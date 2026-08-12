@@ -1,0 +1,96 @@
+.section {
+  padding: 3.5rem 0 4rem;
+  background: linear-gradient(180deg, #fff 0%, var(--bg) 100%);
+  border-top: 1px solid var(--line);
+}
+
+.head {
+  max-width: 40rem;
+  margin-bottom: 1.75rem;
+}
+
+.kicker {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(1.75rem, 3.5vw, 2.35rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.65rem;
+  color: var(--ink);
+}
+
+.lead {
+  color: var(--ink-soft);
+  line-height: 1.55;
+  margin-bottom: 1rem;
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.badge {
+  font-size: 0.72rem;
+  font-weight: 650;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(232, 93, 4, 0.25);
+  background: var(--orange-wash);
+  color: #9a3412;
+}
+
+.panel {
+  padding: 0.35rem 0 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.panel :global(.wrap) {
+  margin: 0;
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.tableWrap,
+.table,
+.tableHead,
+.chips,
+.chip,
+.hint,
+.controls,
+.field,
+.fixtureMeta,
+.win,
+.lose {
+  display: none;
+}
+
+.footerNote {
+  margin: 1.25rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.link {
+  color: var(--orange);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:hover {
+  color: var(--orange-mid);
+}

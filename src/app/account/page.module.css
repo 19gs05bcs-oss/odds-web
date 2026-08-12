@@ -1,0 +1,138 @@
+.main {
+  padding: 3rem 0 4rem;
+  max-width: 36rem;
+}
+
+.kicker {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange);
+  margin-bottom: 0.5rem;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  margin-bottom: 1rem;
+  word-break: break-all;
+}
+
+.bannerOk,
+.bannerWarn {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.bannerOk {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.bannerWarn {
+  background: var(--orange-wash);
+  border: 1px solid rgba(232, 93, 4, 0.25);
+  color: #9a3412;
+}
+
+.card {
+  padding: 1.25rem 1.35rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+  margin-bottom: 1.25rem;
+}
+
+.card h2 {
+  font-size: 1rem;
+  margin-bottom: 1rem;
+}
+
+.dl {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.dl dt {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.dl dd {
+  margin: 0.15rem 0 0;
+  font-weight: 650;
+}
+
+.ok {
+  color: #047857;
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+.primaryLink {
+  display: inline-flex;
+  font-weight: 700;
+  color: var(--orange);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.primaryLink:hover {
+  color: var(--orange-mid);
+}
+
+.plans {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+}
+
+.secondaryLink {
+  font-weight: 650;
+  color: var(--ink-soft);
+}
+
+.secondaryLink:hover {
+  color: var(--orange);
+}
+
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.signOut {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.hint {
+  margin-top: 1rem;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}

@@ -1,0 +1,103 @@
+:root {
+  --bg: #fafaf8;
+  --bg-elevated: #ffffff;
+  --ink: #1a1a1a;
+  --ink-soft: #5c5c5c;
+  --ink-faint: #8a8a8a;
+  --line: rgba(26, 26, 26, 0.08);
+  --orange: #e85d04;
+  --orange-mid: #f48c06;
+  --orange-soft: #ffba08;
+  --orange-wash: rgba(232, 93, 4, 0.08);
+  --orange-glow: rgba(244, 140, 6, 0.22);
+  --radius: 14px;
+  --shadow-soft: 0 18px 50px rgba(26, 26, 26, 0.06);
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-body: var(--font-source-sans), "Source Sans 3", sans-serif;
+  --max: 1120px;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 700px at 85% -10%, var(--orange-glow), transparent 55%),
+    radial-gradient(900px 500px at -10% 20%, var(--orange-wash), transparent 50%),
+    linear-gradient(180deg, #ffffff 0%, var(--bg) 45%, #fff7ef 100%);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(232, 93, 4, 0.2);
+}
+
+.shell {
+  width: min(100% - 2.5rem, var(--max));
+  margin-inline: auto;
+}
+
+.fade-up {
+  animation: fadeUp 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.fade-up-delay {
+  animation: fadeUp 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes washIn {
+  from {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulseSoft {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}

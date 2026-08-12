@@ -1,0 +1,1176 @@
+{
+  "generatedAt": "2026-08-12T09:56:37.232463+00:00",
+  "sampleFinished": 3068,
+  "sample1x2Profiles": 3068,
+  "similarOddsTolerance": 0.03,
+  "pillar1_bookmakerCalibration": [
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "n": 413,
+      "winPct": 0.6004842615012107,
+      "impliedOpenPct": 0.2472323991096354,
+      "impliedClosePct": 0.2410482931630086,
+      "edgeClosePp": 0.3594359683382021
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "n": 271,
+      "winPct": 0.5313653136531366,
+      "impliedOpenPct": 0.23200346495929167,
+      "impliedClosePct": 0.22624455782293618,
+      "edgeClosePp": 0.3051207558302004
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "n": 1418,
+      "winPct": 0.5112834978843441,
+      "impliedOpenPct": 0.23631887813307553,
+      "impliedClosePct": 0.2261325279058122,
+      "edgeClosePp": 0.28515096997853195
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "OVER_UNDER:FIRST_HALF",
+      "n": 4787,
+      "winPct": 0.5621474827658242,
+      "impliedOpenPct": 0.3066060973442539,
+      "impliedClosePct": 0.3135256480969768,
+      "edgeClosePp": 0.24862183466884735
+    },
+    {
+      "bookmakerId": "429",
+      "bookmakerName": "Betfair",
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "n": 784,
+      "winPct": 0.5663265306122449,
+      "impliedOpenPct": 0.3243175699447927,
+      "impliedClosePct": 0.3196290844371062,
+      "edgeClosePp": 0.24669744617513872
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "n": 381,
+      "winPct": 0.5328083989501312,
+      "impliedOpenPct": 0.30576827054966466,
+      "impliedClosePct": 0.2981693907180159,
+      "edgeClosePp": 0.2346390082321153
+    },
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "OVER_UNDER:FIRST_HALF",
+      "n": 3946,
+      "winPct": 0.5532184490623416,
+      "impliedOpenPct": 0.31557108631458064,
+      "impliedClosePct": 0.322597260064815,
+      "edgeClosePp": 0.23062118899752665
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "OVER_UNDER:SECOND_HALF",
+      "n": 3107,
+      "winPct": 0.5638879948503379,
+      "impliedOpenPct": 0.3714869148571707,
+      "impliedClosePct": 0.35935418761051346,
+      "edgeClosePp": 0.20453380723982445
+    },
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 72,
+      "winPct": 0.8611111111111112,
+      "impliedOpenPct": 0.6700718653747766,
+      "impliedClosePct": 0.6660090508977463,
+      "edgeClosePp": 0.19510206021336485
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "n": 1263,
+      "winPct": 0.5186064924782264,
+      "impliedOpenPct": 0.3486155100572843,
+      "impliedClosePct": 0.3389584308539566,
+      "edgeClosePp": 0.17964806162426983
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "OVER_UNDER:SECOND_HALF",
+      "n": 4017,
+      "winPct": 0.4067712223052029,
+      "impliedOpenPct": 0.23176590752237597,
+      "impliedClosePct": 0.23054876851060022,
+      "edgeClosePp": 0.1762224537946027
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 54,
+      "winPct": 0.8518518518518519,
+      "impliedOpenPct": 0.6826214238403694,
+      "impliedClosePct": 0.6780618903236275,
+      "edgeClosePp": 0.17378996152822435
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 493,
+      "winPct": 0.5294117647058824,
+      "impliedOpenPct": 0.39946999282993373,
+      "impliedClosePct": 0.4001736798462446,
+      "edgeClosePp": 0.12923808485963778
+    },
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 838,
+      "winPct": 0.4964200477326969,
+      "impliedOpenPct": 0.38441206798610905,
+      "impliedClosePct": 0.38299604651873076,
+      "edgeClosePp": 0.11342400121396612
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "OVER_UNDER:SECOND_HALF",
+      "n": 5167,
+      "winPct": 0.8027869169730986,
+      "impliedOpenPct": 0.7111051843374723,
+      "impliedClosePct": 0.7110436151395703,
+      "edgeClosePp": 0.0917433018335283
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "OVER_UNDER:FIRST_HALF",
+      "n": 2252,
+      "winPct": 0.43383658969804617,
+      "impliedOpenPct": 0.3566572503433003,
+      "impliedClosePct": 0.350321691160561,
+      "edgeClosePp": 0.08351489853748517
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "n": 997,
+      "winPct": 0.5145436308926781,
+      "impliedOpenPct": 0.4691728838610506,
+      "impliedClosePct": 0.46548245206500427,
+      "edgeClosePp": 0.0490611788276738
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "n": 2079,
+      "winPct": 0.44203944203944207,
+      "impliedOpenPct": 0.39959795763646,
+      "impliedClosePct": 0.3947708942916434,
+      "edgeClosePp": 0.04726854774779865
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "n": 931,
+      "winPct": 0.41353383458646614,
+      "impliedOpenPct": 0.379069634532693,
+      "impliedClosePct": 0.37303218289770207,
+      "edgeClosePp": 0.04050165168876407
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 318,
+      "winPct": 0.5440251572327044,
+      "impliedOpenPct": 0.5115549234732203,
+      "impliedClosePct": 0.5070159804070212,
+      "edgeClosePp": 0.037009176825683165
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "OVER_UNDER:FIRST_HALF",
+      "n": 10071,
+      "winPct": 0.5054115777976368,
+      "impliedOpenPct": 0.47236390586374877,
+      "impliedClosePct": 0.4689723548449678,
+      "edgeClosePp": 0.03643922295266899
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 1979,
+      "winPct": 0.39818089944416374,
+      "impliedOpenPct": 0.376272003593989,
+      "impliedClosePct": 0.36845165599478746,
+      "edgeClosePp": 0.029729243449376275
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 1073,
+      "winPct": 0.6579683131407269,
+      "impliedOpenPct": 0.6392707413100984,
+      "impliedClosePct": 0.6323566767493674,
+      "edgeClosePp": 0.02561163639135955
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 414,
+      "winPct": 0.34057971014492755,
+      "impliedOpenPct": 0.32868671232782537,
+      "impliedClosePct": 0.31756515322918927,
+      "edgeClosePp": 0.023014556915738282
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 905,
+      "winPct": 0.4530386740331492,
+      "impliedOpenPct": 0.44817782817543855,
+      "impliedClosePct": 0.4319294888128388,
+      "edgeClosePp": 0.021109185220310356
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 287,
+      "winPct": 0.3693379790940767,
+      "impliedOpenPct": 0.3682323947622466,
+      "impliedClosePct": 0.34832898272984386,
+      "edgeClosePp": 0.021008996364232813
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 747,
+      "winPct": 0.31459170013386883,
+      "impliedOpenPct": 0.30447811747755404,
+      "impliedClosePct": 0.30051079622489113,
+      "edgeClosePp": 0.014080903908977704
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "n": 1152,
+      "winPct": 0.2786458333333333,
+      "impliedOpenPct": 0.2683025043152582,
+      "impliedClosePct": 0.26625243385422986,
+      "edgeClosePp": 0.01239339947910345
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 212,
+      "winPct": 0.41037735849056606,
+      "impliedOpenPct": 0.4128786039177674,
+      "impliedClosePct": 0.3994011697870015,
+      "edgeClosePp": 0.010976188703564538
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 349,
+      "winPct": 0.7191977077363897,
+      "impliedOpenPct": 0.7191617212096317,
+      "impliedClosePct": 0.7103306797401734,
+      "edgeClosePp": 0.008867027996216303
+    },
+    {
+      "bookmakerId": "429",
+      "bookmakerName": "Betfair",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 521,
+      "winPct": 0.4760076775431862,
+      "impliedOpenPct": 0.4885527854726554,
+      "impliedClosePct": 0.46775488718276204,
+      "edgeClosePp": 0.008252790360424145
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 563,
+      "winPct": 0.5452930728241563,
+      "impliedOpenPct": 0.5527753397845323,
+      "impliedClosePct": 0.5386634228212106,
+      "edgeClosePp": 0.006629650002945686
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 848,
+      "winPct": 0.7075471698113207,
+      "impliedOpenPct": 0.71440739848495,
+      "impliedClosePct": 0.7012347696933869,
+      "edgeClosePp": 0.00631240011793377
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 963,
+      "winPct": 0.2814122533748702,
+      "impliedOpenPct": 0.2971519582182902,
+      "impliedClosePct": 0.27602402707051565,
+      "edgeClosePp": 0.0053882263043545375
+    },
+    {
+      "bookmakerId": "429",
+      "bookmakerName": "Betfair",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 1272,
+      "winPct": 0.26257861635220126,
+      "impliedOpenPct": 0.27824576657981603,
+      "impliedClosePct": 0.26127181076583095,
+      "edgeClosePp": 0.0013068055863703076
+    },
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 487,
+      "winPct": 0.406570841889117,
+      "impliedOpenPct": 0.4144266464057133,
+      "impliedClosePct": 0.40586642007376267,
+      "edgeClosePp": 0.0007044218153543502
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "DOUBLE_CHANCE:SECOND_HALF",
+      "n": 3082,
+      "winPct": 0.7011680726800779,
+      "impliedOpenPct": 0.7033818114207271,
+      "impliedClosePct": 0.7019654788876972,
+      "edgeClosePp": -0.0007974062076193666
+    },
+    {
+      "bookmakerId": "429",
+      "bookmakerName": "Betfair",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 3927,
+      "winPct": 0.38553603259485614,
+      "impliedOpenPct": 0.4044089984818807,
+      "impliedClosePct": 0.3880801952171223,
+      "edgeClosePp": -0.002544162622266144
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "n": 685,
+      "winPct": 0.24671532846715327,
+      "impliedOpenPct": 0.2601017255693864,
+      "impliedClosePct": 0.2503241604470316,
+      "edgeClosePp": -0.003608831979878324
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 700,
+      "winPct": 0.5457142857142857,
+      "impliedOpenPct": 0.5610533295390592,
+      "impliedClosePct": 0.5500781010599373,
+      "edgeClosePp": -0.004363815345651556
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 441,
+      "winPct": 0.7596371882086168,
+      "impliedOpenPct": 0.7763528282703918,
+      "impliedClosePct": 0.7643013819891803,
+      "edgeClosePp": -0.004664193780563486
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 1164,
+      "winPct": 0.35309278350515466,
+      "impliedOpenPct": 0.36228466525657976,
+      "impliedClosePct": 0.3611320902112015,
+      "edgeClosePp": -0.008039306706046856
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 4923,
+      "winPct": 0.34775543367865125,
+      "impliedOpenPct": 0.3401631677655655,
+      "impliedClosePct": 0.3574422055874123,
+      "edgeClosePp": -0.00968677190876105
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 932,
+      "winPct": 0.5375536480686696,
+      "impliedOpenPct": 0.5555202005733005,
+      "impliedClosePct": 0.5488621517635417,
+      "edgeClosePp": -0.01130850369487213
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 3426,
+      "winPct": 0.7994746059544658,
+      "impliedOpenPct": 0.8185154565474565,
+      "impliedClosePct": 0.8110258396023069,
+      "edgeClosePp": -0.011551233647841053
+    },
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 4353,
+      "winPct": 0.34734665747760163,
+      "impliedOpenPct": 0.34515278620886414,
+      "impliedClosePct": 0.35914976224247686,
+      "edgeClosePp": -0.011803104764875227
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 6717,
+      "winPct": 0.2518981688253685,
+      "impliedOpenPct": 0.2740668259793568,
+      "impliedClosePct": 0.2637367318772418,
+      "edgeClosePp": -0.011838563051873308
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 673,
+      "winPct": 0.7340267459138187,
+      "impliedOpenPct": 0.7460506485674252,
+      "impliedClosePct": 0.7464506327811213,
+      "edgeClosePp": -0.01242388686730267
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 1350,
+      "winPct": 0.3207407407407407,
+      "impliedOpenPct": 0.34960974897433333,
+      "impliedClosePct": 0.3341165501330963,
+      "edgeClosePp": -0.013375809392355609
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "n": 281,
+      "winPct": 0.42704626334519574,
+      "impliedOpenPct": 0.45823916755787725,
+      "impliedClosePct": 0.4416317017850067,
+      "edgeClosePp": -0.014585438439810972
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 2991,
+      "winPct": 0.7646272149782681,
+      "impliedOpenPct": 0.7884045191831557,
+      "impliedClosePct": 0.7797642407724151,
+      "edgeClosePp": -0.015137025794146997
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 2605,
+      "winPct": 0.6418426103646833,
+      "impliedOpenPct": 0.6653443999990052,
+      "impliedClosePct": 0.6577190424208235,
+      "edgeClosePp": -0.0158764320561402
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 76,
+      "winPct": 0.4868421052631579,
+      "impliedOpenPct": 0.5289781530996485,
+      "impliedClosePct": 0.5028755307869822,
+      "edgeClosePp": -0.016033425523824307
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 18068,
+      "winPct": 0.5359198583130397,
+      "impliedOpenPct": 0.5467206716883083,
+      "impliedClosePct": 0.5523279439321381,
+      "edgeClosePp": -0.016408085619098456
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 2082,
+      "winPct": 0.6311239193083573,
+      "impliedOpenPct": 0.6485642593632664,
+      "impliedClosePct": 0.6478773802950685,
+      "edgeClosePp": -0.016753460986711155
+    },
+    {
+      "bookmakerId": "71",
+      "bookmakerName": "Coral",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 408,
+      "winPct": 0.696078431372549,
+      "impliedOpenPct": 0.7245067645591818,
+      "impliedClosePct": 0.7129005365578978,
+      "edgeClosePp": -0.016822105185348768
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 3280,
+      "winPct": 0.6759146341463415,
+      "impliedOpenPct": 0.7007941999562595,
+      "impliedClosePct": 0.6932773858242917,
+      "edgeClosePp": -0.017362751677950206
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 1195,
+      "winPct": 0.7020920502092051,
+      "impliedOpenPct": 0.7278220247594595,
+      "impliedClosePct": 0.7194792664677768,
+      "edgeClosePp": -0.017387216258571758
+    },
+    {
+      "bookmakerId": "76",
+      "bookmakerName": "BetVictor",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 1680,
+      "winPct": 0.45535714285714285,
+      "impliedOpenPct": 0.47319376078098035,
+      "impliedClosePct": 0.47276729962570135,
+      "edgeClosePp": -0.017410156768558505
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 6619,
+      "winPct": 0.32316059827768545,
+      "impliedOpenPct": 0.34363135933347794,
+      "impliedClosePct": 0.34067379873256554,
+      "edgeClosePp": -0.017513200454880085
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 1519,
+      "winPct": 0.27583936800526665,
+      "impliedOpenPct": 0.3024529784126312,
+      "impliedClosePct": 0.293486218177974,
+      "edgeClosePp": -0.01764685017270734
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "n": 1659,
+      "winPct": 0.3628691983122363,
+      "impliedOpenPct": 0.3838082988998364,
+      "impliedClosePct": 0.3825067064682116,
+      "edgeClosePp": -0.019637508155975314
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "OVER_UNDER:FULL_TIME",
+      "n": 10458,
+      "winPct": 0.5104226429527634,
+      "impliedOpenPct": 0.5354320623901411,
+      "impliedClosePct": 0.5318244113300148,
+      "edgeClosePp": -0.021401768377251384
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 938,
+      "winPct": 0.38272921108742003,
+      "impliedOpenPct": 0.4204921604544079,
+      "impliedClosePct": 0.4058657088321795,
+      "edgeClosePp": -0.023136497744759454
+    },
+    {
+      "bookmakerId": "625",
+      "bookmakerName": "Unibetuk",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 1780,
+      "winPct": 0.6033707865168539,
+      "impliedOpenPct": 0.6367662677261937,
+      "impliedClosePct": 0.6279674888644771,
+      "edgeClosePp": -0.024596702347623123
+    },
+    {
+      "bookmakerId": "263",
+      "bookmakerName": "BetUK",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 73,
+      "winPct": 0.2876712328767123,
+      "impliedOpenPct": 0.3212196356990742,
+      "impliedClosePct": 0.31291879851172777,
+      "edgeClosePp": -0.025247565635015456
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "n": 1561,
+      "winPct": 0.7809096732863549,
+      "impliedOpenPct": 0.8031582407389131,
+      "impliedClosePct": 0.8076610026953449,
+      "edgeClosePp": -0.026751329408990054
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 1525,
+      "winPct": 0.7108196721311475,
+      "impliedOpenPct": 0.7495057846273296,
+      "impliedClosePct": 0.7412495466025582,
+      "edgeClosePp": -0.030429874471410656
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "OVER_UNDER:SECOND_HALF",
+      "n": 1444,
+      "winPct": 0.6641274238227147,
+      "impliedOpenPct": 0.7064611222115155,
+      "impliedClosePct": 0.694825811296991,
+      "edgeClosePp": -0.030698387474276223
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 692,
+      "winPct": 0.5216763005780347,
+      "impliedOpenPct": 0.5740644519141068,
+      "impliedClosePct": 0.5537458343880411,
+      "edgeClosePp": -0.032069533810006434
+    },
+    {
+      "bookmakerId": "26",
+      "bookmakerName": "Betway",
+      "market": "DOUBLE_CHANCE:SECOND_HALF",
+      "n": 5387,
+      "winPct": 0.6847967328754409,
+      "impliedOpenPct": 0.7193241279855748,
+      "impliedClosePct": 0.7179175544053885,
+      "edgeClosePp": -0.033120821529947664
+    },
+    {
+      "bookmakerId": "429",
+      "bookmakerName": "Betfair",
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "n": 846,
+      "winPct": 0.2647754137115839,
+      "impliedOpenPct": 0.3169989412542592,
+      "impliedClosePct": 0.3005363453966492,
+      "edgeClosePp": -0.03576093168506528
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "OVER_UNDER:SECOND_HALF",
+      "n": 3370,
+      "winPct": 0.49584569732937683,
+      "impliedOpenPct": 0.5393698688055032,
+      "impliedClosePct": 0.5355367976008301,
+      "edgeClosePp": -0.03969110027145323
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "OVER_UNDER:FIRST_HALF",
+      "n": 2356,
+      "winPct": 0.466893039049236,
+      "impliedOpenPct": 0.5126397398399238,
+      "impliedClosePct": 0.5074278686602448,
+      "edgeClosePp": -0.040534829611008794
+    },
+    {
+      "bookmakerId": "28",
+      "bookmakerName": "Ladbrokes",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 137,
+      "winPct": 0.7007299270072993,
+      "impliedOpenPct": 0.7566576924490857,
+      "impliedClosePct": 0.7414135375757072,
+      "edgeClosePp": -0.04068361056840786
+    },
+    {
+      "bookmakerId": "15",
+      "bookmakerName": "William Hill",
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "n": 498,
+      "winPct": 0.5441767068273092,
+      "impliedOpenPct": 0.5945488580283793,
+      "impliedClosePct": 0.5910784367016155,
+      "edgeClosePp": -0.0469017298743063
+    },
+    {
+      "bookmakerId": "21",
+      "bookmakerName": "Betfred",
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "n": 852,
+      "winPct": 0.5093896713615024,
+      "impliedOpenPct": 0.5607177313852347,
+      "impliedClosePct": 0.5565490257942095,
+      "edgeClosePp": -0.047159354432707135
+    },
+    {
+      "bookmakerId": "16",
+      "bookmakerName": "bet365",
+      "market": "OVER_UNDER:SECOND_HALF",
+      "n": 7737,
+      "winPct": 0.37818275817500324,
+      "impliedOpenPct": 0.42885609061564894,
+      "impliedClosePct": 0.4259515106071761,
+      "edgeClosePp": -0.04776875243217288
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "OVER_UNDER:FIRST_HALF",
+      "n": 7016,
+      "winPct": 0.4505416191562144,
+      "impliedOpenPct": 0.5079518711368953,
+      "impliedClosePct": 0.5030438485025509,
+      "edgeClosePp": -0.052502229346336526
+    },
+    {
+      "bookmakerId": "14",
+      "bookmakerName": "10bet",
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "n": 536,
+      "winPct": 0.457089552238806,
+      "impliedOpenPct": 0.5252029246914331,
+      "impliedClosePct": 0.5175875094955096,
+      "edgeClosePp": -0.060497957256703594
+    }
+  ],
+  "pillar2_marketDrift": [
+    {
+      "market": "OVER_UNDER:FULL_TIME",
+      "move": "lengthened",
+      "n": 24210,
+      "winPct": 0.38033870301528294,
+      "impliedOpenPct": 0.42434994050085656,
+      "impliedClosePct": 0.3912042376576953,
+      "edgeClosePp": -0.010865534642412356
+    },
+    {
+      "market": "OVER_UNDER:FULL_TIME",
+      "move": "stable",
+      "n": 22976,
+      "winPct": 0.6198206824512534,
+      "impliedOpenPct": 0.6344199488538264,
+      "impliedClosePct": 0.6339382409748551,
+      "edgeClosePp": -0.014117558523601637
+    },
+    {
+      "market": "OVER_UNDER:FIRST_HALF",
+      "move": "stable",
+      "n": 18042,
+      "winPct": 0.5285445072608358,
+      "impliedOpenPct": 0.6256059715129609,
+      "impliedClosePct": 0.6252824064258622,
+      "edgeClosePp": -0.0967378991650264
+    },
+    {
+      "market": "OVER_UNDER:FULL_TIME",
+      "move": "shortened",
+      "n": 16008,
+      "winPct": 0.3816841579210395,
+      "impliedOpenPct": 0.37637501343797203,
+      "impliedClosePct": 0.4041064834232471,
+      "edgeClosePp": -0.02242232550220763
+    },
+    {
+      "market": "OVER_UNDER:FIRST_HALF",
+      "move": "lengthened",
+      "n": 14297,
+      "winPct": 0.4307197314121844,
+      "impliedOpenPct": 0.42376955943365613,
+      "impliedClosePct": 0.39703046875224257,
+      "edgeClosePp": 0.03368926265994182
+    },
+    {
+      "market": "OVER_UNDER:SECOND_HALF",
+      "move": "stable",
+      "n": 13964,
+      "winPct": 0.5835720423947293,
+      "impliedOpenPct": 0.671334317353969,
+      "impliedClosePct": 0.6713352054769318,
+      "edgeClosePp": -0.08776316308220256
+    },
+    {
+      "market": "OVER_UNDER:SECOND_HALF",
+      "move": "lengthened",
+      "n": 11501,
+      "winPct": 0.42474567428919224,
+      "impliedOpenPct": 0.4095710848138379,
+      "impliedClosePct": 0.3824430786499248,
+      "edgeClosePp": 0.04230259563926747
+    },
+    {
+      "market": "OVER_UNDER:FIRST_HALF",
+      "move": "shortened",
+      "n": 10041,
+      "winPct": 0.4815257444477642,
+      "impliedOpenPct": 0.3922675106552513,
+      "impliedClosePct": 0.4160951262795387,
+      "edgeClosePp": 0.06543061816822549
+    },
+    {
+      "market": "OVER_UNDER:SECOND_HALF",
+      "move": "shortened",
+      "n": 8085,
+      "winPct": 0.44551638837353125,
+      "impliedOpenPct": 0.4015624814455044,
+      "impliedClosePct": 0.4258497044440179,
+      "edgeClosePp": 0.019666683929513373
+    },
+    {
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "move": "lengthened",
+      "n": 5176,
+      "winPct": 0.294629057187017,
+      "impliedOpenPct": 0.34343519243752424,
+      "impliedClosePct": 0.30648942323040834,
+      "edgeClosePp": -0.011860366043391357
+    },
+    {
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "move": "lengthened",
+      "n": 4613,
+      "winPct": 0.2859310643832647,
+      "impliedOpenPct": 0.34414102130627966,
+      "impliedClosePct": 0.3149494463885451,
+      "edgeClosePp": -0.029018382005280396
+    },
+    {
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "move": "lengthened",
+      "n": 3892,
+      "winPct": 0.30087358684480986,
+      "impliedOpenPct": 0.3606679106258203,
+      "impliedClosePct": 0.33194482360557287,
+      "edgeClosePp": -0.03107123676076301
+    },
+    {
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "move": "stable",
+      "n": 3830,
+      "winPct": 0.7169712793733681,
+      "impliedOpenPct": 0.7153744076692644,
+      "impliedClosePct": 0.7152753907442274,
+      "edgeClosePp": 0.0016958886291407183
+    },
+    {
+      "market": "DOUBLE_CHANCE:SECOND_HALF",
+      "move": "stable",
+      "n": 3756,
+      "winPct": 0.7143237486687966,
+      "impliedOpenPct": 0.7271245641579456,
+      "impliedClosePct": 0.7274939911439084,
+      "edgeClosePp": -0.013170242475111893
+    },
+    {
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "move": "lengthened",
+      "n": 3751,
+      "winPct": 0.5955745134630765,
+      "impliedOpenPct": 0.6651074431568069,
+      "impliedClosePct": 0.6237108558978971,
+      "edgeClosePp": -0.02813634243482055
+    },
+    {
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "move": "lengthened",
+      "n": 3452,
+      "winPct": 0.6057358053302433,
+      "impliedOpenPct": 0.6840282490446837,
+      "impliedClosePct": 0.6489748854840311,
+      "edgeClosePp": -0.04323908015378786
+    },
+    {
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "move": "stable",
+      "n": 3347,
+      "winPct": 0.7343890050791754,
+      "impliedOpenPct": 0.7622630173643481,
+      "impliedClosePct": 0.7620308793656251,
+      "edgeClosePp": -0.027641874286449708
+    },
+    {
+      "market": "DOUBLE_CHANCE:SECOND_HALF",
+      "move": "lengthened",
+      "n": 3096,
+      "winPct": 0.5985142118863049,
+      "impliedOpenPct": 0.6850609628596882,
+      "impliedClosePct": 0.6509619892201485,
+      "edgeClosePp": -0.05244777733384354
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "move": "lengthened",
+      "n": 3009,
+      "winPct": 0.47756729810568294,
+      "impliedOpenPct": 0.5311779608513119,
+      "impliedClosePct": 0.49129882262352437,
+      "edgeClosePp": -0.013731524517841431
+    },
+    {
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "move": "stable",
+      "n": 2859,
+      "winPct": 0.329136061559986,
+      "impliedOpenPct": 0.35158389935389583,
+      "impliedClosePct": 0.351692994021488,
+      "edgeClosePp": -0.022556932461502033
+    },
+    {
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "move": "shortened",
+      "n": 2571,
+      "winPct": 0.4134577985219759,
+      "impliedOpenPct": 0.3692654190142658,
+      "impliedClosePct": 0.3943921216518222,
+      "edgeClosePp": 0.019065676870153703
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "move": "stable",
+      "n": 2542,
+      "winPct": 0.4925255704169945,
+      "impliedOpenPct": 0.6289256299275483,
+      "impliedClosePct": 0.6291432666636324,
+      "edgeClosePp": -0.1366176962466379
+    },
+    {
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "move": "shortened",
+      "n": 2521,
+      "winPct": 0.3958746529155097,
+      "impliedOpenPct": 0.35771659051515925,
+      "impliedClosePct": 0.39021842005041796,
+      "edgeClosePp": 0.005656232865091759
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "move": "lengthened",
+      "n": 2476,
+      "winPct": 0.4781906300484653,
+      "impliedOpenPct": 0.48857241673149937,
+      "impliedClosePct": 0.45842844090507917,
+      "edgeClosePp": 0.019762189143386122
+    },
+    {
+      "market": "HOME_DRAW_AWAY:SECOND_HALF",
+      "move": "shortened",
+      "n": 2453,
+      "winPct": 0.38972686506318793,
+      "impliedOpenPct": 0.36718117596278316,
+      "impliedClosePct": 0.3940671264484704,
+      "edgeClosePp": -0.0043402613852824845
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "move": "lengthened",
+      "n": 2409,
+      "winPct": 0.47779161477791615,
+      "impliedOpenPct": 0.4483677620341127,
+      "impliedClosePct": 0.4219922118307385,
+      "edgeClosePp": 0.05579940294717767
+    },
+    {
+      "market": "DOUBLE_CHANCE:SECOND_HALF",
+      "move": "shortened",
+      "n": 2352,
+      "winPct": 0.6802721088435374,
+      "impliedOpenPct": 0.6848166344105225,
+      "impliedClosePct": 0.7194508020043514,
+      "edgeClosePp": -0.039178693160814015
+    },
+    {
+      "market": "DOUBLE_CHANCE:FULL_TIME",
+      "move": "shortened",
+      "n": 2106,
+      "winPct": 0.6856600189933523,
+      "impliedOpenPct": 0.6468402961909494,
+      "impliedClosePct": 0.6857440858337173,
+      "edgeClosePp": -8.406684036499357e-05
+    },
+    {
+      "market": "HOME_DRAW_AWAY:FIRST_HALF",
+      "move": "stable",
+      "n": 2020,
+      "winPct": 0.33960396039603963,
+      "impliedOpenPct": 0.3822652245347252,
+      "impliedClosePct": 0.3822843269119682,
+      "edgeClosePp": -0.04268036651592855
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "move": "stable",
+      "n": 1926,
+      "winPct": 0.5010384215991692,
+      "impliedOpenPct": 0.5436651775916775,
+      "impliedClosePct": 0.5439033002090324,
+      "edgeClosePp": -0.04286487860986321
+    },
+    {
+      "market": "DOUBLE_CHANCE:FIRST_HALF",
+      "move": "shortened",
+      "n": 1922,
+      "winPct": 0.6758584807492196,
+      "impliedOpenPct": 0.6910625655096189,
+      "impliedClosePct": 0.722418942978045,
+      "edgeClosePp": -0.04656046222882537
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "move": "shortened",
+      "n": 1863,
+      "winPct": 0.5281803542673108,
+      "impliedOpenPct": 0.5032951272078131,
+      "impliedClosePct": 0.5367070522302565,
+      "edgeClosePp": -0.008526697962945695
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:SECOND_HALF",
+      "move": "shortened",
+      "n": 1734,
+      "winPct": 0.5299884659746251,
+      "impliedOpenPct": 0.5490917653047763,
+      "impliedClosePct": 0.5778554221792477,
+      "edgeClosePp": -0.04786695620462256
+    },
+    {
+      "market": "HOME_DRAW_AWAY:FULL_TIME",
+      "move": "stable",
+      "n": 1507,
+      "winPct": 0.36164565361645656,
+      "impliedOpenPct": 0.37709738155252803,
+      "impliedClosePct": 0.37717883854475,
+      "edgeClosePp": -0.01553318492829342
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+      "move": "stable",
+      "n": 1264,
+      "winPct": 0.5118670886075949,
+      "impliedOpenPct": 0.5373388828778883,
+      "impliedClosePct": 0.5375046191286923,
+      "edgeClosePp": -0.025637530521097407
+    },
+    {
+      "market": "BOTH_TEAMS_TO_SCORE:FIRST_HALF",
+      "move": "shortened",
+      "n": 1185,
+      "winPct": 0.5611814345991561,
+      "impliedOpenPct": 0.4512808145402124,
+      "impliedClosePct": 0.4739798610836585,
+      "edgeClosePp": 0.08720157351549762
+    }
+  ],
+  "pillar3_similarOdds": {
+    "avgClusterSize": 16.456043956043956,
+    "byOutcome": {
+      "1X2:H": {
+        "anchors": 229,
+        "avgSameOutcomePct": 49.91536185043466
+      },
+      "1X2:A": {
+        "anchors": 188,
+        "avgSameOutcomePct": 38.440796331725565
+      },
+      "1X2:D": {
+        "anchors": 129,
+        "avgSameOutcomePct": 26.104897629959673
+      }
+    },
+    "baselineRandom1x2": 33.3
+  },
+  "pillar4_upcomingSample": [],
+  "bookmakersSeen": {
+    "1009": "SpreadEX",
+    "1281": "BetMGM.uk",
+    "14": "10bet",
+    "15": "William Hill",
+    "16": "bet365",
+    "21": "Betfred",
+    "26": "Betway",
+    "263": "BetUK",
+    "28": "Ladbrokes",
+    "429": "Betfair",
+    "60": "Paddy Power",
+    "625": "Unibetuk",
+    "71": "Coral",
+    "74": "Skybet",
+    "76": "BetVictor",
+    "841": "Midnite",
+    "895": "7BetUK",
+    "979": "Betano.uk",
+    "981": "Talksportbet",
+    "983": "Parimatch.uk"
+  },
+  "note": "Slim archive: each selection is best price from one bookmaker. Pillar 1 attributes moves to the BM that posted the best line. For simultaneous 20-BM comparison, re-import with full markets_json."
+}

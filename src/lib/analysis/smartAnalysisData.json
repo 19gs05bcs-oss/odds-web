@@ -1,0 +1,130 @@
+{
+  "generatedAt": "2026-08-12T09:23:22.837128Z",
+  "sampleEvents": 1520,
+  "composite1x2": {
+    "logLoss": 0.9489693026016267,
+    "brier": 0.5610113111689161,
+    "topPickPct": 0.5638157894736842
+  },
+  "bookmakerRanking": [
+    {
+      "id": "26",
+      "name": "Betway",
+      "n": 438,
+      "actualWinPct": 0.4954337899543379,
+      "avgImpliedPct": 0.44173529028219977,
+      "edgePp": 0.053698499672138134
+    },
+    {
+      "id": "15",
+      "name": "William Hill",
+      "n": 406,
+      "actualWinPct": 0.31773399014778325,
+      "avgImpliedPct": 0.29475426178598607,
+      "edgePp": 0.02297972836179718
+    },
+    {
+      "id": "76",
+      "name": "BetVictor",
+      "n": 477,
+      "actualWinPct": 0.2578616352201258,
+      "avgImpliedPct": 0.25547253782408097,
+      "edgePp": 0.0023890973960448147
+    },
+    {
+      "id": "21",
+      "name": "Betfred",
+      "n": 757,
+      "actualWinPct": 0.3632760898282695,
+      "avgImpliedPct": 0.36571860911572507,
+      "edgePp": -0.002442519287455591
+    },
+    {
+      "id": "16",
+      "name": "bet365",
+      "n": 478,
+      "actualWinPct": 0.3158995815899582,
+      "avgImpliedPct": 0.3241608910495268,
+      "edgePp": -0.0082613094595686
+    },
+    {
+      "id": "625",
+      "name": "Unibetuk",
+      "n": 575,
+      "actualWinPct": 0.271304347826087,
+      "avgImpliedPct": 0.2826297759662994,
+      "edgePp": -0.011325428140212424
+    },
+    {
+      "id": "14",
+      "name": "10bet",
+      "n": 669,
+      "actualWinPct": 0.3632286995515695,
+      "avgImpliedPct": 0.3990622344361671,
+      "edgePp": -0.03583353488459762
+    },
+    {
+      "id": "429",
+      "name": "Betfair",
+      "n": 610,
+      "actualWinPct": 0.27704918032786885,
+      "avgImpliedPct": 0.31297714945065414,
+      "edgePp": -0.035927969122785286
+    }
+  ],
+  "toleranceSweep": {
+    "0.01": {
+      "avgPool": 30.318066157760814,
+      "sameOutcomePct": 44.57280578487068,
+      "anchors": 393
+    },
+    "0.015": {
+      "avgPool": 41.81863979848867,
+      "sameOutcomePct": 44.262315684522655,
+      "anchors": 397
+    },
+    "0.02": {
+      "avgPool": 50.43969849246231,
+      "sameOutcomePct": 44.290703424140396,
+      "anchors": 398
+    },
+    "0.03": {
+      "avgPool": 81.42857142857143,
+      "sameOutcomePct": 44.3915832131854,
+      "anchors": 399
+    },
+    "0.04": {
+      "avgPool": 100.745,
+      "sameOutcomePct": 44.24523657982829,
+      "anchors": 400
+    },
+    "0.05": {
+      "avgPool": 126.65,
+      "sameOutcomePct": 44.2050003903009,
+      "anchors": 400
+    },
+    "0.07": {
+      "avgPool": 180.7,
+      "sameOutcomePct": 44.44975037728616,
+      "anchors": 400
+    },
+    "0.1": {
+      "avgPool": 251.5875,
+      "sameOutcomePct": 44.49738468758873,
+      "anchors": 400
+    }
+  },
+  "stackedProfile": {
+    "avgPool": 20.11413043478261,
+    "sameOutcomePct": 42.48014188866801,
+    "tolerance": 0.03
+  },
+  "recommendations": {
+    "bookmakerId": "26",
+    "bookmakerName": "Betway",
+    "tolerance": 0.02,
+    "useStackedCriteria": true,
+    "minPoolSize": 12,
+    "note": "Archive stores best price per side (slim import). Full 20-BM per-market analysis needs event_quotes backfill from full import."
+  }
+}

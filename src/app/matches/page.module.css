@@ -1,0 +1,46 @@
+.page {
+  padding: 2.5rem 0 4rem;
+}
+
+.intro {
+  margin-bottom: 1.75rem;
+  max-width: 36rem;
+}
+
+.kicker {
+  display: inline-block;
+  margin-bottom: 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--orange);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 0.6rem;
+}
+
+.lead {
+  color: var(--ink-soft);
+}
+
+.banner {
+  margin-bottom: 1.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: rgba(232, 93, 4, 0.08);
+  border: 1px solid rgba(232, 93, 4, 0.18);
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
+
+.banner code {
+  font-size: 0.85em;
+  color: var(--orange);
+}

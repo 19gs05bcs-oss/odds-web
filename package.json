@@ -1,0 +1,30 @@
+{
+  "name": "odds-intel-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "NODE_OPTIONS=--max-old-space-size=6144 next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test:analysis": "npx --yes tsx --test src/lib/analysis/*.test.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.6.1",
+    "@supabase/supabase-js": "^2.49.1",
+    "next": "14.2.18",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.18",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  }
+}

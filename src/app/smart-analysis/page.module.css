@@ -1,0 +1,20 @@
+.page {
+  padding: 1.5rem 0 3rem;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 400px at 10% -10%, var(--orange-wash) 0%, transparent 55%),
+    radial-gradient(900px 360px at 90% 0%, rgba(255, 237, 213, 0.5) 0%, transparent 50%),
+    var(--bg);
+}
+
+.main {
+  max-width: min(100%, 98rem);
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.loading {
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  padding: 1rem 0;
+}

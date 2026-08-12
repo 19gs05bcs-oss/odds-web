@@ -1,0 +1,86 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1.2fr 1.6fr auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.15rem;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  animation: fadeUp 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.row:hover {
+  border-color: rgba(232, 93, 4, 0.35);
+  background: #fff;
+  transform: translateX(3px);
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.competition {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--orange);
+}
+
+.kickoff {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.teams {
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.vs {
+  color: var(--ink-faint);
+  font-weight: 500;
+  margin: 0 0.35rem;
+}
+
+.badge {
+  justify-self: end;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: var(--orange-wash);
+  color: var(--orange);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.empty {
+  padding: 2.5rem 0;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 760px) {
+  .row {
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+  }
+
+  .badge {
+    justify-self: start;
+  }
+}

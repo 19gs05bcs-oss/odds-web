@@ -1,0 +1,86 @@
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.market {
+  padding-top: 0.25rem;
+  animation: fadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.75rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.55rem;
+}
+
+.sel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--line);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sel:hover {
+  border-color: rgba(244, 140, 6, 0.4);
+  background: #fff;
+}
+
+.selSuspended {
+  opacity: 0.55;
+}
+
+.name {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.prices {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+}
+
+.open {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.odds {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.oddsHot {
+  color: var(--orange);
+}
+
+.book {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  letter-spacing: 0.02em;
+}
+
+.empty {
+  color: var(--ink-soft);
+  padding: 1.5rem 0;
+}

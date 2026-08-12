@@ -1,0 +1,59 @@
+.page {
+  padding: 1.5rem 0 3rem;
+  background:
+    radial-gradient(1200px 400px at 10% -10%, var(--orange-wash) 0%, transparent 55%),
+    radial-gradient(900px 360px at 90% 0%, rgba(255, 237, 213, 0.5) 0%, transparent 50%),
+    var(--bg);
+  min-height: 100vh;
+}
+
+.main {
+  max-width: min(100%, 98rem);
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.hero {
+  max-width: 44rem;
+  margin-bottom: 1.25rem;
+}
+
+.kicker {
+  display: inline-block;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange);
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 2.8vw, 2.2rem);
+  margin: 0 0 0.45rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.hero p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.banner {
+  margin-top: 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(232, 93, 4, 0.18);
+  border-radius: 8px;
+  background: var(--orange-wash);
+}
+
+.loading {
+  margin: 1.5rem 0;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+}
