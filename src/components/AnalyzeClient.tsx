@@ -24,7 +24,7 @@ import {
   type TableRow,
 } from "@/lib/analysis/tableRows";
 import type { BookmakerOption } from "@/lib/types";
-import type { FixtureRow } from "@/lib/fixtures";
+import type { FixtureRow } from "@/lib/archiveCache";
 
 type ProfileSearchResult = ProfileResult & { tableRows?: TableRow[] };
 
