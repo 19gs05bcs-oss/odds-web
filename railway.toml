@@ -2,8 +2,8 @@
 builder = "NIXPACKS"
 
 [build.env]
-# NODE_ENV=production iken devDependencies (typescript, eslint) kurulsun
 NIXPACKS_INSTALL_DEV_DEPS = "true"
+NPM_CONFIG_PRODUCTION = "false"
 NODE_OPTIONS = "--max-old-space-size=4096"
 
 [deploy]
