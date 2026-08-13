@@ -32,7 +32,7 @@ export default async function SeasonsPage() {
 
         {result.ok && (
           <ul className={styles.list}>
-            {result.data.map((s) => (
+            {result.data.map((s: any) => (
               <li key={s.id}>
                 <Link
                   href={`/analyze?seasonSlug=${encodeURIComponent(s.id)}&marketType=HOME_DRAW_AWAY&marketScope=FULL_TIME`}
