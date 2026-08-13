@@ -152,10 +152,21 @@ export function startArchiveWarm(maxSeasons = 24): WarmStatus {
   const { cache } = globalStore();
   if (cache.status === "ready") return getWarmStatus();
   if (cache.status === "loading" && cache.promise) return getWarmStatus();
+  // "error" durumunda otomatik yeniden başlatma — aksi halde her poll
+  // sessizce yeni bir denemeyi tetikliyor ve gerçek hata mesajı hiç
+  // client'a ulaşmadan bir sonraki "loading" snapshot'ıyla eziliyor.
+  if (cache.status === "error") return getWarmStatus();
   cache.promise = runWarm(maxSeasons).finally(() => {
     /* keep promise for awaiters */
   });
   return getWarmStatus();
+}
+
+/** Error durumunda elle yeniden denemek için (ör. bir "retry" butonu). */
+export function retryArchiveWarm(maxSeasons = 24): WarmStatus {
+  const { cache } = globalStore();
+  cache.status = "idle";
+  return startArchiveWarm(maxSeasons);
 }
 
 export function getWarmStatus(): WarmStatus {
