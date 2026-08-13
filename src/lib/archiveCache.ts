@@ -1,212 +1,212 @@
-/**
- * Server-side in-memory archive cache.
- * Analyze sayfası açılınca warm edilir; filtre tıklanınca markets_json
- * yeniden çekilmez — deparse edilmiş Quote[] üzerinden aranır.
- */
+import { sql } from "@/lib/db";
 
-import { normalizeMany } from "@/lib/analysis/normalize";
-import type { Quote } from "@/lib/analysis/types";
-import type { OddsEvent, SeasonRow } from "@/lib/types";
-import { getSupabase, hasSupabaseEnv } from "@/lib/supabase";
+/** Compact odds row from fetchday / season schema_version=2. */
+export type CompactOddsRow = [
+  bookmakerId: number,
+  bettingType: string,
+  bettingScope: string,
+  side: string,
+  opening: number | null,
+  current: number | null,
+  active: boolean,
+];
 
-export type WarmStatus = {
-  status: "idle" | "loading" | "ready" | "error";
-  seasonsDone: number;
-  seasonsTotal: number;
-  events: number;
-  quotes: number;
-  error?: string;
-  startedAt?: number;
-  readyAt?: number;
+export type FixtureRow = {
+  match_id: string;
+  bulletin_date: string;
+  day_offset: number;
+  league: string | null;
+  league_country: string | null;
+  kickoff_at: string | null;
+  kickoff_ts: number | null;
+  home_name: string | null;
+  away_name: string | null;
+  home_id?: string | null;
+  away_id?: string | null;
+  home_score: string | null;
+  away_score: string | null;
+  home_ht_score?: string | number | null;
+  away_ht_score?: string | number | null;
+  match_url: string | null;
+  odds: CompactOddsRow[] | null;
+  bookmakers: Record<string, string> | null;
+  odds_count: number;
 };
 
-type CacheBag = {
-  status: WarmStatus["status"];
-  seasonsDone: number;
-  seasonsTotal: number;
-  events: OddsEvent[];
-  quotes: Quote[];
-  byId: Map<string, OddsEvent>;
-  error?: string;
-  startedAt?: number;
-  readyAt?: number;
-  promise?: Promise<void>;
-};
+function todayUtcDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
-const META_COLS =
-  "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,home_ht_score,away_ht_score,season_slug,markets_json";
+const FIXTURE_META_HT =
+  "match_id,bulletin_date,day_offset,league,league_country,kickoff_at,kickoff_ts,home_name,away_name,home_id,away_id,home_score,away_score,home_ht_score,away_ht_score,match_url,odds_count";
 
-const META_COLS_BASE =
-  "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,season_slug,markets_json";
+const FIXTURE_META_BASE =
+  "match_id,bulletin_date,day_offset,league,league_country,kickoff_at,kickoff_ts,home_name,away_name,home_id,away_id,home_score,away_score,match_url,odds_count";
 
-/** Bump when normalize/quote shape changes so stale warm cache is dropped. */
-const CACHE_VERSION = 3;
+const ODDS_COLS = "match_id,odds,bookmakers,odds_count";
+const ODDS_CHUNK = 30;
+const ODDS_CONCURRENCY = 8;
 
-function globalStore(): { cache: CacheBag } {
-  const g = globalThis as unknown as {
-    __oddsArchiveCache?: { cache: CacheBag; version?: number };
-  };
-  if (!g.__oddsArchiveCache || g.__oddsArchiveCache.version !== CACHE_VERSION) {
-    g.__oddsArchiveCache = {
-      version: CACHE_VERSION,
-      cache: {
-        status: "idle",
-        seasonsDone: 0,
-        seasonsTotal: 0,
-        events: [],
-        quotes: [],
-        byId: new Map(),
+function isMissingHtColumn(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /home_ht_score|away_ht_score|42703/i.test(message);
+}
+
+function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timeout ${ms}ms`)), ms);
+    Promise.resolve(p).then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
       },
-    };
-  }
-  return g.__oddsArchiveCache;
-}
-
-function appendAll<T>(target: T[], items: readonly T[]): void {
-  for (let i = 0; i < items.length; i++) target.push(items[i]);
-}
-
-async function loadSeasonEvents(seasonSlug: string): Promise<OddsEvent[]> {
-  const sb = getSupabase();
-  if (!sb) return [];
-  const pageSize = 150;
-  let from = 0;
-  const all: OddsEvent[] = [];
-  let useHt = true;
-  for (;;) {
-    const cols = useHt ? META_COLS : META_COLS_BASE;
-    const { data, error } = await sb
-      .from("events")
-      .select(cols)
-      .eq("source", "flashscore")
-      .eq("season_slug", seasonSlug)
-      .order("kickoff_at", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error && useHt && /home_ht_score|away_ht_score/i.test(error.message)) {
-      useHt = false;
-      from = 0;
-      all.length = 0;
-      continue;
-    }
-    if (error) throw new Error(error.message);
-    const batch = (data ?? []) as unknown as OddsEvent[];
-    appendAll(all, batch);
-    if (batch.length < pageSize) break;
-    from += pageSize;
-  }
-  return all;
-}
-
-async function listSeasonIds(): Promise<string[]> {
-  const sb = getSupabase();
-  if (!sb) return [];
-  const { data, error } = await sb
-    .from("seasons")
-    .select("id")
-    .eq("source", "flashscore")
-    .order("season_label", { ascending: false });
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Pick<SeasonRow, "id">[]).map((s) => s.id);
-}
-
-async function runWarm(maxSeasons: number): Promise<void> {
-  const { cache } = globalStore();
-  cache.status = "loading";
-  cache.startedAt = Date.now();
-  cache.error = undefined;
-  cache.events = [];
-  cache.quotes = [];
-  cache.byId = new Map();
-  cache.seasonsDone = 0;
-
-  try {
-    if (!hasSupabaseEnv() || !getSupabase()) {
-      throw new Error("Supabase env missing");
-    }
-    const allIds = await listSeasonIds();
-    const seasonIds = allIds.slice(0, maxSeasons);
-    cache.seasonsTotal = seasonIds.length;
-
-    // Arka plan: 2 paralel sezon — UI'yi kilitlemeden ısınır
-    let cursor = 0;
-    async function worker() {
-      for (;;) {
-        const i = cursor++;
-        if (i >= seasonIds.length) return;
-        const slug = seasonIds[i];
-        const evs = await loadSeasonEvents(slug);
-        for (const e of evs) {
-          cache.events.push(e);
-          cache.byId.set(e.id, e);
-        }
-        const q = normalizeMany(evs);
-        appendAll(cache.quotes, q);
-        cache.seasonsDone += 1;
-      }
-    }
-    await Promise.all([worker(), worker(), worker(), worker()]);
-
-    cache.status = "ready";
-    cache.readyAt = Date.now();
-  } catch (e) {
-    cache.status = "error";
-    cache.error = e instanceof Error ? e.message : String(e);
-  }
-}
-
-/** Sayfa açılışında çağır — idempotent. */
-export function startArchiveWarm(maxSeasons = 24): WarmStatus {
-  const { cache } = globalStore();
-  if (cache.status === "ready") return getWarmStatus();
-  if (cache.status === "loading" && cache.promise) return getWarmStatus();
-  cache.promise = runWarm(maxSeasons).finally(() => {
-    /* keep promise for awaiters */
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
   });
-  return getWarmStatus();
 }
 
-export function getWarmStatus(): WarmStatus {
-  const { cache } = globalStore();
-  return {
-    status: cache.status,
-    seasonsDone: cache.seasonsDone,
-    seasonsTotal: cache.seasonsTotal,
-    events: cache.events.length,
-    quotes: cache.quotes.length,
-    error: cache.error,
-    startedAt: cache.startedAt,
-    readyAt: cache.readyAt,
-  };
+type OddsPatch = Pick<FixtureRow, "odds" | "bookmakers" | "odds_count">;
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
 }
 
-/** Filtre için: ready ise anında; loading ise bitmesini bekle (max waitMs). */
-export async function ensureArchiveCache(opts?: {
-  maxSeasons?: number;
-  waitMs?: number;
-}): Promise<{
-  quotes: Quote[];
-  byId: Map<string, OddsEvent>;
-  status: WarmStatus;
-}> {
-  const maxSeasons = opts?.maxSeasons ?? 24;
-  const waitMs = opts?.waitMs ?? 120_000;
-  const { cache } = globalStore();
+async function fetchOddsSlice(slice: string[]): Promise<Map<string, OddsPatch>> {
+  const out = new Map<string, OddsPatch>();
+  if (!slice.length) return out;
+  
+  try {
+    const query = `SELECT ${ODDS_COLS} FROM fixture WHERE match_id = ANY($1)`;
+    // `withTimeout` içerisinde sql.unsafe çalıştırılıyor. 
+    // ANY($1) postgres formatı string array'i direk bekler.
+    const data = await withTimeout(
+      sql.unsafe<{ match_id: string; odds: FixtureRow["odds"]; bookmakers: FixtureRow["bookmakers"]; odds_count: number }[]>(query, [slice]),
+      20000,
+      "fixture-odds"
+    );
+    
+    for (const row of data) {
+      out.set(row.match_id, {
+        odds: row.odds,
+        bookmakers: row.bookmakers,
+        odds_count: row.odds_count ?? 0,
+      });
+    }
+  } catch (error) {
+    console.error("fetchOddsSlice error:", error instanceof Error ? error.message : String(error));
+  }
+  return out;
+}
 
-  if (cache.status !== "ready" && cache.status !== "loading") {
-    startArchiveWarm(maxSeasons);
+/** Parallel DB chunks — much faster than serial for 200+ fixtures. */
+export async function fetchFixturesOdds(
+  matchIds: string[],
+): Promise<Map<string, OddsPatch>> {
+  const out = new Map<string, OddsPatch>();
+  if (!matchIds.length) return out;
+
+  const slices: string[][] = [];
+  for (let i = 0; i < matchIds.length; i += ODDS_CHUNK) {
+    slices.push(matchIds.slice(i, i + ODDS_CHUNK));
   }
 
-  if (cache.status === "loading" && cache.promise) {
-    await Promise.race([
-      cache.promise,
-      new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
-    ]);
+  const parts = await mapPool(slices, ODDS_CONCURRENCY, (slice) => fetchOddsSlice(slice));
+  for (const part of parts) {
+    for (const [k, v] of part) out.set(k, v);
   }
+  return out;
+}
 
-  // Kısmi cache ile de ara (ısınma bitmeden tıklanırsa)
-  return {
-    quotes: cache.quotes,
-    byId: cache.byId,
-    status: getWarmStatus(),
-  };
+/**
+ * Bulletin day odds — meta ids + parallel chunks (bulk JSONB query too slow/unreliable).
+ */
+export async function fetchFixturesOddsByDate(
+  date: string,
+): Promise<Map<string, OddsPatch>> {
+  const meta = await fetchFixturesMeta(date);
+  if (!meta.length) return new Map();
+  return fetchFixturesOdds(meta.map((r) => r.match_id));
+}
+
+export async function fetchFixturesMeta(date: string): Promise<FixtureRow[]> {
+  let useHt = true;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const cols = useHt ? FIXTURE_META_HT : FIXTURE_META_BASE;
+    try {
+      const query = `SELECT ${cols} FROM fixture WHERE bulletin_date = $1 ORDER BY kickoff_at ASC`;
+      const data = await withTimeout(sql.unsafe<FixtureRow[]>(query, [date]), 18000, "fixture-meta");
+      
+      return data.map((row) => ({
+        ...row,
+        odds: null,
+        bookmakers: null,
+        odds_count: row.odds_count ?? 0,
+      }));
+    } catch (e) {
+      if (useHt && isMissingHtColumn(e)) {
+        useHt = false;
+        continue;
+      }
+      console.error("fetchFixturesMeta error:", e instanceof Error ? e.message : e);
+      return [];
+    }
+  }
+  return [];
+}
+
+/** Meta + odds (odds ayrı chunk; timeout olursa meta yine döner). */
+export async function listFixtures(bulletinDate?: string): Promise<FixtureRow[]> {
+  const date = (bulletinDate || todayUtcDate()).trim();
+  const meta = await fetchFixturesMeta(date);
+  if (!meta.length) return [];
+
+  const oddsMap = await fetchFixturesOddsByDate(date);
+  return meta.map((r) => {
+    const o = oddsMap.get(r.match_id);
+    if (!o) return r;
+    return { ...r, odds: o.odds, bookmakers: o.bookmakers, odds_count: o.odds_count };
+  });
+}
+
+export async function listFixtureDates(limit = 14): Promise<string[]> {
+  try {
+    const query = "SELECT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 300";
+    const data = await withTimeout(
+      sql.unsafe<{ bulletin_date: string }[]>(query),
+      8000,
+      "fixture-dates"
+    );
+    
+    const seen = new Set<string>();
+    for (const row of data) {
+      if (row.bulletin_date) seen.add(row.bulletin_date);
+      if (seen.size >= limit) break;
+    }
+    return [...seen];
+  } catch (e) {
+    console.error("listFixtureDates error:", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+export function fixtureTitle(f: FixtureRow): string {
+  return `${f.home_name || "?"} – ${f.away_name || "?"}`;
 }
