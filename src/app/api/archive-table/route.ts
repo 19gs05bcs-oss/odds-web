@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { loadSeasonEvents } from "@/lib/archive";
+import { loadSeasonEvents } from "@/lib/fixtures";
 import { eventsToTableRows, PREFERRED_BM } from "@/lib/analysis/tableRows";
 
 export const dynamic = "force-dynamic";
