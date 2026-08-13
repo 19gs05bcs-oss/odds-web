@@ -1,6 +1,7 @@
 import { MatchList } from "@/components/MatchList";
 import { SiteHeader } from "@/components/SiteHeader";
-import { listOpenEvents } from "@/lib/events";
+import { listOpenEvents } from "@/lib/archieve";
+import { listFixtures } from "@/lib/archiveCache";
 import styles from "./page.module.css";
 
 export const dynamic = "force-dynamic";
