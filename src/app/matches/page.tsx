@@ -1,6 +1,6 @@
 import { MatchList } from "@/components/MatchList";
 import { SiteHeader } from "@/components/SiteHeader";
-import { listOpenEvents } from "@/lib/archieve";
+import { listOpenEvents } from "@/lib/archive";
 import { listFixtures } from "@/lib/archiveCache";
 import styles from "./page.module.css";
 
