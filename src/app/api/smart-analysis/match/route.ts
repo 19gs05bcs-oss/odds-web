@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { buildSmartMatchReport } from "@/lib/analysis/smartMatchReport";
 import { ensureSeasonGzCache } from "@/lib/analysis/seasonGzCache";
-import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
+import type { CompactOddsRow, FixtureRow } from "@/lib/archiveCache";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
