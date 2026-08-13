@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { MarketBoard } from "@/components/MarketBoard";
 import { SiteHeader } from "@/components/SiteHeader";
-import { getEventById, marketsFromEvent } from "@/lib/events";
+import { getEventById, marketsFromEvent } from "@/lib/archieve";
 import { formatKickoff, formatRelative, sourceLabel } from "@/lib/format";
 import styles from "./page.module.css";
 
