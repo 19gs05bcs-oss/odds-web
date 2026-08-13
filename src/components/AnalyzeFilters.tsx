@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState, useTransition, type FormEvent } from "react";
-import type { BookmakerOption } from "@/lib/archive";
+import type { BookmakerOption } from "@/lib/types";
 import {
   criterionLabel,
   decodeCriterion,
