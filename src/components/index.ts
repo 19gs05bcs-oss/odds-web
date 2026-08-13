@@ -7,5 +7,5 @@ export * from "./analyze";
 export * from "./labels";
 export * from "./profile";
 export * from "./tableColumns";
-export * from "./tableRows";
+export * from "@/lib/analysis/tableRows";
 export * from "./smartAnalysisEngine";
