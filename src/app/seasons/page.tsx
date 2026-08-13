@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
-import { listSeasons } from "@/lib/archive";
+import { listSeasons } from "@/lib/fixtures";
 import styles from "./page.module.css";
 
 export const dynamic = "force-dynamic";
