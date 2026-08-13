@@ -15,12 +15,13 @@ import {
   PREFERRED_BM,
   type TableRow,
 } from "@/lib/analysis/tableRows";
-import type { FetchResult } from "@/lib/events";
+import type { FetchResult } from "@/lib/archive";
 import { sql } from "@/lib/db";
 import type { MarketsBlob, OddsEvent, SeasonRow, BookmakerOption } from "@/lib/types";
 
 export type MarketOption = { type: string; label: string };
 export type { BookmakerOption };
+export type { FixtureRow, CompactOddsRow } from "@/lib/archiveCache";
 
 /** Memoize event→table row (markets_json parse is expensive per search). */
 const eventRowCache = new Map<string, TableRow>();
@@ -212,7 +213,7 @@ export async function searchProfile(
   }
 
   try {
-    const { ensureArchiveCache } = await import("@/lib/archiveCache");
+    const { ensureArchiveCache } = await import("@/lib/events");
     const { quotes, byId, status } = await ensureArchiveCache({
       maxSeasons: 24,
       waitMs: 90_000,
