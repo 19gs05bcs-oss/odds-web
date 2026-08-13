@@ -6,7 +6,7 @@
 import type { CompactOddsRow } from "@/lib/fixtures";
 import { marketsBlobToCompactOdds } from "@/lib/analysis/tableRows";
 import type { MarketsBlob, OddsEvent, SeasonRow } from "@/lib/types";
-import { getSupabase, hasSupabaseEnv } from "@/lib/supabase";
+import { sql } from "@/lib/db";
 
 export type SeasonGzMatch = {
   id: string;
@@ -131,56 +131,52 @@ function eventToMatch(event: OddsEvent): SeasonGzMatch | null {
   };
 }
 
+function isMissingHtColumn(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /home_ht_score|away_ht_score|42703/i.test(message);
+}
+
 async function listSeasonIds(): Promise<string[]> {
-  const sb = getSupabase();
-  if (!sb) return [];
-  const { data, error } = await sb
-    .from("seasons")
-    .select("id")
-    .eq("source", "flashscore")
-    .order("season_label", { ascending: false });
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as Pick<SeasonRow, "id">[]).map((s) => s.id);
+  const query = "SELECT id FROM seasons WHERE source = 'flashscore' ORDER BY season_label DESC";
+  const data = await sql.unsafe<{id: string}[]>(query);
+  return data.map((s) => s.id);
 }
 
 async function loadSeasonMatchesOnce(
   seasonSlug: string,
   pageSize: number,
 ): Promise<SeasonGzMatch[]> {
-  const sb = getSupabase();
-  if (!sb) return [];
   let from = 0;
   let useHt = true;
   const out: SeasonGzMatch[] = [];
+  
   for (;;) {
     const cols = useHt ? EVENT_COLS : EVENT_COLS_BASE;
-    const { data, error } = await sb
-      .from("events")
-      .select(cols)
-      .eq("source", "flashscore")
-      .eq("season_slug", seasonSlug)
-      .order("kickoff_at", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error && useHt && /home_ht_score|away_ht_score/i.test(error.message)) {
-      useHt = false;
-      from = 0;
-      out.length = 0;
-      continue;
-    }
-    if (error) throw new Error(error.message);
-    const batch = (data ?? []) as unknown as OddsEvent[];
-    for (const e of batch) {
-      let m: SeasonGzMatch | null = null;
-      try {
-        m = eventToMatch(e);
-      } catch (e2) {
-        console.error("[seasonArchive] event parse error", e?.id, e2);
+    try {
+      const query = `SELECT ${cols} FROM events WHERE source = 'flashscore' AND season_slug = $1 ORDER BY kickoff_at ASC LIMIT $2 OFFSET $3`;
+      const batch = await sql.unsafe<OddsEvent[]>(query, [seasonSlug, pageSize, from]);
+      
+      for (const e of batch) {
+        let m: SeasonGzMatch | null = null;
+        try {
+          m = eventToMatch(e);
+        } catch (e2) {
+          console.error("[seasonArchive] event parse error", e?.id, e2);
+        }
+        if (m) out.push(m);
       }
-      if (m) out.push(m);
+      await yieldToLoop();
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    } catch (error) {
+      if (useHt && isMissingHtColumn(error)) {
+        useHt = false;
+        from = 0;
+        out.length = 0;
+        continue;
+      }
+      throw error;
     }
-    await yieldToLoop();
-    if (batch.length < pageSize) break;
-    from += pageSize;
   }
   return out;
 }
@@ -209,9 +205,6 @@ async function runWarm(): Promise<void> {
   bag.files = 0;
 
   try {
-    if (!hasSupabaseEnv() || !getSupabase()) {
-      throw new Error("Supabase env missing");
-    }
     const seasonIds = await listSeasonIds();
     bag.files = seasonIds.length;
     bag.phase = "downloading";
