@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "NODE_OPTIONS=--max-old-space-size=6144 next dev",
-    "build": "next build",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "NODE_OPTIONS=--max-old-space-size=4096 next start",
     "lint": "next lint",
     "test:analysis": "tsx --test src/lib/analysis/*.test.ts"
@@ -28,6 +28,6 @@
     "ws": "^8.21.3"
   },
   "engines": {
-    "node": ">=18.17.0"
+    "node": ">=20.9.0"
   }
 }

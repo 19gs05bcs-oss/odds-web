@@ -1,0 +1,12 @@
+[build]
+builder = "NIXPACKS"
+
+[build.env]
+# NODE_ENV=production iken devDependencies (typescript, eslint) kurulsun
+NIXPACKS_INSTALL_DEV_DEPS = "true"
+NODE_OPTIONS = "--max-old-space-size=4096"
+
+[deploy]
+startCommand = "npm run start"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
