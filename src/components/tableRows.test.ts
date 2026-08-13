@@ -80,7 +80,7 @@ describe("tableRows", () => {
       match_url: null,
       bookmakers: {},
       odds_count: 1,
-      odds: [[16, "HOME_DRAW_AWAY", "FULL_TIME", "H", "2.50", "2.40", true]],
+      odds: [[16, "HOME_DRAW_AWAY", "FULL_TIME", "H", "2.50", "2.40", true]] as unknown as FixtureRow["odds"],
     };
     const row = fixtureToTableRow(f, 16);
     assert.equal(row.odds.ms_1?.opening, 2.5);

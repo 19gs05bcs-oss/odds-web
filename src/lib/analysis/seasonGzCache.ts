@@ -1,15 +1,12 @@
 /**
- * Smart Analysis archive — season .json.gz loaded server-side only.
- * Source: private GitHub repo (GITHUB_TOKEN) or local SEASON_ODDS_DIR override.
+ * Smart Analysis archive — Supabase `events` tablosundan belleğe yüklenir.
+ * (Eski kaynak: GitHub'daki season .json.gz dökümleri.)
  */
 
-import { existsSync, readdirSync, readFileSync } from "fs";
-import { gunzip } from "zlib";
-import { promisify } from "util";
-import { join } from "path";
 import type { CompactOddsRow } from "@/lib/fixtures";
-
-const gunzipAsync = promisify(gunzip);
+import { marketsBlobToCompactOdds } from "@/lib/analysis/tableRows";
+import type { MarketsBlob, OddsEvent, SeasonRow } from "@/lib/types";
+import { getSupabase, hasSupabaseEnv } from "@/lib/supabase";
 
 export type SeasonGzMatch = {
   id: string;
@@ -36,19 +33,14 @@ export type GzWarmStatus = {
   error?: string;
   startedAt?: number;
   readyAt?: number;
-};
-
-type RemoteGzFile = {
-  name: string;
-  downloadUrl: string;
-  seasonKey: string;
-  stamp: number;
+  /** Veri kaynağı etiketi (raporda gösterilir). */
+  dir?: string | null;
 };
 
 type GzBag = {
   status: GzWarmStatus["status"];
   phase: GzWarmStatus["phase"];
-  files: string[];
+  files: number;
   filesDone: number;
   matches: SeasonGzMatch[];
   error?: string;
@@ -57,11 +49,13 @@ type GzBag = {
   promise?: Promise<void>;
 };
 
-const CACHE_VERSION = 5;
-const DEFAULT_REPO = "19gs05bcs-oss/listener";
-const DEFAULT_BRANCH = "main";
-const DEFAULT_PREFIX = "data/season_odds";
-const DOWNLOAD_RETRIES = 3;
+const CACHE_VERSION = 6;
+const SOURCE_LABEL = "supabase:events";
+
+const EVENT_COLS =
+  "id,source_event_id,competition,home_team,away_team,kickoff_at,home_score,away_score,home_ht_score,away_ht_score,season_slug,markets_json";
+const EVENT_COLS_BASE =
+  "id,source_event_id,competition,home_team,away_team,kickoff_at,home_score,away_score,season_slug,markets_json";
 
 function globalStore(): { bag: GzBag } {
   const g = globalThis as unknown as { __seasonGzCache?: { bag: GzBag; version?: number } };
@@ -71,7 +65,7 @@ function globalStore(): { bag: GzBag } {
       bag: {
         status: "idle",
         phase: "idle",
-        files: [],
+        files: 0,
         filesDone: 0,
         matches: [],
       },
@@ -80,65 +74,25 @@ function globalStore(): { bag: GzBag } {
   return g.__seasonGzCache;
 }
 
-function githubConfig() {
-  const repo = (
-    process.env.GIT_SEASON_REPO ||
-    process.env.GITHUB_SEASON_REPO ||
-    DEFAULT_REPO
-  ).trim();
-  const branch = (
-    process.env.GIT_SEASON_BRANCH ||
-    process.env.GITHUB_SEASON_BRANCH ||
-    DEFAULT_BRANCH
-  ).trim();
-  const prefix = (
-    process.env.GIT_SEASON_PATH ||
-    process.env.GITHUB_SEASON_PATH ||
-    DEFAULT_PREFIX
-  ).replace(/\/$/, "");
-  const [owner, name] = repo.split("/");
-  return {
-    owner,
-    name,
-    branch,
-    prefix,
-    rawBase: `https://raw.githubusercontent.com/${repo}/${branch}/${prefix}`,
-  };
-}
+/** Ana thread'i uzun dönüşümlerde nefeslendir — yoksa sunucu isteklere cevap veremiyor. */
+const yieldToLoop = () => new Promise<void>((r) => setImmediate(r));
 
-function readGitHubToken(): string {
-  return (
-    process.env.GITHUB_TOKEN?.trim() ||
-    process.env.GT_TOKEN?.trim() ||
-    process.env.GT_GITHUB_TOKEN?.trim() ||
-    ""
-  );
-}
-
-function githubAuthHeaders(): Record<string, string> {
-  const token = readGitHubToken();
-  const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "odds-intel-smart-analysis",
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  return headers;
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), ms);
-  try {
-    return await fetch(url, { ...init, signal: ac.signal });
-  } finally {
-    clearTimeout(t);
+function asBlob(raw: OddsEvent["markets_json"]): MarketsBlob {
+  if (!raw) return { markets: [] };
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw) as MarketsBlob;
+    } catch {
+      return { markets: [] };
+    }
   }
+  return raw;
 }
 
-function kickoffIso(ts: unknown): string | null {
-  const n = Number(ts);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return new Date(n * 1000).toISOString();
+function parseScore(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 function competitionLabel(slug: string): string {
@@ -151,223 +105,97 @@ function competitionLabel(slug: string): string {
   return `${country}: ${league}`;
 }
 
-export function resolveSeasonOddsDir(): string | null {
-  const env = process.env.SEASON_ODDS_DIR?.trim();
-  if (!env) return null;
-  return existsSync(env) ? env : env;
-}
-
-function listLocalGzFiles(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-      .filter((f) => f.endsWith(".json.gz") || f.endsWith(".gz"))
-      .map((f) => join(dir, f))
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-function seasonKeyFromFilename(name: string): string {
-  const m = /^(.+)_\d{8}_\d{6}\.json\.gz$/i.exec(name);
-  return m ? m[1] : name.replace(/\.json\.gz$|\.gz$/i, "");
-}
-
-function stampFromFilename(name: string): number {
-  const m = /_(\d{8})_(\d{6})\.json\.gz$/i.exec(name);
-  if (!m) return 0;
-  return Number(m[1] + m[2]);
-}
-
-function dedupeRemoteFiles(files: RemoteGzFile[]): RemoteGzFile[] {
-  const best = new Map<string, RemoteGzFile>();
-  for (const f of files) {
-    const prev = best.get(f.seasonKey);
-    if (!prev || f.stamp > prev.stamp) best.set(f.seasonKey, f);
-  }
-  return [...best.values()].sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function dedupeLocalPaths(paths: string[]): string[] {
-  const best = new Map<string, { path: string; stamp: number }>();
-  for (const path of paths) {
-    const name = path.split("/").pop() || path;
-    const key = seasonKeyFromFilename(name);
-    const stamp = stampFromFilename(name);
-    const prev = best.get(key);
-    if (!prev || stamp > prev.stamp) best.set(key, { path, stamp });
-  }
-  return [...best.values()].map((x) => x.path);
-}
-
-function parseScore(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** Ana thread'i uzun parse'larda nefeslendir — yoksa sunucu isteklere cevap veremiyor. */
-const yieldToLoop = () => new Promise<void>((r) => setImmediate(r));
-
-async function parseGzBuffer(buf: Buffer, seasonSlugGuess: string): Promise<SeasonGzMatch[]> {
-  const raw = await gunzipAsync(buf);
-  const data = JSON.parse(raw.toString("utf-8")) as {
-    league_slug?: string;
-    bookmakers?: Record<string, string>;
-    matches?: Array<Record<string, unknown>>;
+function eventToMatch(event: OddsEvent): SeasonGzMatch | null {
+  const hs = parseScore(event.home_score);
+  const as = parseScore(event.away_score);
+  if (hs == null || as == null) return null;
+  const blob = asBlob(event.markets_json);
+  const odds = marketsBlobToCompactOdds(blob);
+  if (!odds.length) return null;
+  const mid = event.source_event_id || event.id;
+  if (!mid) return null;
+  return {
+    id: `flashscore:${mid}`,
+    matchId: mid,
+    seasonSlug: event.season_slug || "",
+    competition: event.competition || competitionLabel(event.season_slug || ""),
+    home: event.home_team || "Home",
+    away: event.away_team || "Away",
+    kickoffAt: event.kickoff_at ?? null,
+    homeScore: hs,
+    awayScore: as,
+    homeHtScore: parseScore(event.home_ht_score),
+    awayHtScore: parseScore(event.away_ht_score),
+    odds,
+    bookmakers: blob.bookmakers ?? {},
   };
-  const slug = data.league_slug || seasonSlugGuess;
-  const bms = data.bookmakers || {};
-  const out: SeasonGzMatch[] = [];
+}
 
-  for (const m of data.matches || []) {
-    const hs = parseScore(m.home_score);
-    const as = parseScore(m.away_score);
-    if (hs == null || as == null) continue;
-    const odds = (m.odds as CompactOddsRow[]) || [];
-    if (!odds.length) continue;
-    const mid = String(m.match_id || "");
-    if (!mid) continue;
-    out.push({
-      id: `flashscore:${mid}`,
-      matchId: mid,
-      seasonSlug: slug,
-      competition: competitionLabel(slug),
-      home: String(m.home_name || "Home"),
-      away: String(m.away_name || "Away"),
-      kickoffAt: kickoffIso(m.kickoff_ts),
-      homeScore: hs,
-      awayScore: as,
-      homeHtScore: parseScore(m.home_ht_score),
-      awayHtScore: parseScore(m.away_ht_score),
-      odds,
-      bookmakers: bms,
-    });
-    if (out.length % 1000 === 0) await yieldToLoop();
+async function listSeasonIds(): Promise<string[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb
+    .from("seasons")
+    .select("id")
+    .eq("source", "flashscore")
+    .order("season_label", { ascending: false });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Pick<SeasonRow, "id">[]).map((s) => s.id);
+}
+
+async function loadSeasonMatchesOnce(
+  seasonSlug: string,
+  pageSize: number,
+): Promise<SeasonGzMatch[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  let from = 0;
+  let useHt = true;
+  const out: SeasonGzMatch[] = [];
+  for (;;) {
+    const cols = useHt ? EVENT_COLS : EVENT_COLS_BASE;
+    const { data, error } = await sb
+      .from("events")
+      .select(cols)
+      .eq("source", "flashscore")
+      .eq("season_slug", seasonSlug)
+      .order("kickoff_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error && useHt && /home_ht_score|away_ht_score/i.test(error.message)) {
+      useHt = false;
+      from = 0;
+      out.length = 0;
+      continue;
+    }
+    if (error) throw new Error(error.message);
+    const batch = (data ?? []) as unknown as OddsEvent[];
+    for (const e of batch) {
+      let m: SeasonGzMatch | null = null;
+      try {
+        m = eventToMatch(e);
+      } catch (e2) {
+        console.error("[seasonArchive] event parse error", e?.id, e2);
+      }
+      if (m) out.push(m);
+    }
+    await yieldToLoop();
+    if (batch.length < pageSize) break;
+    from += pageSize;
   }
   return out;
 }
 
-async function loadLocalGz(path: string): Promise<SeasonGzMatch[]> {
-  const name = path.split("/").pop() || path;
-  const slugGuess = seasonKeyFromFilename(name).replace(/_/g, "/");
-  return parseGzBuffer(readFileSync(path), slugGuess);
-}
-
-async function listGitHubGzFiles(): Promise<RemoteGzFile[]> {
-  const cfg = githubConfig();
-  const res = await fetchWithTimeout(
-    `https://api.github.com/repos/${cfg.owner}/${cfg.name}/git/trees/${cfg.branch}?recursive=1`,
-    { headers: githubAuthHeaders(), cache: "no-store" },
-    60_000,
-  );
-  if (!res.ok) {
-    const hint =
-      res.status === 404
-        ? " Repo private ise sunucuda GT_TOKEN (veya GITHUB_TOKEN) tanımlayın."
-        : res.status === 403
-          ? " GitHub rate limit — GT_TOKEN ekleyin."
-          : "";
-    throw new Error(`Sezon listesi alınamadı (${res.status}).${hint}`);
-  }
-  const body = (await res.json()) as { tree?: Array<{ path?: string; type?: string }> };
-  const prefix = `${cfg.prefix}/`;
-  const out: RemoteGzFile[] = [];
-  for (const node of body.tree || []) {
-    if (node.type !== "blob" || !node.path?.startsWith(prefix)) continue;
-    if (!node.path.endsWith(".json.gz")) continue;
-    const name = node.path.slice(prefix.length);
-    out.push({
-      name,
-      downloadUrl: `${cfg.rawBase}/${name}`,
-      seasonKey: seasonKeyFromFilename(name),
-      stamp: stampFromFilename(name),
-    });
-  }
-  if (!out.length) throw new Error("Arşivde sezon dosyası bulunamadı.");
-  return dedupeRemoteFiles(out);
-}
-
-async function downloadGz(file: RemoteGzFile): Promise<Buffer> {
-  const cfg = githubConfig();
-  const path = `${cfg.prefix}/${file.name}`;
-  const url =
-    `https://api.github.com/repos/${cfg.owner}/${cfg.name}/contents/${path}` +
-    `?ref=${encodeURIComponent(cfg.branch)}`;
-  const res = await fetchWithTimeout(
-    url,
-    {
-      headers: { ...githubAuthHeaders(), Accept: "application/vnd.github.raw" },
-      cache: "no-store",
-    },
-    120_000,
-  );
-  if (!res.ok) throw new Error(`Dosya indirilemedi (${res.status})`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-async function downloadGzWithRetry(file: RemoteGzFile): Promise<Buffer> {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= DOWNLOAD_RETRIES; attempt++) {
+/** Statement timeout'a takılırsa sayfa boyunu küçülterek dene. */
+async function loadSeasonMatches(seasonSlug: string): Promise<SeasonGzMatch[]> {
+  for (const pageSize of [150, 60]) {
     try {
-      if (attempt > 1) await sleep(800 * attempt);
-      return await downloadGz(file);
+      return await loadSeasonMatchesOnce(seasonSlug, pageSize);
     } catch (e) {
-      lastErr = e;
+      if (pageSize === 60) throw e;
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
-  throw lastErr;
-}
-
-async function warmFromGitHub(bag: GzBag): Promise<void> {
-  bag.phase = "listing";
-  const remote = await listGitHubGzFiles();
-  bag.files = remote.map((f) => f.name);
-  bag.phase = "downloading";
-
-  // 4 paralel indirme — sırayla + dosya başına bekleme arşivi dakikalarca süründürüyordu
-  let cursor = 0;
-  async function worker() {
-    for (;;) {
-      const i = cursor++;
-      if (i >= remote.length) return;
-      const file = remote[i];
-      try {
-        const buf = await downloadGzWithRetry(file);
-        const slugGuess = file.seasonKey.replace(/_/g, "/");
-        const batch = await parseGzBuffer(buf, slugGuess);
-        bag.matches.push(...batch);
-        console.log(`[seasonGzCache] ${bag.filesDone + 1}/${remote.length} ${file.name} → ${batch.length} matches`);
-      } catch (e) {
-        console.error("[seasonGzCache] skip", file.name, e);
-      } finally {
-        bag.filesDone += 1;
-      }
-      await yieldToLoop();
-    }
-  }
-  await Promise.all([worker(), worker(), worker(), worker()]);
-
-  if (!bag.matches.length) {
-    throw new Error("Arşivden hiç bitmiş maç yüklenemedi.");
-  }
-}
-
-async function warmFromLocal(bag: GzBag, dir: string): Promise<void> {
-  bag.phase = "listing";
-  const files = dedupeLocalPaths(listLocalGzFiles(dir));
-  bag.files = files;
-  if (!files.length) throw new Error(`Klasörde .json.gz yok: ${dir}`);
-  bag.phase = "downloading";
-
-  for (const path of files) {
-    bag.matches.push(...(await loadLocalGz(path)));
-    bag.filesDone += 1;
-  }
+  return [];
 }
 
 async function runWarm(): Promise<void> {
@@ -378,16 +206,55 @@ async function runWarm(): Promise<void> {
   bag.error = undefined;
   bag.matches = [];
   bag.filesDone = 0;
-  bag.files = [];
-
-  const localDir = resolveSeasonOddsDir();
-  const useLocal = Boolean(localDir && existsSync(localDir) && listLocalGzFiles(localDir).length > 0);
+  bag.files = 0;
 
   try {
-    if (useLocal && localDir) {
-      await warmFromLocal(bag, localDir);
-    } else {
-      await warmFromGitHub(bag);
+    if (!hasSupabaseEnv() || !getSupabase()) {
+      throw new Error("Supabase env missing");
+    }
+    const seasonIds = await listSeasonIds();
+    bag.files = seasonIds.length;
+    bag.phase = "downloading";
+
+    const failed: string[] = [];
+    let cursor = 0;
+    async function worker() {
+      for (;;) {
+        const i = cursor++;
+        if (i >= seasonIds.length) return;
+        const slug = seasonIds[i];
+        try {
+          const batch = await loadSeasonMatches(slug);
+          bag.matches.push(...batch);
+          console.log(
+            `[seasonArchive] ${bag.filesDone + 1}/${seasonIds.length} ${slug} → ${batch.length} matches`,
+          );
+        } catch (e) {
+          console.error("[seasonArchive] skip", slug, e);
+          failed.push(slug);
+        } finally {
+          bag.filesDone += 1;
+        }
+        await yieldToLoop();
+      }
+    }
+    // 3 worker — events tablosu büyük blob'larla yüksek eşzamanlılıkta timeout veriyor
+    await Promise.all([worker(), worker(), worker()]);
+
+    // Kurtarma turu: başarısız sezonları tek tek, düşük eşzamanlılıkla tekrar dene
+    for (const slug of failed) {
+      try {
+        const batch = await loadSeasonMatchesOnce(slug, 40);
+        bag.matches.push(...batch);
+        console.log(`[seasonArchive] rescue ${slug} → ${batch.length} matches`);
+      } catch (e) {
+        console.error("[seasonArchive] rescue failed", slug, e);
+      }
+      await yieldToLoop();
+    }
+
+    if (!bag.matches.length) {
+      throw new Error("Arşivden hiç bitmiş maç yüklenemedi.");
     }
     bag.status = "ready";
     bag.phase = "idle";
@@ -416,12 +283,13 @@ export function getSeasonGzStatus(): GzWarmStatus {
   return {
     status: bag.status,
     phase: bag.phase,
-    files: bag.files.length,
+    files: bag.files,
     filesDone: bag.filesDone,
     matches: bag.matches.length,
     error: bag.error,
     startedAt: bag.startedAt,
     readyAt: bag.readyAt,
+    dir: SOURCE_LABEL,
   };
 }
 
