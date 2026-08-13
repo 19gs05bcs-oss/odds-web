@@ -4,7 +4,7 @@ import {
   type OddsCriterion,
   type ProfileQuery,
 } from "@/lib/analysis/profile";
-import { searchProfile } from "@/lib/archive";
+import { searchProfile } from "@/lib/fixtures";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
