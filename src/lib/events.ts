@@ -1,91 +1,205 @@
-import { getSupabase, hasSupabaseEnv } from "@/lib/supabase";
-import type { MarketsBlob, OddsEvent } from "@/lib/types";
+/**
+ * Server-side in-memory archive cache.
+ * Analyze sayfası açılınca warm edilir; filtre tıklanınca markets_json
+ * yeniden çekilmez — deparse edilmiş Quote[] üzerinden aranır.
+ */
 
-export type FetchResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; missingEnv?: boolean };
+import { normalizeMany } from "@/lib/analysis/normalize";
+import type { Quote } from "@/lib/analysis/types";
+import type { OddsEvent, SeasonRow } from "@/lib/types";
+import { sql } from "@/lib/db";
 
-function parseMarkets(raw: OddsEvent["markets_json"]): MarketsBlob {
-  if (!raw) return { markets: [] };
-  if (typeof raw === "string") {
+export type WarmStatus = {
+  status: "idle" | "loading" | "ready" | "error";
+  seasonsDone: number;
+  seasonsTotal: number;
+  events: number;
+  quotes: number;
+  error?: string;
+  startedAt?: number;
+  readyAt?: number;
+};
+
+type CacheBag = {
+  status: WarmStatus["status"];
+  seasonsDone: number;
+  seasonsTotal: number;
+  events: OddsEvent[];
+  quotes: Quote[];
+  byId: Map<string, OddsEvent>;
+  error?: string;
+  startedAt?: number;
+  readyAt?: number;
+  promise?: Promise<void>;
+};
+
+const META_COLS =
+  "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,home_ht_score,away_ht_score,season_slug,markets_json";
+
+const META_COLS_BASE =
+  "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,season_slug,markets_json";
+
+/** Bump when normalize/quote shape changes so stale warm cache is dropped. */
+const CACHE_VERSION = 3;
+
+function globalStore(): { cache: CacheBag } {
+  const g = globalThis as unknown as {
+    __oddsArchiveCache?: { cache: CacheBag; version?: number };
+  };
+  if (!g.__oddsArchiveCache || g.__oddsArchiveCache.version !== CACHE_VERSION) {
+    g.__oddsArchiveCache = {
+      version: CACHE_VERSION,
+      cache: {
+        status: "idle",
+        seasonsDone: 0,
+        seasonsTotal: 0,
+        events: [],
+        quotes: [],
+        byId: new Map(),
+      },
+    };
+  }
+  return g.__oddsArchiveCache;
+}
+
+function appendAll<T>(target: T[], items: readonly T[]): void {
+  for (let i = 0; i < items.length; i++) target.push(items[i]);
+}
+
+function isMissingHtColumn(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /home_ht_score|away_ht_score|42703/i.test(message);
+}
+
+async function loadSeasonEvents(seasonSlug: string): Promise<OddsEvent[]> {
+  const pageSize = 150;
+  let from = 0;
+  const all: OddsEvent[] = [];
+  let useHt = true;
+  
+  for (;;) {
+    const cols = useHt ? META_COLS : META_COLS_BASE;
     try {
-      return JSON.parse(raw) as MarketsBlob;
-    } catch {
-      return { markets: [] };
+      const query = `SELECT ${cols} FROM events WHERE source = 'flashscore' AND season_slug = $1 ORDER BY kickoff_at ASC LIMIT $2 OFFSET $3`;
+      const batch = await sql.unsafe<OddsEvent[]>(query, [seasonSlug, pageSize, from]);
+      
+      appendAll(all, batch);
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    } catch (error) {
+      if (useHt && isMissingHtColumn(error)) {
+        useHt = false;
+        from = 0;
+        all.length = 0;
+        continue;
+      }
+      throw error;
     }
   }
+  return all;
+}
+
+async function listSeasonIds(): Promise<string[]> {
+  const query = "SELECT id FROM seasons WHERE source = 'flashscore' ORDER BY season_label DESC";
+  const data = await sql.unsafe<{id: string}[]>(query);
+  return data.map((s) => s.id);
+}
+
+async function runWarm(maxSeasons: number): Promise<void> {
+  const { cache } = globalStore();
+  cache.status = "loading";
+  cache.startedAt = Date.now();
+  cache.error = undefined;
+  cache.events = [];
+  cache.quotes = [];
+  cache.byId = new Map();
+  cache.seasonsDone = 0;
+
+  try {
+    const allIds = await listSeasonIds();
+    const seasonIds = allIds.slice(0, maxSeasons);
+    cache.seasonsTotal = seasonIds.length;
+
+    // Arka plan: 4 paralel sezon — UI'yi kilitlemeden ısınır
+    let cursor = 0;
+    async function worker() {
+      for (;;) {
+        const i = cursor++;
+        if (i >= seasonIds.length) return;
+        const slug = seasonIds[i];
+        const evs = await loadSeasonEvents(slug);
+        for (const e of evs) {
+          cache.events.push(e);
+          cache.byId.set(e.id, e);
+        }
+        const q = normalizeMany(evs);
+        appendAll(cache.quotes, q);
+        cache.seasonsDone += 1;
+      }
+    }
+    await Promise.all([worker(), worker(), worker(), worker()]);
+
+    cache.status = "ready";
+    cache.readyAt = Date.now();
+  } catch (e) {
+    cache.status = "error";
+    cache.error = e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** Sayfa açılışında çağır — idempotent. */
+export function startArchiveWarm(maxSeasons = 24): WarmStatus {
+  const { cache } = globalStore();
+  if (cache.status === "ready") return getWarmStatus();
+  if (cache.status === "loading" && cache.promise) return getWarmStatus();
+  cache.promise = runWarm(maxSeasons).finally(() => {
+    /* keep promise for awaiters */
+  });
+  return getWarmStatus();
+}
+
+export function getWarmStatus(): WarmStatus {
+  const { cache } = globalStore();
   return {
-    markets: Array.isArray(raw.markets) ? raw.markets : [],
+    status: cache.status,
+    seasonsDone: cache.seasonsDone,
+    seasonsTotal: cache.seasonsTotal,
+    events: cache.events.length,
+    quotes: cache.quotes.length,
+    error: cache.error,
+    startedAt: cache.startedAt,
+    readyAt: cache.readyAt,
   };
 }
 
-export function marketsFromEvent(event: OddsEvent): MarketsBlob {
-  return parseMarkets(event.markets_json);
-}
+/** Filtre için: ready ise anında; loading ise bitmesini bekle (max waitMs). */
+export async function ensureArchiveCache(opts?: {
+  maxSeasons?: number;
+  waitMs?: number;
+}): Promise<{
+  quotes: Quote[];
+  byId: Map<string, OddsEvent>;
+  status: WarmStatus;
+}> {
+  const maxSeasons = opts?.maxSeasons ?? 24;
+  const waitMs = opts?.waitMs ?? 120_000;
+  const { cache } = globalStore();
 
-export async function listOpenEvents(limit = 80): Promise<FetchResult<OddsEvent[]>> {
-  if (!hasSupabaseEnv()) {
-    return {
-      ok: false,
-      error: "Supabase ortam değişkenleri eksik.",
-      missingEnv: true,
-    };
-  }
-  const sb = getSupabase();
-  if (!sb) {
-    return { ok: false, error: "Supabase istemcisi oluşturulamadı.", missingEnv: true };
-  }
-
-  const { data, error } = await sb
-    .from("events")
-    .select(
-      "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_json,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at",
-    )
-    .or("is_closed.eq.0,is_closed.is.null")
-    .order("kickoff_at", { ascending: true, nullsFirst: false })
-    .limit(limit);
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-  return { ok: true, data: (data ?? []) as OddsEvent[] };
-}
-
-export async function getEventById(id: string): Promise<FetchResult<OddsEvent | null>> {
-  if (!hasSupabaseEnv()) {
-    return {
-      ok: false,
-      error: "Supabase ortam değişkenleri eksik.",
-      missingEnv: true,
-    };
-  }
-  const sb = getSupabase();
-  if (!sb) {
-    return { ok: false, error: "Supabase istemcisi oluşturulamadı.", missingEnv: true };
+  if (cache.status !== "ready" && cache.status !== "loading") {
+    startArchiveWarm(maxSeasons);
   }
 
-  const { data, error } = await sb
-    .from("events")
-    .select(
-      "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_json,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,home_ht_score,away_ht_score,season_slug,home_team_id,away_team_id",
-    )
-    .eq("id", id)
-    .maybeSingle();
-
-  if (error && /home_ht_score|away_ht_score/i.test(error.message)) {
-    const retry = await sb
-      .from("events")
-      .select(
-        "id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_json,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,season_slug,home_team_id,away_team_id",
-      )
-      .eq("id", id)
-      .maybeSingle();
-    if (retry.error) return { ok: false, error: retry.error.message };
-    return { ok: true, data: (retry.data as OddsEvent | null) ?? null };
+  if (cache.status === "loading" && cache.promise) {
+    await Promise.race([
+      cache.promise,
+      new Promise<void>((resolve) => setTimeout(resolve, waitMs)),
+    ]);
   }
 
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-  return { ok: true, data: (data as OddsEvent | null) ?? null };
+  // Kısmi cache ile de ara (ısınma bitmeden tıklanırsa)
+  return {
+    quotes: cache.quotes,
+    byId: cache.byId,
+    status: getWarmStatus(),
+  };
 }
