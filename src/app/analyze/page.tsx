@@ -1,7 +1,8 @@
 import dynamic from "next/dynamic";
 import { SiteHeader } from "@/components/SiteHeader";
 import { decodeCriterion } from "@/lib/analysis/profile";
-import { listFixtureDates, listBookmakers } from "@/lib/fixtures";
+import { listBookmakers } from "@/lib/fixtures";
+import { listFixtureDates } from "@/lib/archiveCache";
 import styles from "./page.module.css";
 
 const AnalyzeClient = dynamic(() => import("@/components/AnalyzeClient"), {
