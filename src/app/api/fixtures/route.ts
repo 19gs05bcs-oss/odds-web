@@ -5,7 +5,7 @@ import {
   fetchFixturesOddsByDate,
   listFixtures,
   type FixtureRow,
-} from "@/lib/fixtures";
+} from "@/lib/archiveCache";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
