@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic";
 import { SiteHeader } from "@/components/SiteHeader";
-import { listBookmakers } from "@/lib/archive";
-import { listFixtureDates } from "@/lib/fixtures";
+import { listBookmakers } from "@/lib/fixtures";
+import { listFixtureDates } from "@/lib/archiveCache";
 import styles from "./page.module.css";
 
 export const metadata = {
