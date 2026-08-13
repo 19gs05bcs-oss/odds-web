@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getWarmStatus, startArchiveWarm } from "@/lib/archiveCache";
+import { getWarmStatus, startArchiveWarm } from "@/lib/events";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
