@@ -47,12 +47,12 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function lineFromSideToken(side: string): string | null {
+export function lineFromSideToken(side: string): string | null {
   const m = /^[HDA]:(.+)$/i.exec(side) || /^(?:OVER|UNDER):(.+)$/i.exec(side);
   return m ? m[1] : null;
 }
 
-function resolveLine(
+export function resolveLine(
   marketType: string,
   marketLine: string | null | undefined,
   side: string,

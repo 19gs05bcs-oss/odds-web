@@ -162,15 +162,51 @@ async function fetchEventsWithMarkets(seasonSlug: string): Promise<OddsEvent[]> 
   return all;
 }
 
+/**
+ * Tek bir event'i markets_json dahil id ile çeker. searchProfile (DuckDB
+ * yolu) eşleşen event_id listesini bulduktan SONRA, sadece o birkaç yüz
+ * maçın tam bookmaker grid'ini almak için kullanır — sezonun tamamını değil.
+ */
+async function fetchEventsWithMarketsByIds(eventIds: string[]): Promise<Map<string, OddsEvent>> {
+  const ids = [...new Set(eventIds)];
+  const map = new Map<string, OddsEvent>();
+  if (!ids.length) return map;
+  try {
+    const query = `SELECT ${FULL_COLS} FROM events WHERE id = ANY($1)`;
+    const rows = await sql.unsafe<OddsEvent[]>(query, [ids]);
+    for (const r of rows) map.set(r.id, r);
+    return map;
+  } catch (error) {
+    if (!isMissingHtColumn(error)) throw error;
+  }
+  const query = `SELECT ${FULL_COLS_BASE} FROM events WHERE id = ANY($1)`;
+  const rows = await sql.unsafe<OddsEvent[]>(query, [ids]);
+  for (const r of rows) map.set(r.id, r);
+  return map;
+}
+
 /** Full markets_json seasons exceed Next 2MB data-cache limit — do not unstable_cache. */
 export async function loadSeasonEvents(seasonSlug: string): Promise<OddsEvent[]> {
   return fetchEventsWithMarkets(seasonSlug);
 }
 
-/** Archive quotes from events.markets_json (no event_quotes table). */
-async function loadQuotesForSeason(seasonSlug: string, _filters: FilterState): Promise<Quote[]> {
-  const events = await loadSeasonEvents(seasonSlug);
-  return normalizeMany(events);
+/**
+ * Archive quotes from events.markets_json — DuckDB üzerinden, market/scope/
+ * bookmaker/odds filtresiyle erken daraltılmış olarak çekilir (bkz.
+ * analyzeSeasonSQL.ts). Eskisi gibi sezonun TÜM markets_json'ını Node'a
+ * çekip normalizeMany ile parse etmiyoruz.
+ */
+async function loadQuotesForSeason(seasonSlug: string, filters: FilterState): Promise<Quote[]> {
+  const { loadSeasonQuotesSQL } = await import("@/lib/analysis/analyzeSeasonSQL");
+  try {
+    return await loadSeasonQuotesSQL({ ...filters, seasonSlug });
+  } catch (e) {
+    // DuckDB/Postgres attach başarısızsa (örn. DUCKDB_PG_DSN yok) eski
+    // Node-side yola düş — en azından özellik çalışmaya devam etsin.
+    console.error("[loadQuotesForSeason] DuckDB path failed, falling back to Node:", e);
+    const events = await loadSeasonEvents(seasonSlug);
+    return normalizeMany(events);
+  }
 }
 
 export async function analyzeSeason(filters: FilterState): Promise<FetchResult<AnalyzeResult>> {
@@ -194,7 +230,13 @@ export async function analyzeFromSearchParams(
   return analyzeSeason(filters);
 }
 
-/** Stacked odds profile search — warm cache üzerinden (sayfa açılışında deparse). */
+/**
+ * Stacked odds profile search — DuckDB üzerinden (events.markets_json'ı
+ * doğrudan JSON-unnest ile sorgular, Node'da global bir "24 sezon RAM'de"
+ * cache YOK artık). DuckDB/attach başarısız olursa eski warm-cache yoluna
+ * düşer (feature çalışmaya devam etsin diye), ama bu yavaş/RAM-ağır yoldur —
+ * DUCKDB_PG_DSN doğru kurulduysa asla tetiklenmemeli.
+ */
 export async function searchProfile(
   query: ProfileQuery,
 ): Promise<FetchResult<ProfileResult & { tableRows: TableRow[]; cacheStatus?: string }>> {
@@ -212,6 +254,37 @@ export async function searchProfile(
     };
   }
 
+  const bm = Number(query.bookmakerId);
+  const preferredBm = Number.isFinite(bm) && bm > 0 ? bm : PREFERRED_BM;
+
+  try {
+    const { searchOddsProfileSQL } = await import("@/lib/analysis/searchOddsProfileSQL");
+    const result = await searchOddsProfileSQL(query);
+
+    // Eşleşen event'lerin tam satırını (tüm bookmaker grid'i) TEK sorguda çekiyoruz —
+    // eskisi gibi 24 sezonun tamamını değil, sadece bu birkaç yüz maçı.
+    const byId = await fetchEventsWithMarketsByIds(result.matches.map((m) => m.eventId));
+
+    const tableRows: TableRow[] = result.matches.map((m) => {
+      const event = byId.get(m.eventId);
+      const hitsRow = profileMatchToTableRow(m);
+      if (!event) return hitsRow;
+      const full = getCachedEventTableRow(event, preferredBm);
+      for (const [colId, cell] of Object.entries(hitsRow.odds)) {
+        if (cell) full.odds[colId] = cell;
+      }
+      return full;
+    });
+
+    return {
+      ok: true,
+      data: { ...result, tableRows, cacheStatus: "duckdb" },
+    };
+  } catch (e) {
+    console.error("[searchProfile] DuckDB path failed, falling back to Node RAM cache:", e);
+  }
+
+  // --- Fallback: eski global warm-cache yolu ---
   try {
     const { ensureArchiveCache } = await import("@/lib/events");
     const { quotes, byId, status } = await ensureArchiveCache({
@@ -230,7 +303,6 @@ export async function searchProfile(
       };
     }
 
-    // seasonSlugs verilmişse cache içinden daralt
     let pool = quotes;
     const seasons = query.seasonSlugs?.filter(Boolean) ?? [];
     if (seasons.length) {
@@ -239,14 +311,11 @@ export async function searchProfile(
     }
 
     const result = searchOddsProfile(pool, query);
-    const bm = Number(query.bookmakerId);
-    const preferredBm = Number.isFinite(bm) && bm > 0 ? bm : PREFERRED_BM;
     const tableRows: TableRow[] = result.matches.map((m) => {
       const event = byId.get(m.eventId);
       const hitsRow = profileMatchToTableRow(m);
       if (!event) return hitsRow;
       const full = getCachedEventTableRow(event, preferredBm);
-      // Arama isabetindeki O/C değerlerini yaz (slim arşivde BM başına tek satır)
       for (const [colId, cell] of Object.entries(hitsRow.odds)) {
         if (cell) full.odds[colId] = cell;
       }
@@ -257,7 +326,7 @@ export async function searchProfile(
       data: {
         ...result,
         tableRows,
-        cacheStatus: `${status.status} seasons=${status.seasonsDone}/${status.seasonsTotal} quotes=${status.quotes}`,
+        cacheStatus: `fallback:${status.status} seasons=${status.seasonsDone}/${status.seasonsTotal} quotes=${status.quotes}`,
       },
     };
   } catch (e) {
