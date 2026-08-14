@@ -62,6 +62,8 @@ export type ProfileResult = {
   truncated: boolean;
   tookMs: number;
   criteria: OddsCriterion[];
+  /** "Tüm sezonlar" araması, arşiv çok büyüdüğü için son N sezonla sınırlandıysa doldurulur. */
+  scannedSeasons?: { capped: boolean; count: number };
 };
 
 export function criterionLabel(c: OddsCriterion): string {
