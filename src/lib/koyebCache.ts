@@ -115,6 +115,38 @@ export async function fetchKoyebQuotesSeason(seasonSlug: string): Promise<{
   return { season: data.season, quotes: data.quotes || [] };
 }
 
+/**
+ * /events/season/{slug} — markets_json'suz hafif event meta (id, takımlar,
+ * skor, kickoff, competition/round). quotes_flat materialize adımında
+ * flat quotes satırlarını event'e bağlamak için kullanılır — markets_json
+ * hiç Node'a inmez.
+ */
+export type KoyebEventMeta = {
+  id: string;
+  source_event_id: string | null;
+  season_slug: string | null;
+  competition: string | null;
+  round: string | null;
+  home_team: string | null;
+  away_team: string | null;
+  kickoff_at: string | null;
+  home_score: number | string | null;
+  away_score: number | string | null;
+  home_ht_score: number | string | null;
+  away_ht_score: number | string | null;
+};
+
+export async function fetchKoyebEventsMetaSeason(seasonSlug: string): Promise<{
+  season: string;
+  events: KoyebEventMeta[];
+}> {
+  const data = await getJson<{ ok: boolean; season: string; events: KoyebEventMeta[] }>(
+    `/events/season/${encodeURIComponent(seasonSlug)}`,
+    45_000,
+  );
+  return { season: data.season, events: data.events || [] };
+}
+
 // ---------------- smart-match/report ----------------
 
 export type SmartMatchReportFixtureInput = {
