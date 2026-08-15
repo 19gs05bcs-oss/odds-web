@@ -357,6 +357,8 @@ export default function AnalyzeClient({
     seasonsTotal: number;
     quotes: number;
     error?: string;
+    source?: string;
+    duckdbError?: string;
   }>({
     status: "idle",
     seasonsDone: 0,
@@ -376,6 +378,8 @@ export default function AnalyzeClient({
           seasonsTotal?: number;
           quotes?: number;
           error?: string;
+          source?: string;
+          duckdbError?: string;
         };
         if (cancelled) return;
         setArchiveWarm({
@@ -384,6 +388,8 @@ export default function AnalyzeClient({
           seasonsTotal: j.seasonsTotal ?? 0,
           quotes: j.quotes ?? 0,
           error: j.error,
+          source: j.source,
+          duckdbError: j.duckdbError,
         });
         if (j.status === "ready" || j.status === "error") {
           if (timer) clearInterval(timer);
@@ -577,6 +583,7 @@ export default function AnalyzeClient({
               title={archiveWarm.error || undefined}
             >
               archive {archiveLabel}
+              {archiveWarm.source === "ram-fallback" ? " (ram-fallback: duckdb devre dışı)" : ""}
             </span>
             {(criteria.length > 0 || result) && (
               <button type="button" className={styles.linkBtn} onClick={clearAll}>
@@ -588,6 +595,11 @@ export default function AnalyzeClient({
           {oddsLoading && (
             <p className={styles.stripHint}>
               Loading odds… {oddsChunksDone}/{oddsChunksTotal || "—"} chunks
+            </p>
+          )}
+          {archiveWarm.source === "ram-fallback" && archiveWarm.duckdbError && (
+            <p className={styles.stripHint} style={{ color: "#b45309" }}>
+              DuckDB devre dışı, Postgres fallback kullanılıyor. Sebep: {archiveWarm.duckdbError}
             </p>
           )}
           {archiveWarm.status === "error" && archiveWarm.error && (
