@@ -574,6 +574,7 @@ export default function AnalyzeClient({
 
             <span
               className={`${styles.statusPill} ${archiveReady ? styles.statusOk : styles.statusPending}`}
+              title={archiveWarm.error || undefined}
             >
               archive {archiveLabel}
             </span>
@@ -587,6 +588,11 @@ export default function AnalyzeClient({
           {oddsLoading && (
             <p className={styles.stripHint}>
               Loading odds… {oddsChunksDone}/{oddsChunksTotal || "—"} chunks
+            </p>
+          )}
+          {archiveWarm.status === "error" && archiveWarm.error && (
+            <p className={styles.stripHint} style={{ color: "#b91c1c" }}>
+              Archive build failed: {archiveWarm.error}
             </p>
           )}
         </div>
