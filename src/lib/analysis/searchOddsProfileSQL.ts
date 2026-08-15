@@ -19,7 +19,8 @@
  * davranış eskisiyle bit-bit aynı kalır.
  */
 import { getDuckDbConnection } from "@/lib/duckdb";
-import { buildQuoteCandidateCte, EVENT_META_SELECT } from "./duckdbQuotes";
+import { buildFlatQuoteCandidateCte, EVENT_META_SELECT } from "./duckdbQuotes";
+import { ensureQuotesTable, QUOTES_FLAT_TABLE } from "./duckdbMaterialize";
 import { prettySideName } from "./labels";
 import {
   quoteMatchesCriterion,
@@ -61,47 +62,6 @@ async function loadBookmakerNames(): Promise<Map<string, string>> {
   return map;
 }
 
-/**
- * "seasonSlugs boş = tüm sezonlar" (bkz. profile.ts) — arşiv 24 sezonken
- * bu makuldü. 283+ sezonda DuckDB'nin postgres_scanner'ı her event'in TÜM
- * markets_json'ını ağ üzerinden çekip yerelde unnest etmek zorunda kalıyor;
- * bu artık dakikalarca sürüp Railway gateway timeout'una (502) çarpıyor.
- *
- * Bu yüzden açık sezon seçilmediğinde taramayı en güncel N sezonla
- * sınırlıyoruz — ANALYZE_DEFAULT_SEASON_SCAN_LIMIT ile ayarlanabilir.
- * Kalıcı çözüm (normalize edilmiş/indexli bir quotes tablosu) ayrı bir
- * şema projesi; bu sadece pratik bir sınır.
- */
-const DEFAULT_SEASON_SCAN_LIMIT = Number(process.env.ANALYZE_DEFAULT_SEASON_SCAN_LIMIT) || 60;
-
-let recentSeasonsCache: { at: number; ids: string[] } | null = null;
-const RECENT_SEASONS_TTL_MS = 5 * 60_000;
-
-async function resolveSeasonScope(
-  explicit: string[],
-): Promise<{ seasons: string[]; capped: boolean }> {
-  if (explicit.length) return { seasons: explicit, capped: false };
-
-  if (recentSeasonsCache && Date.now() - recentSeasonsCache.at < RECENT_SEASONS_TTL_MS) {
-    return { seasons: recentSeasonsCache.ids, capped: true };
-  }
-
-  try {
-    const rows = await sql.unsafe<{ id: string }[]>(
-      "SELECT id FROM seasons WHERE source = 'flashscore' ORDER BY season_label DESC LIMIT $1",
-      [DEFAULT_SEASON_SCAN_LIMIT],
-    );
-    const ids = rows.map((r) => r.id);
-    recentSeasonsCache = { at: Date.now(), ids };
-    return { seasons: ids, capped: true };
-  } catch (e) {
-    // seasons tablosu okunamazsa eski (sınırsız) davranışa düş — en azından
-    // özellik çalışmaya devam etsin; bu durumda 502 riski geri gelir.
-    console.error("[searchOddsProfileSQL] resolveSeasonScope failed, scanning unbounded:", e);
-    return { seasons: [], capped: false };
-  }
-}
-
 type SqlBuild = { text: string; params: unknown[] };
 
 function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
@@ -120,7 +80,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
 
   const ctes = criteria.map((c, i) => {
     const effTol = tol > 0 ? tol : 0.005;
-    return buildQuoteCandidateCte(
+    return buildFlatQuoteCandidateCte(
       `q${i}`,
       {
         marketType: c.marketType,
@@ -132,6 +92,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
         seasonSlugs: seasons,
       },
       push,
+      QUOTES_FLAT_TABLE,
     );
   });
 
@@ -194,12 +155,18 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     return { matches: [], totalMatched: 0, truncated: false, tookMs: 0, criteria };
   }
 
-  const scope = await resolveSeasonScope((query.seasonSlugs ?? []).filter(Boolean));
-  const scopedQuery: ProfileQuery = { ...query, seasonSlugs: scope.seasons };
+  const materializeStatus = await ensureQuotesTable();
+  if (materializeStatus.status !== "ready") {
+    throw new Error(
+      `quotes_flat tablosu hazır değil (status=${materializeStatus.status}${
+        materializeStatus.error ? `, error=${materializeStatus.error}` : ""
+      }) — DuckDB path henüz kullanılamıyor.`,
+    );
+  }
 
   // JS tarafında kesin doğrulamada bir kısmı elenecek — biraz fazla çek.
   const fetchLimit = Math.min(Math.max(limit * 4, 400), 3000);
-  const built = buildQuery(scopedQuery, fetchLimit);
+  const built = buildQuery(query, fetchLimit);
   if (!built) {
     return { matches: [], totalMatched: 0, truncated: false, tookMs: 0, criteria };
   }
@@ -313,6 +280,6 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     truncated,
     tookMs: Date.now() - t0,
     criteria,
-    scannedSeasons: { capped: scope.capped, count: scope.seasons.length },
+    scannedSeasons: { capped: true, count: materializeStatus.seasons },
   };
 }
