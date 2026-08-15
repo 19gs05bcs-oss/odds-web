@@ -57,16 +57,18 @@ function isMissingHtColumn(err: unknown): boolean {
   return /home_ht_score|away_ht_score|42703/i.test(message);
 }
 
+// fixtures.ts icindeki fetchSeasonsUncached'i BUNUNLA degistir:
+// (listSeasons = unstable_cache(fetchSeasonsUncached, ...) satiri AYNEN kalir)
+
 async function fetchSeasonsUncached(): Promise<FetchResult<SeasonRow[]>> {
   try {
-    const query = `
-      SELECT id,source,competition,season_label,template_id,season_code,match_count,bookmaker_count,updated_at 
-      FROM seasons 
-      WHERE source = 'flashscore' 
-      ORDER BY season_label DESC
-    `;
-    const data = await sql.unsafe<SeasonRow[]>(query);
-    return { ok: true, data };
+    const { fetchKoyebSeasonsMeta } = await import("@/lib/koyebCache");
+    const seasons = await fetchKoyebSeasonsMeta();
+    // KoyebSeasonMeta ile SeasonRow ayni alan adlarini kullaniyor —
+    // dogrudan atanabilir. Bu artik hem Supabase'de canli takip edilen
+    // sezonlari HEM GitHub'daki 330 tarihsel sezonu birlikte dondurur
+    // (archive_cache_server.py._fetch_seasons_meta zaten ikisini birlestiriyor).
+    return { ok: true, data: seasons as unknown as SeasonRow[] };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
