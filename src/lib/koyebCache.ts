@@ -103,6 +103,22 @@ export async function fetchKoyebArchiveSeason(seasonSlug: string): Promise<{
   return { season: data.season, events: data.events || [] };
 }
 
+/** /archive/event/{id} — tekil event (markets_json dahil). Cache'te yoksa
+ * sunucu tek satir olarak REST'ten cekip doner (bkz. ArchiveCacheServer.get_event). */
+export async function fetchKoyebEvent(eventId: string): Promise<Record<string, unknown> | null> {
+  try {
+    const data = await getJson<{ ok: boolean; event?: Record<string, unknown>; error?: string }>(
+      `/archive/event/${encodeURIComponent(eventId)}`,
+      20_000,
+    );
+    return data.event ?? null;
+  } catch (err) {
+    // Sunucu 404'te "not found" hatasi doner — bunu exception degil, null olarak ele al.
+    if (err instanceof Error && /-> 404\b/.test(err.message)) return null;
+    throw err;
+  }
+}
+
 /** /quotes/season/{slug} — flat quotes (markets_json UNNEST gerekmez). */
 export async function fetchKoyebQuotesSeason(seasonSlug: string): Promise<{
   season: string;
