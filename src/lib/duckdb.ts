@@ -17,7 +17,7 @@
  * Supabase'de bunu "Session pooler" (5432/6543 session mode) ya da
  * doğrudan bağlantı stringiyle doldurun — Transaction pooler DEĞİL.
  */
-import type { DuckDBConnection } from "@duckdb/node-api";
+import type { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
 
 function resolveDuckDbDsn(): string {
   const dsn =
@@ -37,38 +37,89 @@ function sqlQuoteLiteral(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
 }
 
-async function createConnection(): Promise<DuckDBConnection> {
+async function createInstance(): Promise<DuckDBInstance> {
   const { DuckDBInstance } = await import("@duckdb/node-api");
   const instance = await DuckDBInstance.create(":memory:");
-  const conn = await instance.connect();
 
-  await conn.run("INSTALL postgres;");
-  await conn.run("LOAD postgres;");
-
+  // ATTACH, instance/catalog seviyesinde kalıcıdır — bir kez bootstrap
+  // connection'ıyla yapılır, sonrasında aynı instance'tan açılan TÜM
+  // connection'lar (interactive + materialize) "pg" şemasını görür.
+  const boot = await instance.connect();
+  await boot.run("INSTALL postgres;");
+  await boot.run("LOAD postgres;");
   const dsn = resolveDuckDbDsn();
-  await conn.run(
-    `ATTACH ${sqlQuoteLiteral(dsn)} AS pg (TYPE POSTGRES, READ_ONLY);`,
-  );
+  await boot.run(`ATTACH ${sqlQuoteLiteral(dsn)} AS pg (TYPE POSTGRES, READ_ONLY);`);
 
-  return conn;
+  return instance;
+}
+
+type InstanceBag = { promise: Promise<DuckDBInstance> | null };
+
+function instanceBag(): InstanceBag {
+  const g = globalThis as unknown as { __duckdbInstanceBag?: InstanceBag };
+  if (!g.__duckdbInstanceBag) {
+    g.__duckdbInstanceBag = { promise: null };
+  }
+  return g.__duckdbInstanceBag;
+}
+
+async function getDuckDbInstance(): Promise<DuckDBInstance> {
+  const bag = instanceBag();
+  if (!bag.promise) {
+    bag.promise = createInstance().catch((err) => {
+      bag.promise = null;
+      throw err;
+    });
+  }
+  return bag.promise;
 }
 
 type ConnBag = { promise: Promise<DuckDBConnection> | null };
 
-function globalBag(): ConnBag {
-  const g = globalThis as unknown as { __duckdbConnBag?: ConnBag };
-  if (!g.__duckdbConnBag) {
-    g.__duckdbConnBag = { promise: null };
+function connBag(key: "__duckdbInteractiveConnBag" | "__duckdbMaterializeConnBag"): ConnBag {
+  const g = globalThis as unknown as Record<string, ConnBag | undefined>;
+  if (!g[key]) {
+    g[key] = { promise: null };
   }
-  return g.__duckdbConnBag;
+  return g[key] as ConnBag;
 }
 
-/** Lazy singleton — ilk çağrıda ATTACH eder, sonrasında aynı connection reuse edilir. */
+/**
+ * "İnteraktif" bağlantı — kullanıcı isteklerini bekleten TÜM sorgular
+ * (analyzeSeasonSQL tek-sezon sorgusu, searchOddsProfileSQL'in quotes_flat
+ * üzerindeki hızlı WHERE'i, archive-table, warm'ın health-check'i) bunu
+ * kullanır. Ayrı bir materialize connection'ı olduğu için, arka planda
+ * süren uzun quotes_flat inşası bu bağlantıyı BLOKE ETMEZ.
+ */
 export async function getDuckDbConnection(): Promise<DuckDBConnection> {
-  const bag = globalBag();
+  const bag = connBag("__duckdbInteractiveConnBag");
   if (!bag.promise) {
-    bag.promise = createConnection().catch((err) => {
-      // Başarısız denemeyi cache'leme — bir sonraki istek yeniden dener.
+    bag.promise = (async () => {
+      const instance = await getDuckDbInstance();
+      return instance.connect();
+    })().catch((err) => {
+      bag.promise = null;
+      throw err;
+    });
+  }
+  return bag.promise;
+}
+
+/**
+ * Sadece duckdbMaterialize.ts'in uzun süren CREATE TABLE AS SELECT
+ * işi için — kasıtlı olarak getDuckDbConnection()'dan AYRI bir
+ * connection. Aynı instance'ı (dolayısıyla "pg" ATTACH'ını ve
+ * yazdığı quotes_flat tablosunu) paylaşır, ama sorgu kuyruğu farklıdır;
+ * bu sayede materialize çalışırken interactive sorgular (ve warm'ın
+ * kendi health-check'i) saniyelerce/dakikalarca bloklanmaz.
+ */
+export async function getDuckDbMaterializeConnection(): Promise<DuckDBConnection> {
+  const bag = connBag("__duckdbMaterializeConnBag");
+  if (!bag.promise) {
+    bag.promise = (async () => {
+      const instance = await getDuckDbInstance();
+      return instance.connect();
+    })().catch((err) => {
       bag.promise = null;
       throw err;
     });
