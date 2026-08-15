@@ -20,7 +20,7 @@
  * bir DuckDB dosyasına veya Postgres'te normalize edilmiş bir tabloya
  * taşımak — ayrı bir proje.
  */
-import { getDuckDbConnection } from "@/lib/duckdb";
+import { getDuckDbMaterializeConnection } from "@/lib/duckdb";
 import { sql } from "@/lib/db";
 
 const TABLE = "quotes_flat";
@@ -64,7 +64,7 @@ async function buildTable(): Promise<void> {
   b.status = { status: "loading", rows: 0, seasons: 0, startedAt: Date.now() };
   try {
     const seasons = await recentSeasonIds(DEFAULT_SEASON_SCAN_LIMIT);
-    const conn = await getDuckDbConnection();
+    const conn = await getDuckDbMaterializeConnection();
     const seasonCond = seasons.length
       ? `AND e.season_slug IN (${seasons.map(sqlQuoteLiteral).join(", ")})`
       : "";
