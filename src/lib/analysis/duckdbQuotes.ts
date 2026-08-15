@@ -156,6 +156,71 @@ export const EVENT_META_SELECT = `
   e.home_team, e.away_team, e.kickoff_at, e.home_score, e.away_score,
   e.home_ht_score, e.away_ht_score`;
 
+/**
+ * buildQuoteCandidateCte'nin materialize edilmiş `quotes_flat` tablosuna
+ * (bkz. duckdbMaterialize.ts) karşı çalışan hafif eşdeğeri — pg.events'e
+ * canlı UNNEST cross-join YAPMAZ, sadece hazır düz tabloda basit WHERE
+ * filtreler. Semantik olarak buildQuoteCandidateCte ile aynı davranışı
+ * hedefler (side prefix/OR eşleşmesi, slim satırlar bookmaker filtresinden
+ * muaf).
+ */
+export function buildFlatQuoteCandidateCte(
+  alias: string,
+  opts: QuoteCandidateOpts,
+  push: SqlParamPusher,
+  tableName: string,
+): string {
+  const { exact, prefixes } = sideCandidates(opts.side);
+  const sideExactPh = exact.map((v) => push(v));
+  const sideConds = [`side IN (${sideExactPh.join(", ")})`];
+  for (const p of prefixes) {
+    const ph = push(p);
+    const phPrefix = push(`${p}:%`);
+    sideConds.push(`side = ${ph}`);
+    sideConds.push(`side LIKE ${phPrefix}`);
+  }
+  const sideCond = `(${sideConds.join(" OR ")})`;
+
+  const [lo, hi] = opts.oddsRange;
+  const loPh = push(lo);
+  const hiPh = push(hi);
+
+  const typePh = push(opts.marketType);
+  const scopePh = push(opts.marketScope || "FULL_TIME");
+
+  // Nested (bookmaker_id dolu) satırlar bm filtresine tabi; slim (bookmaker_id
+  // NULL) satırlar eskisi gibi over-inclusive kalır — bkz. buildQuoteCandidateCte.
+  const bmCond = opts.bookmakerId
+    ? `AND (bookmaker_id IS NULL OR bookmaker_id = ${push(String(opts.bookmakerId))})`
+    : "";
+
+  const seasons = (opts.seasonSlugs ?? []).filter(Boolean);
+  let seasonCond = "";
+  if (seasons.length) {
+    const phs = seasons.map((s) => push(s));
+    seasonCond = `AND season_slug IN (${phs.join(", ")})`;
+  }
+
+  const oddsCond =
+    opts.price === "opening"
+      ? `opening BETWEEN ${loPh} AND ${hiPh}`
+      : opts.price === "closing"
+        ? `closing BETWEEN ${loPh} AND ${hiPh}`
+        : `(closing BETWEEN ${loPh} AND ${hiPh} OR opening BETWEEN ${loPh} AND ${hiPh})`;
+
+  return `
+    ${alias} AS (
+      SELECT event_id, bookmaker_id, side, opening, closing AS current
+      FROM ${tableName}
+      WHERE market_type = ${typePh}
+        AND market_scope = ${scopePh}
+        AND ${sideCond}
+        AND ${oddsCond}
+        ${bmCond}
+        ${seasonCond}
+    )`;
+}
+
 export type SeasonQuotesFilters = {
   seasonSlug: string;
   marketType?: string | null;
