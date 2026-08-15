@@ -44,31 +44,14 @@ export async function listOpenEvents(limit = 80): Promise<FetchResult<OddsEvent[
   }
 }
 
+// archive.ts icindeki getEventById'i BUNUNLA degistir:
+
 export async function getEventById(id: string): Promise<FetchResult<OddsEvent | null>> {
   try {
-    const query = `
-      SELECT id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_json,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,home_ht_score,away_ht_score,season_slug,home_team_id,away_team_id 
-      FROM events 
-      WHERE id = $1 
-      LIMIT 1
-    `;
-    const data = await sql.unsafe<OddsEvent[]>(query, [id]);
-    return { ok: true, data: data[0] ?? null };
+    const { fetchKoyebEvent } = await import("@/lib/koyebCache");
+    const event = await fetchKoyebEvent(id);
+    return { ok: true, data: (event as unknown as OddsEvent) ?? null };
   } catch (error) {
-    if (isMissingHtColumn(error)) {
-      try {
-        const retryQuery = `
-          SELECT id,source,source_event_id,sport,competition,home_team,away_team,kickoff_at,status,is_closed,markets_json,markets_hash,odds_updated_at,opening_captured_at,closing_captured_at,created_at,updated_at,round,home_score,away_score,season_slug,home_team_id,away_team_id 
-          FROM events 
-          WHERE id = $1 
-          LIMIT 1
-        `;
-        const retryData = await sql.unsafe<OddsEvent[]>(retryQuery, [id]);
-        return { ok: true, data: retryData[0] ?? null };
-      } catch (retryError) {
-        return { ok: false, error: retryError instanceof Error ? retryError.message : String(retryError) };
-      }
-    }
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
