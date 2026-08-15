@@ -37,7 +37,12 @@ export async function GET(req: Request) {
       duckdb.error,
     );
     startArchiveWarm(maxSeasons);
-    return NextResponse.json({ ok: true, source: "ram-fallback", ...getWarmStatus() });
+    return NextResponse.json({
+      ok: true,
+      source: "ram-fallback",
+      duckdbError: duckdb.error,
+      ...getWarmStatus(),
+    });
   }
 
   // Materialize'ı tetikle (idempotent — zaten yükleniyor/taze ise no-op).
