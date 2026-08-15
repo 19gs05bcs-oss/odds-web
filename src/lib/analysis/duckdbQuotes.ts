@@ -1,4 +1,11 @@
 /**
+ * ⚠️ DEPRECATED — ARTIK KULLANILMIYOR (bkz. src/lib/analysis/marketQuoteCriteria.ts
+ * ve src/lib/analysis/marketQuotes.ts, bu dosyanın Postgres/match_odds karşılığı).
+ * Hiçbir yerden import edilmiyor — silinmedi, referans olsun diye bırakıldı.
+ * Güvenle silinebilir.
+ */
+
+/**
  * quotes_flat (bkz. duckdbMaterialize.ts — Koyeb'den NDJSON stream edilip
  * DuckDB'ye toplu yüklenmiş düz tablo) üzerinde çalışan SQL builder'lar.
  *

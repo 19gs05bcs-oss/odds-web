@@ -1,21 +1,21 @@
 /**
- * searchOddsProfile'ın DuckDB tabanlı eşdeğeri.
+ * searchOddsProfile'ın Postgres tabanlı eşdeğeri.
  *
- * Artık Postgres'e hiç dokunmuyor: quotes_flat (bkz. duckdbMaterialize.ts),
- * Koyeb worker'ın flat `/quotes/season` + hafif `/events/season`
- * endpoint'lerinden NDJSON stream edilip DuckDB'ye toplu yüklenmiş yerel
- * bir tablo. Bu dosya, her kriter için quotes_flat'e basit bir WHERE atıp
- * (bkz. duckdbQuotes.ts → buildFlatQuoteCandidateCte) event_id üzerinden
- * JOIN ediyor — "N kriterin AND'i" işini DuckDB'nin vectorized
- * execution'ına devrediyor, Node RAM'inde hiçbir şey tutmuyor.
+ * ESKİSİ: DuckDB'nin quotes_flat (Koyeb'den NDJSON stream edilip
+ * materialize edilmiş) tablosuna karşı çalışıyordu.
+ *
+ * ŞİMDİ: doğrudan `match_odds` tablosuna (bkz. marketQuotes.ts,
+ * marketQuoteCriteria.ts) sql.unsafe ile basit bir WHERE atıp
+ * (buildQuoteCandidateCte) event_id üzerinden JOIN ediyor — "N kriterin
+ * AND'i" işini Postgres'in kendi execution planına devrediyoruz, Node
+ * RAM'inde büyük bir ara küme tutmuyoruz. DuckDB/Koyeb'e hiç dokunmuyor.
  *
  * SQL filtresi kasıtlı olarak biraz gevşek (side için prefix/OR eşleşmesi) —
  * sonuç seti (yüzlerce satır) üzerinde profile.ts'teki BİREBİR AYNI
  * `quoteMatchesCriterion` fonksiyonu ile kesin doğrulama yapılıyor.
  */
-import { getDuckDbConnection } from "@/lib/duckdb";
-import { buildFlatQuoteCandidateCte, FLAT_EVENT_META_SELECT } from "./duckdbQuotes";
-import { ensureQuotesTable, QUOTES_FLAT_TABLE } from "./duckdbMaterialize";
+import { MATCH_ODDS_EVENT_META_SELECT, MATCH_ODDS_TABLE } from "./marketQuotes";
+import { buildQuoteCandidateCte, runCriteriaQuery } from "./marketQuoteCriteria";
 import { loadBookmakerNames } from "./bookmakerNames";
 import { prettySideName } from "./labels";
 import {
@@ -28,7 +28,7 @@ import {
 } from "./profile";
 import type { Quote } from "./types";
 
-type DuckRow = Record<string, unknown>;
+type SqlRow = Record<string, unknown>;
 
 type SqlBuild = { text: string; params: unknown[] };
 
@@ -48,7 +48,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
 
   const ctes = criteria.map((c, i) => {
     const effTol = tol > 0 ? tol : 0.005;
-    return buildFlatQuoteCandidateCte(
+    return buildQuoteCandidateCte(
       `q${i}`,
       {
         marketType: c.marketType,
@@ -60,7 +60,6 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
         seasonSlugs: seasons,
       },
       push,
-      QUOTES_FLAT_TABLE,
     );
   });
 
@@ -76,10 +75,14 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
     .map((_, idx) => `JOIN q${idx + 1} ON q${idx + 1}.event_id = q0.event_id`)
     .join("\n      ");
 
-  let seasonCond = "";
+  const outerJoinCols = criteria
+    .map((_, i) => `j.c${i}_side, j.c${i}_opening, j.c${i}_closing, j.c${i}_bookmaker_id`)
+    .join(",\n      ");
+
+  let seasonWhere = "";
   if (seasons.length) {
     const phs = seasons.map((s) => push(s));
-    seasonCond = `AND e.season_slug IN (${phs.join(", ")})`;
+    seasonWhere = `WHERE season_slug IN (${phs.join(", ")})`;
   }
 
   const limitPh = push(fetchLimit);
@@ -93,13 +96,15 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
       ${joins}
     )
     SELECT
-      e.*,
-      j.* EXCLUDE (event_id)
+      e.event_id, e.source_event_id, e.competition, e.season_slug, e.round,
+      e.home_team, e.away_team, e.kickoff_at, e.home_score, e.away_score,
+      e.home_ht_score, e.away_ht_score,
+      ${outerJoinCols}
     FROM joined j
     JOIN (
-      SELECT DISTINCT ${FLAT_EVENT_META_SELECT}
-      FROM ${QUOTES_FLAT_TABLE} e
-      ${seasonCond ? seasonCond.replace(/^AND /, "WHERE ") : ""}
+      SELECT DISTINCT ${MATCH_ODDS_EVENT_META_SELECT}
+      FROM ${MATCH_ODDS_TABLE}
+      ${seasonWhere}
     ) e ON e.event_id = j.event_id
     LIMIT ${limitPh}
   `;
@@ -113,7 +118,7 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** DuckDB (Postgres attach) üzerinden çok kriterli profile araması. */
+/** Postgres (match_odds) üzerinden çok kriterli profile araması. */
 export async function searchOddsProfileSQL(query: ProfileQuery): Promise<ProfileResult> {
   const t0 = Date.now();
   const criteria = query.criteria.filter((c) => c.targetOdds > 1);
@@ -125,15 +130,6 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     return { matches: [], totalMatched: 0, truncated: false, tookMs: 0, criteria };
   }
 
-  const materializeStatus = await ensureQuotesTable();
-  if (materializeStatus.status !== "ready") {
-    throw new Error(
-      `quotes_flat tablosu hazır değil (status=${materializeStatus.status}${
-        materializeStatus.error ? `, error=${materializeStatus.error}` : ""
-      }) — DuckDB path henüz kullanılamıyor.`,
-    );
-  }
-
   // JS tarafında kesin doğrulamada bir kısmı elenecek — biraz fazla çek.
   const fetchLimit = Math.min(Math.max(limit * 4, 400), 3000);
   const built = buildQuery(query, fetchLimit);
@@ -141,9 +137,7 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     return { matches: [], totalMatched: 0, truncated: false, tookMs: 0, criteria };
   }
 
-  const conn = await getDuckDbConnection();
-  const reader = await conn.runAndReadAll(built.text, built.params as never[]);
-  const rows = reader.getRowObjectsJS() as DuckRow[];
+  const rows = await runCriteriaQuery<SqlRow>(built.text, built.params);
   const bmNames = await loadBookmakerNames();
 
   const matches: ProfileMatch[] = [];
@@ -250,6 +244,5 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     truncated,
     tookMs: Date.now() - t0,
     criteria,
-    scannedSeasons: { capped: true, count: materializeStatus.seasons },
   };
 }

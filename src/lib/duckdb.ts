@@ -1,3 +1,5 @@
+// ⚠️ DEPRECATED — ARTIK KULLANILMIYOR. Sadece deprecated duckdbMaterialize.ts
+// tarafından import ediliyor; o da hiçbir yerden çağrılmıyor. Güvenle silinebilir.
 /**
  * DuckDB connection singleton.
  *

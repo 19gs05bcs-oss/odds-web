@@ -1,4 +1,12 @@
 /**
+ * ⚠️ DEPRECATED — ARTIK KULLANILMIYOR (bkz. src/lib/analysis/marketQuotes.ts).
+ * analyzeSeasonSQL.ts ve searchOddsProfileSQL.ts artık DuckDB/Koyeb'e hiç
+ * dokunmuyor, doğrudan Postgres'teki `match_odds` tablosuna sorgu atıyor.
+ * Bu dosya hiçbir yerden import edilmiyor — silinmedi, referans olsun diye
+ * bırakıldı. Güvenle silinebilir.
+ */
+
+/**
  * "quotes_flat" — DuckDB'nin kendi yerel tablosunda materialize edilmiş,
  * flat quote satırları (market × selection × bookmaker, event meta dahil).
  *

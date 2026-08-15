@@ -3,6 +3,7 @@
 import type { MarketColumnDef, MetaField, TableColumnDef } from "@/lib/analysis/tableColumns";
 import { ALL_COLUMNS, criterionMatchesColumn } from "@/lib/analysis/tableColumns";
 import type { OddsCriterion, ProfileMatch } from "@/lib/analysis/profile";
+import type { MatchOddsRow } from "@/lib/analysis/marketQuotes";
 import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
 import type { MarketsBlob, OddsEvent } from "@/lib/types";
 
@@ -942,4 +943,91 @@ export function filterTableRows(
     }
     return true;
   });
+}
+
+/* ------------------------------------------------------------------------ */
+/* match_odds (flat Postgres tablosu) satırlarından TableRow kurma          */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * match_odds satırlarını (event meta + quote alanları aynı satırda) oddsByColumn'un
+ * beklediği CompactOddsRow tuple'larına çevirir. events.markets_json'a hiç
+ * dokunmadan tam bookmaker grid'i kurmayı sağlar.
+ */
+export function marketQuoteRowsToCompactOdds(rows: MatchOddsRow[]): CompactOddsRow[] {
+  const out: CompactOddsRow[] = [];
+  for (const row of rows) {
+    const bm = Number(row.bookmaker_id);
+    if (!Number.isFinite(bm) || bm <= 0) continue;
+    const mtype = row.market_type || "UNKNOWN";
+    const scope = row.market_scope || "FULL_TIME";
+    const side = row.side;
+    if (!side) continue;
+    const opening = row.opening == null ? null : Number(row.opening);
+    const current = row.closing == null ? null : Number(row.closing);
+    if (opening == null && current == null) continue;
+    const active = row.active !== false && row.active !== "false" && row.active !== "False";
+    out.push([bm, mtype, scope, side, opening, current, active]);
+  }
+  return out;
+}
+
+/** match_odds satırının meta alanlarından (markets_json'suz) bir TableRow kurar. */
+export function eventMetaToTableRow(
+  meta: MatchOddsRow,
+  quoteRows: MatchOddsRow[],
+  bookmakerId: number = PREFERRED_BM,
+): TableRow {
+  const parts = kickoffParts(meta.kickoff_at);
+  const { lig, altLig } = splitLeague(meta.competition);
+  const { h, a } = parseScore(meta.home_score, meta.away_score);
+  const { h: htH, a: htA } = parseScore(meta.home_ht_score, meta.away_ht_score);
+  const odds = oddsByColumn(marketQuoteRowsToCompactOdds(quoteRows), { bookmakerId });
+  const settled = isMatchSettled(meta.kickoff_at, h, a);
+  const skorOut = h != null && a != null && (settled || h > 0 || a > 0) ? `${h}-${a}` : "";
+  const skor1yOut =
+    htH != null && htA != null && (settled || htH > 0 || htA > 0) ? `${htH}-${htA}` : "";
+  return {
+    id: String(meta.event_id ?? meta.source_event_id ?? ""),
+    source: "archive",
+    meta: {
+      ...parts,
+      kaynak: "archive",
+      lig: lig || meta.season_slug || "",
+      altLig,
+      ev: meta.home_team || "",
+      dep: meta.away_team || "",
+      skor1y: skor1yOut,
+      skor: skorOut,
+    },
+    odds,
+    outcome: outcomeForColumns(h, a, ALL_COLUMNS, meta.kickoff_at, htH, htA),
+    homeScore: h,
+    awayScore: a,
+  };
+}
+
+/**
+ * match_odds'tan gelen düz satırları event_id'ye göre grupla, her event için
+ * bir TableRow (tam bookmaker grid'i) üret. searchProfile'ın eşleşen
+ * event_id'ler için events.markets_json'a dönüp full grid çekmesine gerek
+ * bırakmaz — match_odds zaten aynı veriyi flat taşıyor.
+ */
+export function eventsMetaAndQuotesToTableRows(
+  rows: MatchOddsRow[],
+  bookmakerId: number = PREFERRED_BM,
+): Map<string, TableRow> {
+  const byEvent = new Map<string, MatchOddsRow[]>();
+  for (const row of rows) {
+    const id = String(row.event_id ?? "");
+    if (!id) continue;
+    const arr = byEvent.get(id);
+    if (arr) arr.push(row);
+    else byEvent.set(id, [row]);
+  }
+  const out = new Map<string, TableRow>();
+  for (const [id, quoteRows] of byEvent) {
+    out.set(id, eventMetaToTableRow(quoteRows[0], quoteRows, bookmakerId));
+  }
+  return out;
 }

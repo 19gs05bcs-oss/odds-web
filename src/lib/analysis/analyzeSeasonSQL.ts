@@ -1,12 +1,21 @@
-import { getDuckDbConnection } from "@/lib/duckdb";
-import { buildFlatSeasonQuotesSql, type SeasonQuotesFilters } from "./duckdbQuotes";
-import { ensureQuotesTable, QUOTES_FLAT_TABLE } from "./duckdbMaterialize";
+/**
+ * analyzeSeason'ın match_odds'tan (bkz. marketQuotes.ts) beslenen versiyonu.
+ * market/scope/bookmaker/odds aralığıyla önceden daraltılmış satırları
+ * Postgres'ten çeker — DuckDB/Koyeb'e hiç dokunmaz, markets_json'ı hiç
+ * görmez. Dönen Quote[] üzerinde analyze.ts'teki analyzeQuotes (de-vig,
+ * drift, edge) DEĞİŞMEDEN çalışır — o da zaten quoteMatchesFilters ile
+ * kesin filtreyi tekrar uygular.
+ *
+ * NOT: match_odds, market_key/market_name/side_name_raw gibi kolonları
+ * (bunlar markets_json'daki serbest metin isimlerdi) taşımıyor —
+ * marketKey/marketName/line/sideName burada marketType+marketScope+side'dan
+ * (labels.ts/normalize.ts'teki AYNI fonksiyonlarla) türetiliyor.
+ */
+import { fetchSeasonQuoteRows, HARD_ROW_CAP, type MatchOddsRow, type SeasonQuotesFilters } from "./marketQuotes";
 import { loadBookmakerNames } from "./bookmakerNames";
 import { prettySideName } from "./labels";
 import { resolveLine } from "./normalize";
 import type { FilterState, Quote } from "./types";
-
-type DuckRow = Record<string, unknown>;
 
 function num(v: unknown): number | null {
   if (v == null) return null;
@@ -18,43 +27,8 @@ function str(v: unknown): string | null {
   return v == null ? null : String(v);
 }
 
-/** Aşırı geniş/filtresiz istekte bile Node'a inen satır sayısını sınırlayan güvenlik supabı. */
-const HARD_ROW_CAP = 20_000;
-
-/**
- * analyzeSeason'ın DuckDB'den beslenen versiyonu. quotes_flat (bkz.
- * duckdbMaterialize.ts — Koyeb'in flat /quotes/season + hafif
- * /events/season endpoint'lerinden NDJSON stream edilip DuckDB'ye toplu
- * yüklenmiş tablo) üzerinden market/scope/bookmaker/odds aralığıyla önceden
- * daraltılmış satırları çeker — Postgres'e hiç dokunmaz, markets_json'ı
- * hiç görmez. Dönen Quote[] üzerinde analyze.ts'teki analyzeQuotes (de-vig,
- * drift, edge) DEĞİŞMEDEN çalışır — o da zaten quoteMatchesFilters ile
- * kesin filtreyi tekrar uygular.
- *
- * NOT: quotes_flat, market_key/market_name/side_name_raw gibi kolonları
- * (bunlar markets_json'daki serbest metin isimlerdi, flat `quotes`
- * tablosunda yok) taşımıyor — marketKey/marketName/line/sideName burada
- * marketType+marketScope+side'dan (labels.ts/normalize.ts'teki AYNI
- * fonksiyonlarla) türetiliyor.
- */
 export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]> {
   if (!filters.seasonSlug) return [];
-
-  const materializeStatus = await ensureQuotesTable();
-  if (materializeStatus.status !== "ready") {
-    throw new Error(
-      `quotes_flat tablosu hazır değil (status=${materializeStatus.status}${
-        materializeStatus.error ? `, error=${materializeStatus.error}` : ""
-      }).`,
-    );
-  }
-
-  const conn = await getDuckDbConnection();
-  const params: unknown[] = [];
-  const push = (v: unknown): string => {
-    params.push(v);
-    return `$${params.length}`;
-  };
 
   const seasonFilters: SeasonQuotesFilters = {
     seasonSlug: filters.seasonSlug,
@@ -69,12 +43,7 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
     dateTo: filters.dateTo,
   };
 
-  const body = buildFlatSeasonQuotesSql(seasonFilters, push, QUOTES_FLAT_TABLE);
-  const limitPh = push(HARD_ROW_CAP);
-  const text = `${body}\n    LIMIT ${limitPh}`;
-
-  const reader = await conn.runAndReadAll(text, params as never[]);
-  const rows = reader.getRowObjectsJS() as DuckRow[];
+  const rows: MatchOddsRow[] = await fetchSeasonQuoteRows(seasonFilters, HARD_ROW_CAP);
 
   if (rows.length >= HARD_ROW_CAP) {
     console.warn(
@@ -94,7 +63,7 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
     const closing = num(row.closing);
     if (opening == null && closing == null) continue;
 
-    // market_line yok (flat quotes tablosunda serbest metin market bilgisi
+    // market_line yok (match_odds tablosunda serbest metin market bilgisi
     // taşınmıyor) — line, side token'ından türetiliyor (örn. "OVER:2.5").
     const line = resolveLine(marketType, null, side);
     const sideName = prettySideName(side, null, marketType);

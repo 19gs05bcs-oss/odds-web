@@ -1,42 +1,18 @@
 import { unstable_cache } from "next/cache";
 import { analyzeQuotes } from "@/lib/analysis/analyze";
 import { parseFilterState } from "@/lib/analysis/filters";
-import { marketTypeLabel } from "@/lib/analysis/labels";
-import { normalizeMany } from "@/lib/analysis/normalize";
-import {
-  searchOddsProfile,
-  type ProfileQuery,
-  type ProfileResult,
-} from "@/lib/analysis/profile";
-import type { AnalyzeResult, FilterState, Quote } from "@/lib/analysis/types";
-import {
-  eventToTableRow,
-  profileMatchToTableRow,
-  PREFERRED_BM,
-  type TableRow,
-} from "@/lib/analysis/tableRows";
+import { eventsMetaAndQuotesToTableRows, profileMatchToTableRow, PREFERRED_BM, type TableRow } from "@/lib/analysis/tableRows";
+import { fetchQuoteRowsByEventIds, listDistinctBookmakerIds, listDistinctSeasonMarketTypes } from "@/lib/analysis/marketQuotes";
+import { loadBookmakerNames } from "@/lib/analysis/bookmakerNames";
+import type { ProfileQuery, ProfileResult } from "@/lib/analysis/profile";
+import type { AnalyzeResult, FilterState } from "@/lib/analysis/types";
 import type { FetchResult } from "@/lib/archive";
 import { sql } from "@/lib/db";
-import type { MarketsBlob, OddsEvent, SeasonRow, BookmakerOption } from "@/lib/types";
+import type { OddsEvent, SeasonRow, BookmakerOption } from "@/lib/types";
 
 export type MarketOption = { type: string; label: string };
 export type { BookmakerOption };
 export type { FixtureRow, CompactOddsRow } from "@/lib/archiveCache";
-
-/** Memoize event→table row (markets_json parse is expensive per search). */
-const eventRowCache = new Map<string, TableRow>();
-
-export function getCachedEventTableRow(
-  event: OddsEvent,
-  bookmakerId: number = PREFERRED_BM,
-): TableRow {
-  const key = `${event.id}:${bookmakerId}`;
-  const hit = eventRowCache.get(key);
-  if (hit) return hit;
-  const row = eventToTableRow(event, bookmakerId);
-  eventRowCache.set(key, row);
-  return row;
-}
 
 /** Avoid `arr.push(...huge)` — that throws Maximum call stack size exceeded. */
 function appendAll<T>(target: T[], items: readonly T[]): void {
@@ -79,40 +55,10 @@ export const listSeasons = unstable_cache(fetchSeasonsUncached, ["flashscore-sea
   tags: ["seasons"],
 });
 
-/** Distinct market types from events.markets_json sample. */
+/** Distinct market types for a season, read straight from match_odds. */
 export async function listSeasonMarkets(seasonSlug: string): Promise<MarketOption[]> {
   if (!seasonSlug) return [];
-
-  try {
-    const query = "SELECT markets_json FROM events WHERE source = 'flashscore' AND season_slug = $1 LIMIT 60";
-    const data = await sql.unsafe<{ markets_json: OddsEvent["markets_json"] }[]>(query, [seasonSlug]);
-    
-    const map = new Map<string, string>();
-    for (const row of data) {
-      let blob: MarketsBlob | null = null;
-      const raw = row.markets_json;
-      if (typeof raw === "string") {
-        try {
-          blob = JSON.parse(raw) as MarketsBlob;
-        } catch {
-          continue;
-        }
-      } else if (raw && typeof raw === "object") {
-        blob = raw as MarketsBlob;
-      }
-      for (const m of blob?.markets ?? []) {
-        const type = m.type || "UNKNOWN";
-        if (map.has(type)) continue;
-        map.set(type, marketTypeLabel(type, m.name));
-      }
-    }
-    return [...map.entries()]
-      .map(([type, label]) => ({ type, label }))
-      .sort((a, b) => a.label.localeCompare(b.label, "tr"));
-  } catch (err) {
-    console.error("listSeasonMarkets error:", err);
-    return [];
-  }
+  return listDistinctSeasonMarketTypes(seasonSlug);
 }
 
 export async function listEventMetaBySeason(
@@ -197,31 +143,19 @@ export async function loadSeasonEvents(seasonSlug: string): Promise<OddsEvent[]>
 }
 
 /**
- * Archive quotes from events.markets_json — DuckDB üzerinden, market/scope/
- * bookmaker/odds filtresiyle erken daraltılmış olarak çekilir (bkz.
- * analyzeSeasonSQL.ts). Eskisi gibi sezonun TÜM markets_json'ını Node'a
- * çekip normalizeMany ile parse etmiyoruz.
+ * Archive quotes — match_odds tablosundan, market/scope/bookmaker/odds
+ * filtresiyle erken daraltılmış olarak doğrudan Postgres'ten çekilir (bkz.
+ * analyzeSeasonSQL.ts). Sezonun TÜM markets_json'ını Node'a çekip
+ * normalizeMany ile parse etmiyoruz; DuckDB/Koyeb'e hiç dokunulmuyor.
  */
-async function loadQuotesForSeason(seasonSlug: string, filters: FilterState): Promise<Quote[]> {
-  const { loadSeasonQuotesSQL } = await import("@/lib/analysis/analyzeSeasonSQL");
-  try {
-    return await loadSeasonQuotesSQL({ ...filters, seasonSlug });
-  } catch (e) {
-    // DuckDB/Postgres attach başarısızsa (örn. DUCKDB_PG_DSN yok) eski
-    // Node-side yola düş — en azından özellik çalışmaya devam etsin.
-    console.error("[loadQuotesForSeason] DuckDB path failed, falling back to Node:", e);
-    const events = await loadSeasonEvents(seasonSlug);
-    return normalizeMany(events);
-  }
-}
-
 export async function analyzeSeason(filters: FilterState): Promise<FetchResult<AnalyzeResult>> {
   if (!filters.seasonSlug) {
     return { ok: false, error: "seasonSlug gerekli." };
   }
-  
+
   try {
-    const quotes = await loadQuotesForSeason(filters.seasonSlug, filters);
+    const { loadSeasonQuotesSQL } = await import("@/lib/analysis/analyzeSeasonSQL");
+    const quotes = await loadSeasonQuotesSQL({ ...filters, seasonSlug: filters.seasonSlug });
     const result = analyzeQuotes(quotes, filters);
     return { ok: true, data: result };
   } catch (e) {
@@ -237,11 +171,9 @@ export async function analyzeFromSearchParams(
 }
 
 /**
- * Stacked odds profile search — DuckDB üzerinden (events.markets_json'ı
- * doğrudan JSON-unnest ile sorgular, Node'da global bir "24 sezon RAM'de"
- * cache YOK artık). DuckDB/attach başarısız olursa eski warm-cache yoluna
- * düşer (feature çalışmaya devam etsin diye), ama bu yavaş/RAM-ağır yoldur —
- * DUCKDB_PG_DSN doğru kurulduysa asla tetiklenmemeli.
+ * Stacked odds profile search — doğrudan Postgres'in `match_odds` tablosuna
+ * karşı (bkz. searchOddsProfileSQL.ts). Node'da global bir "24 sezon RAM'de"
+ * cache YOK; DuckDB/Koyeb'e hiç dokunulmuyor.
  */
 export async function searchProfile(
   query: ProfileQuery,
@@ -267,15 +199,15 @@ export async function searchProfile(
     const { searchOddsProfileSQL } = await import("@/lib/analysis/searchOddsProfileSQL");
     const result = await searchOddsProfileSQL(query);
 
-    // Eşleşen event'lerin tam satırını (tüm bookmaker grid'i) TEK sorguda çekiyoruz —
-    // eskisi gibi 24 sezonun tamamını değil, sadece bu birkaç yüz maçı.
-    const byId = await fetchEventsWithMarketsByIds(result.matches.map((m) => m.eventId));
+    // Eşleşen event'lerin tüm bookmaker grid'ini TEK sorguda match_odds'tan
+    // çekiyoruz — events.markets_json'a hiç dokunmuyoruz.
+    const quoteRows = await fetchQuoteRowsByEventIds(result.matches.map((m) => m.eventId));
+    const fullRowsById = eventsMetaAndQuotesToTableRows(quoteRows, preferredBm);
 
     const tableRows: TableRow[] = result.matches.map((m) => {
-      const event = byId.get(m.eventId);
       const hitsRow = profileMatchToTableRow(m);
-      if (!event) return hitsRow;
-      const full = getCachedEventTableRow(event, preferredBm);
+      const full = fullRowsById.get(m.eventId);
+      if (!full) return hitsRow;
       for (const [colId, cell] of Object.entries(hitsRow.odds)) {
         if (cell) full.odds[colId] = cell;
       }
@@ -284,118 +216,22 @@ export async function searchProfile(
 
     return {
       ok: true,
-      data: { ...result, tableRows, cacheStatus: "duckdb" },
-    };
-  } catch (e) {
-    console.error("[searchProfile] DuckDB path failed, falling back to Node RAM cache:", e);
-  }
-
-  // --- Fallback: eski global warm-cache yolu ---
-  try {
-    const { ensureArchiveCache } = await import("@/lib/events");
-    const { quotes, byId, status } = await ensureArchiveCache({
-      maxSeasons: 24,
-      waitMs: 90_000,
-    });
-
-    if (!quotes.length) {
-      return {
-        ok: false,
-        error:
-          status.status === "loading"
-            ? "Archive still warming — try again in a few seconds."
-            : status.error ||
-              "No archive odds in cache. Refresh Analyze to start background load.",
-      };
-    }
-
-    let pool = quotes;
-    const seasons = query.seasonSlugs?.filter(Boolean) ?? [];
-    if (seasons.length) {
-      const set = new Set(seasons);
-      pool = quotes.filter((q) => q.seasonSlug && set.has(q.seasonSlug));
-    }
-
-    const result = searchOddsProfile(pool, query);
-    const tableRows: TableRow[] = result.matches.map((m) => {
-      const event = byId.get(m.eventId);
-      const hitsRow = profileMatchToTableRow(m);
-      if (!event) return hitsRow;
-      const full = getCachedEventTableRow(event, preferredBm);
-      for (const [colId, cell] of Object.entries(hitsRow.odds)) {
-        if (cell) full.odds[colId] = cell;
-      }
-      return full;
-    });
-    return {
-      ok: true,
-      data: {
-        ...result,
-        tableRows,
-        cacheStatus: `fallback:${status.status} seasons=${status.seasonsDone}/${status.seasonsTotal} quotes=${status.quotes}`,
-      },
+      data: { ...result, tableRows, cacheStatus: "postgres:match_odds" },
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
+/** Bookmaker id → isim listesi — match_odds'taki distinct id'ler, fixture.bookmakers'tan isimlendirilir. */
 export async function listBookmakers(seasonSlug?: string): Promise<BookmakerOption[]> {
-  const map = new Map<string, string>();
-
-  const absorbBlob = (raw: OddsEvent["markets_json"] | null | undefined) => {
-    let blob: MarketsBlob | null = null;
-    if (typeof raw === "string") {
-      try {
-        blob = JSON.parse(raw) as MarketsBlob;
-      } catch {
-        return;
-      }
-    } else if (raw && typeof raw === "object") {
-      blob = raw as MarketsBlob;
-    }
-    if (!blob) return;
-    if (blob.bookmakers && typeof blob.bookmakers === "object") {
-      for (const [id, name] of Object.entries(blob.bookmakers)) {
-        if (id && id !== "bookmakers" && !map.has(id)) map.set(id, name || id);
-      }
-    }
-    for (const m of blob.markets ?? []) {
-      for (const s of m.selections ?? []) {
-        const id = s.bookmaker_id != null ? String(s.bookmaker_id) : "";
-        if (!id || map.has(id)) continue;
-        map.set(id, s.bookmaker_name || id);
-      }
-    }
-  };
-
   try {
-    let query = "SELECT markets_json FROM events WHERE source = 'flashscore'";
-    const params: any[] = [];
-    if (seasonSlug) {
-      query += " AND season_slug = $1";
-      params.push(seasonSlug);
-    }
-    query += " LIMIT 80";
-    
-    const events = await sql.unsafe<{ markets_json: OddsEvent["markets_json"] }[]>(query, params);
-    for (const row of events) {
-      absorbBlob(row.markets_json);
-    }
-
-    const fixturesQuery = "SELECT bookmakers FROM fixture LIMIT 30";
-    const fixtures = await sql.unsafe<{ bookmakers: Record<string, string> | null }[]>(fixturesQuery);
-    
-    for (const row of fixtures) {
-      const bms = row.bookmakers;
-      if (!bms || typeof bms !== "object") continue;
-      for (const [id, name] of Object.entries(bms)) {
-        if (id && id !== "bookmakers" && !map.has(id)) map.set(id, String(name || id));
-      }
-    }
-
-    return [...map.entries()]
-      .map(([id, name]) => ({ id, name }))
+    const [ids, names] = await Promise.all([
+      listDistinctBookmakerIds(seasonSlug || null),
+      loadBookmakerNames(),
+    ]);
+    return ids
+      .map((id) => ({ id, name: names.get(id) || id }))
       .sort((a, b) => a.name.localeCompare(b.name, "en"));
   } catch (err) {
     console.error("listBookmakers error:", err);
