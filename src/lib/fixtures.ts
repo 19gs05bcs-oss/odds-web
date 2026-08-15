@@ -188,8 +188,12 @@ async function fetchEventsWithMarketsByIds(eventIds: string[]): Promise<Map<stri
 }
 
 /** Full markets_json seasons exceed Next 2MB data-cache limit — do not unstable_cache. */
+// fixtures.ts icindeki loadSeasonEvents'i BUNUNLA degistir:
+
 export async function loadSeasonEvents(seasonSlug: string): Promise<OddsEvent[]> {
-  return fetchEventsWithMarkets(seasonSlug);
+  const { fetchKoyebArchiveSeason } = await import("@/lib/koyebCache");
+  const { events } = await fetchKoyebArchiveSeason(seasonSlug);
+  return events as unknown as OddsEvent[];
 }
 
 /**
