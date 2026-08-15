@@ -1,26 +1,22 @@
 /**
  * searchOddsProfile'ın DuckDB tabanlı eşdeğeri.
  *
- * Eskisi (profile.ts + events.ts ensureArchiveCache): 24 sezonun TÜM
- * markets_json'ı Node process belleğine parse edilip diziye çevriliyor,
- * her arama bu dizide Array.filter ile geziniyordu — ve bu dizi
- * globalThis'te KALICI olarak duruyordu (RAM'in asıl kaynağı).
- *
- * Bu dosya: her kriter için events.markets_json'ı DuckDB JSON
- * fonksiyonlarıyla (json_extract/json_keys/UNNEST) doğrudan quote
- * satırlarına açıp (bkz. duckdbQuotes.ts) event_id üzerinden JOIN ediyor —
- * yani "N kriterin AND'i" işini DuckDB'nin vectorized execution'ına
- * devrediyor, Node RAM'inde hiçbir şey tutmuyor. Şema değişikliği YOK —
- * hâlâ events.markets_json okunuyor, ayrı bir quotes tablosu gerekmiyor.
+ * Artık Postgres'e hiç dokunmuyor: quotes_flat (bkz. duckdbMaterialize.ts),
+ * Koyeb worker'ın flat `/quotes/season` + hafif `/events/season`
+ * endpoint'lerinden NDJSON stream edilip DuckDB'ye toplu yüklenmiş yerel
+ * bir tablo. Bu dosya, her kriter için quotes_flat'e basit bir WHERE atıp
+ * (bkz. duckdbQuotes.ts → buildFlatQuoteCandidateCte) event_id üzerinden
+ * JOIN ediyor — "N kriterin AND'i" işini DuckDB'nin vectorized
+ * execution'ına devrediyor, Node RAM'inde hiçbir şey tutmuyor.
  *
  * SQL filtresi kasıtlı olarak biraz gevşek (side için prefix/OR eşleşmesi) —
  * sonuç seti (yüzlerce satır) üzerinde profile.ts'teki BİREBİR AYNI
- * `quoteMatchesCriterion` fonksiyonu ile kesin doğrulama yapılıyor. Böylece
- * davranış eskisiyle bit-bit aynı kalır.
+ * `quoteMatchesCriterion` fonksiyonu ile kesin doğrulama yapılıyor.
  */
 import { getDuckDbConnection } from "@/lib/duckdb";
-import { buildFlatQuoteCandidateCte, EVENT_META_SELECT } from "./duckdbQuotes";
+import { buildFlatQuoteCandidateCte, FLAT_EVENT_META_SELECT } from "./duckdbQuotes";
 import { ensureQuotesTable, QUOTES_FLAT_TABLE } from "./duckdbMaterialize";
+import { loadBookmakerNames } from "./bookmakerNames";
 import { prettySideName } from "./labels";
 import {
   quoteMatchesCriterion,
@@ -31,36 +27,8 @@ import {
   type CriterionHit,
 } from "./profile";
 import type { Quote } from "./types";
-import { sql } from "@/lib/db";
 
 type DuckRow = Record<string, unknown>;
-
-let bmNamesCache: { at: number; map: Map<string, string> } | null = null;
-const BM_NAMES_TTL_MS = 10 * 60_000;
-
-/** listBookmakers'daki mantığın küçük bir kopyası — fixtures.ts'e circular import olmasın diye. */
-async function loadBookmakerNames(): Promise<Map<string, string>> {
-  if (bmNamesCache && Date.now() - bmNamesCache.at < BM_NAMES_TTL_MS) {
-    return bmNamesCache.map;
-  }
-  const map = new Map<string, string>();
-  try {
-    const rows = await sql.unsafe<{ bookmakers: Record<string, string> | null }[]>(
-      "SELECT bookmakers FROM fixture WHERE bookmakers IS NOT NULL LIMIT 30",
-    );
-    for (const row of rows) {
-      const bms = row.bookmakers;
-      if (!bms || typeof bms !== "object") continue;
-      for (const [id, name] of Object.entries(bms)) {
-        if (id && !map.has(id)) map.set(id, String(name || id));
-      }
-    }
-  } catch {
-    // isim çözemezsek id'yi gösteririz — kritik değil
-  }
-  bmNamesCache = { at: Date.now(), map };
-  return map;
-}
 
 type SqlBuild = { text: string; params: unknown[] };
 
@@ -125,12 +93,14 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
       ${joins}
     )
     SELECT
-      ${EVENT_META_SELECT},
+      e.*,
       j.* EXCLUDE (event_id)
     FROM joined j
-    JOIN pg.events e ON e.id = j.event_id
-    WHERE e.source = 'flashscore'
-      ${seasonCond}
+    JOIN (
+      SELECT DISTINCT ${FLAT_EVENT_META_SELECT}
+      FROM ${QUOTES_FLAT_TABLE} e
+      ${seasonCond ? seasonCond.replace(/^AND /, "WHERE ") : ""}
+    ) e ON e.event_id = j.event_id
     LIMIT ${limitPh}
   `;
 

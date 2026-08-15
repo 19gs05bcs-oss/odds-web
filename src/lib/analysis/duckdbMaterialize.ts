@@ -1,37 +1,34 @@
 /**
- * "quotes_flat" — DuckDB'nin kendi yerel (in-memory) tablosunda materialize
- * edilmiş, events.markets_json'ın açılmış (market × selection × bookmaker)
- * hâli.
+ * "quotes_flat" — DuckDB'nin kendi yerel tablosunda materialize edilmiş,
+ * flat quote satırları (market × selection × bookmaker, event meta dahil).
  *
- * NEDEN: searchOddsProfileSQL.ts eskiden her arama isteğinde `pg.events`
- * tablosuna canlı bağlanıp JSON-unnest cross-join yapıyordu. Arşiv 24
- * sezondan 283+ sezona çıkınca, sadece taranan sezon sayısını (60'a)
- * sınırlamak yetmedi — asıl maliyet "kaç sezon" değil, HER istekte bu ağır
- * unnest işleminin SIFIRDAN tekrar edilmesiydi (tek kriterli arama bile
- * 30+ saniye sürüp Railway gateway timeout'una (502) çarpıyordu).
+ * ESKİSİ (bir önceki iterasyon): DuckDB canlı `pg.events`'e ATTACH olup
+ * markets_json'ı UNNEST ediyordu — tam da OOM'a yol açan işlemin kendisiydi,
+ * sadece :memory: yerine disk-backed yapılarak yumuşatılmıştı.
  *
- * Bu dosya, unnest işini periyodik olarak (TTL ile) BİR KEZ yapıp sonucu
- * DuckDB'nin kendi yerel tablosuna yazıyor. Arama istekleri artık bu hazır
- * tabloya basit indexli WHERE sorgusu atıyor — milisaniyeler sürer.
- *
- * Trade-off: bu hâlâ "son N sezon" ile sınırlı (ANALYZE_DEFAULT_SEASON_SCAN_LIMIT) —
- * tüm 283 sezonu materialize etmek DuckDB'nin :memory: instance'ında çok
- * daha fazla RAM ister. Gerçek uzun vadeli çözüm, bunu diske persist eden
- * bir DuckDB dosyasına veya Postgres'te normalize edilmiş bir tabloya
- * taşımak — ayrı bir proje.
+ * ŞİMDİ: Postgres'e hiç dokunmuyoruz. Koyeb worker'ın (archive_cache_server.py)
+ * zaten flat olan `/quotes/season/{slug}` (quotes tablosu — markets_json YOK)
+ * ve hafif `/events/season/{slug}` (event meta — markets_json YOK) HTTP
+ * endpoint'lerinden sezon sezon çekip, event_id üzerinden Node'da birleştirip
+ * NDJSON olarak DİSKE stream ediyoruz (tüm sezonları aynı anda RAM'de
+ * tutmadan — bir sezon bitince referansı bırakılır, GC edilir). Sonunda
+ * DuckDB'nin `read_json_auto`'su bu NDJSON dosyasını TEK SEFERDE tabloya
+ * yüklüyor. Node process RAM'inde hiçbir zaman "tüm sezonlar" aynı anda
+ * durmuyor — sadece o an işlenen tek sezonun satırları.
  */
 import { getDuckDbMaterializeConnection } from "@/lib/duckdb";
-import { sql } from "@/lib/db";
+import {
+  fetchKoyebSeasonsMeta,
+  fetchKoyebQuotesSeason,
+  fetchKoyebEventsMetaSeason,
+  type KoyebEventMeta,
+} from "@/lib/koyebCache";
 
 const TABLE = "quotes_flat";
 
-// quotes_flat, tek bir kriterle filtrelenmiş dar bir sonuç DEĞİL — o sezon
-// aralığındaki HER market/seçenek/bahisçi kombinasyonunu içeriyor. 60 sezonda
-// bu, süreci OOM'a (Killed) götürecek kadar büyüktü. Disk-backed DuckDB'ye
-// geçiş (bkz. duckdb.ts) bunu out-of-core yapılabilir kılıyor, ama yine de
-// daha güvenli/küçük bir varsayılanla başlayıp gerekirse yükseltiyoruz.
-const DEFAULT_SEASON_SCAN_LIMIT = Number(process.env.ANALYZE_DEFAULT_SEASON_SCAN_LIMIT) || 20;
+const DEFAULT_SEASON_SCAN_LIMIT = Number(process.env.ANALYZE_DEFAULT_SEASON_SCAN_LIMIT) || 60;
 const REFRESH_TTL_MS = Number(process.env.ANALYZE_QUOTES_REFRESH_TTL_MS) || 15 * 60_000;
+const STAGE_PATH = process.env.DUCKDB_STAGE_PATH || "/tmp/oddsvig-duckdb/quotes_stage.ndjson";
 
 export type MaterializeStatus = {
   status: "idle" | "loading" | "ready" | "error";
@@ -52,88 +49,150 @@ function bag(): Bag {
   return g.__quotesFlatBag;
 }
 
-async function recentSeasonIds(limit: number): Promise<string[]> {
-  const rows = await sql.unsafe<{ id: string }[]>(
-    "SELECT id FROM seasons WHERE source = 'flashscore' ORDER BY season_label DESC LIMIT $1",
-    [limit],
+async function seasonSlugsToMaterialize(limit: number): Promise<string[]> {
+  const seasons = await fetchKoyebSeasonsMeta();
+  const sorted = [...seasons].sort((a, b) =>
+    String(b.season_label || "").localeCompare(String(a.season_label || "")),
   );
-  return rows.map((r) => r.id);
+  return sorted.slice(0, limit).map((s) => s.id);
 }
 
 function sqlQuoteLiteral(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
 }
 
+type FlatRow = {
+  event_id: string;
+  season_slug: string | null;
+  competition: string | null;
+  round: string | null;
+  home_team: string | null;
+  away_team: string | null;
+  kickoff_at: string | null;
+  home_score: number | string | null;
+  away_score: number | string | null;
+  home_ht_score: number | string | null;
+  away_ht_score: number | string | null;
+  source_event_id: string | null;
+  bookmaker_id: number | string | null;
+  market_type: string | null;
+  market_scope: string | null;
+  side: string | null;
+  opening: number | null;
+  closing: number | null;
+  active: boolean | null;
+};
+
+function toFlatRow(
+  q: Record<string, unknown>,
+  meta: KoyebEventMeta | undefined,
+  seasonSlug: string,
+): FlatRow | null {
+  const eventId = q.event_id != null ? String(q.event_id) : null;
+  if (!eventId) return null;
+  return {
+    event_id: eventId,
+    season_slug: (meta?.season_slug as string) ?? seasonSlug,
+    competition: meta?.competition ?? null,
+    round: meta?.round ?? null,
+    home_team: meta?.home_team ?? null,
+    away_team: meta?.away_team ?? null,
+    kickoff_at: meta?.kickoff_at ?? ((q.kickoff_at as string) ?? null),
+    home_score: meta?.home_score ?? null,
+    away_score: meta?.away_score ?? null,
+    home_ht_score: meta?.home_ht_score ?? null,
+    away_ht_score: meta?.away_ht_score ?? null,
+    source_event_id: meta?.source_event_id ?? null,
+    bookmaker_id: (q.bookmaker_id as number | string | null) ?? null,
+    market_type: (q.betting_type as string) ?? null,
+    market_scope: (q.betting_scope as string) ?? null,
+    side: (q.side as string) ?? null,
+    opening: q.opening == null ? null : Number(q.opening),
+    closing: q.current == null ? null : Number(q.current),
+    active: q.active == null ? null : Boolean(q.active),
+  };
+}
+
+async function writeSeasonToStage(
+  writeLine: (line: string) => Promise<void>,
+  seasonSlug: string,
+): Promise<number> {
+  const [quotesRes, metaRes] = await Promise.all([
+    fetchKoyebQuotesSeason(seasonSlug),
+    fetchKoyebEventsMetaSeason(seasonSlug),
+  ]);
+  const metaById = new Map(metaRes.events.map((e) => [String(e.id), e]));
+
+  let count = 0;
+  for (const q of quotesRes.quotes) {
+    const eventId = q.event_id != null ? String(q.event_id) : null;
+    const meta = eventId ? metaById.get(eventId) : undefined;
+    const row = toFlatRow(q, meta, seasonSlug);
+    if (!row) continue;
+    await writeLine(JSON.stringify(row));
+    count++;
+  }
+  // quotesRes/metaRes bu fonksiyon dönünce scope dışına çıkar — bir sonraki
+  // sezona geçmeden önce GC'ye uygun hale gelir, tüm sezonlar aynı anda
+  // RAM'de birikmez.
+  return count;
+}
+
 async function buildTable(): Promise<void> {
   const b = bag();
   b.status = { status: "loading", rows: 0, seasons: 0, startedAt: Date.now() };
   try {
-    const seasons = await recentSeasonIds(DEFAULT_SEASON_SCAN_LIMIT);
+    const { mkdirSync, rmSync, createWriteStream } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    mkdirSync(dirname(STAGE_PATH), { recursive: true });
+    rmSync(STAGE_PATH, { force: true });
+
+    const stream = createWriteStream(STAGE_PATH, { flags: "w" });
+    const writeLine = (line: string): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const ok = stream.write(line + "\n", (err) => {
+          if (err) reject(err);
+        });
+        if (ok) resolve();
+        else stream.once("drain", resolve);
+      });
+
+    const seasons = await seasonSlugsToMaterialize(DEFAULT_SEASON_SCAN_LIMIT);
+    let totalRows = 0;
+    let seasonsOk = 0;
+    for (const slug of seasons) {
+      try {
+        totalRows += await writeSeasonToStage(writeLine, slug);
+        seasonsOk++;
+      } catch (e) {
+        // Tek sezonun Koyeb'den çekilmesi başarısız olsa bile diğer
+        // sezonlarla devam et — tüm materialize'ı iptal etme.
+        console.error(`[duckdbMaterialize] sezon ${slug} atlandı:`, e);
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      stream.end((err: unknown) => (err ? reject(err) : resolve()));
+    });
+
+    if (totalRows === 0) {
+      throw new Error(
+        "Koyeb'den hiç quote satırı gelmedi (KOYEB_CACHE_URL/CACHE_API_TOKEN doğru mu, Koyeb worker ayakta mı kontrol et).",
+      );
+    }
+
     const conn = await getDuckDbMaterializeConnection();
-    const seasonCond = seasons.length
-      ? `AND e.season_slug IN (${seasons.map(sqlQuoteLiteral).join(", ")})`
-      : "";
-
-    // Not: DDL/materialize adımı — kullanıcı girdisi burada YOK (season id'ler
-    // Postgres'ten geldi, prepared statement değil ama ATTACH gibi kendi
-    // içimizde üretilmiş literal'lar), analyzeSeasonSQL.ts'deki ATTACH ile
-    // aynı güvenlik modeli.
-    const createSql = `
-      CREATE OR REPLACE TABLE ${TABLE} AS
-      SELECT
-        e.id AS event_id, e.source_event_id, e.competition, e.season_slug, e.round,
-        e.home_team, e.away_team, e.kickoff_at, e.home_score, e.away_score,
-        e.home_ht_score, e.away_ht_score,
-        json_extract_string(m, '$.type') AS market_type,
-        COALESCE(json_extract_string(m, '$.scope'), 'FULL_TIME') AS market_scope,
-        json_extract_string(m, '$.key') AS market_key,
-        json_extract_string(m, '$.name') AS market_name,
-        json_extract_string(m, '$.line') AS market_line,
-        json_extract_string(s, '$.key') AS side,
-        json_extract_string(s, '$.name') AS side_name_raw,
-        TRY_CAST(json_extract_string(s, '$.bookmakers.' || bm_id || '.opening') AS DOUBLE) AS opening,
-        TRY_CAST(json_extract_string(s, '$.bookmakers.' || bm_id || '.current') AS DOUBLE) AS closing,
-        bm_id AS bookmaker_id,
-        json_extract_string(e.markets_json, '$.bookmakers.' || bm_id) AS bookmaker_name,
-        (json_extract_string(s, '$.bookmakers.' || bm_id || '.active') = 'false') AS suspended
-      FROM pg.events e,
-           UNNEST(CAST(json_extract(e.markets_json, '$.markets') AS JSON[])) AS tm(m),
-           UNNEST(CAST(json_extract(m, '$.selections') AS JSON[])) AS ts(s),
-           UNNEST(json_keys(json_extract(s, '$.bookmakers'))) AS tb(bm_id)
-      WHERE e.source = 'flashscore'
-        ${seasonCond}
-
-      UNION ALL
-
-      SELECT
-        e.id AS event_id, e.source_event_id, e.competition, e.season_slug, e.round,
-        e.home_team, e.away_team, e.kickoff_at, e.home_score, e.away_score,
-        e.home_ht_score, e.away_ht_score,
-        json_extract_string(m, '$.type') AS market_type,
-        COALESCE(json_extract_string(m, '$.scope'), 'FULL_TIME') AS market_scope,
-        json_extract_string(m, '$.key') AS market_key,
-        json_extract_string(m, '$.name') AS market_name,
-        json_extract_string(m, '$.line') AS market_line,
-        json_extract_string(s, '$.key') AS side,
-        json_extract_string(s, '$.name') AS side_name_raw,
-        TRY_CAST(json_extract_string(s, '$.opening') AS DOUBLE) AS opening,
-        TRY_CAST(json_extract_string(s, '$.odds') AS DOUBLE) AS closing,
-        NULL AS bookmaker_id,
-        json_extract_string(s, '$.bookmaker_name') AS bookmaker_name,
-        COALESCE(TRY_CAST(json_extract_string(s, '$.suspended') AS BOOLEAN), false) AS suspended
-      FROM pg.events e,
-           UNNEST(CAST(json_extract(e.markets_json, '$.markets') AS JSON[])) AS tm(m),
-           UNNEST(CAST(json_extract(m, '$.selections') AS JSON[])) AS ts(s)
-      WHERE e.source = 'flashscore'
-        AND COALESCE(len(json_keys(json_extract(s, '$.bookmakers'))), 0) = 0
-        ${seasonCond}
-    `;
-
-    await conn.run(createSql);
+    await conn.run(
+      `CREATE OR REPLACE TABLE ${TABLE} AS SELECT * FROM read_json_auto(${sqlQuoteLiteral(
+        STAGE_PATH,
+      )}, format='newline_delimited', sample_size=-1)`,
+    );
     await conn.run(
       `CREATE INDEX IF NOT EXISTS idx_qf_market ON ${TABLE}(market_type, market_scope, side);`,
     );
     await conn.run(`CREATE INDEX IF NOT EXISTS idx_qf_event ON ${TABLE}(event_id);`);
+
+    rmSync(STAGE_PATH, { force: true });
 
     const countReader = await conn.runAndReadAll(`SELECT COUNT(*) AS n FROM ${TABLE}`);
     const rowObjs = countReader.getRowObjectsJS() as { n: unknown }[];
@@ -142,7 +201,7 @@ async function buildTable(): Promise<void> {
     b.status = {
       status: "ready",
       rows,
-      seasons: seasons.length,
+      seasons: seasonsOk,
       startedAt: b.status.startedAt,
       readyAt: Date.now(),
     };

@@ -1,5 +1,7 @@
 import { getDuckDbConnection } from "@/lib/duckdb";
-import { buildSeasonQuotesSql, type SeasonQuotesFilters } from "./duckdbQuotes";
+import { buildFlatSeasonQuotesSql, type SeasonQuotesFilters } from "./duckdbQuotes";
+import { ensureQuotesTable, QUOTES_FLAT_TABLE } from "./duckdbMaterialize";
+import { loadBookmakerNames } from "./bookmakerNames";
 import { prettySideName } from "./labels";
 import { resolveLine } from "./normalize";
 import type { FilterState, Quote } from "./types";
@@ -20,14 +22,32 @@ function str(v: unknown): string | null {
 const HARD_ROW_CAP = 20_000;
 
 /**
- * analyzeSeason'ın DuckDB'den beslenen versiyonu — events.markets_json'ı
- * Node'da JSON.parse etmiyor, sadece filtreye uyan (market/scope/bookmaker/
- * odds aralığı ile önceden daraltılmış) satırları çekiyor. Dönen Quote[]
- * üzerinde analyze.ts'teki analyzeQuotes (de-vig, drift, edge) DEĞİŞMEDEN
- * çalışır — o da zaten quoteMatchesFilters ile kesin filtreyi tekrar uygular.
+ * analyzeSeason'ın DuckDB'den beslenen versiyonu. quotes_flat (bkz.
+ * duckdbMaterialize.ts — Koyeb'in flat /quotes/season + hafif
+ * /events/season endpoint'lerinden NDJSON stream edilip DuckDB'ye toplu
+ * yüklenmiş tablo) üzerinden market/scope/bookmaker/odds aralığıyla önceden
+ * daraltılmış satırları çeker — Postgres'e hiç dokunmaz, markets_json'ı
+ * hiç görmez. Dönen Quote[] üzerinde analyze.ts'teki analyzeQuotes (de-vig,
+ * drift, edge) DEĞİŞMEDEN çalışır — o da zaten quoteMatchesFilters ile
+ * kesin filtreyi tekrar uygular.
+ *
+ * NOT: quotes_flat, market_key/market_name/side_name_raw gibi kolonları
+ * (bunlar markets_json'daki serbest metin isimlerdi, flat `quotes`
+ * tablosunda yok) taşımıyor — marketKey/marketName/line/sideName burada
+ * marketType+marketScope+side'dan (labels.ts/normalize.ts'teki AYNI
+ * fonksiyonlarla) türetiliyor.
  */
 export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]> {
   if (!filters.seasonSlug) return [];
+
+  const materializeStatus = await ensureQuotesTable();
+  if (materializeStatus.status !== "ready") {
+    throw new Error(
+      `quotes_flat tablosu hazır değil (status=${materializeStatus.status}${
+        materializeStatus.error ? `, error=${materializeStatus.error}` : ""
+      }).`,
+    );
+  }
 
   const conn = await getDuckDbConnection();
   const params: unknown[] = [];
@@ -49,7 +69,7 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
     dateTo: filters.dateTo,
   };
 
-  const body = buildSeasonQuotesSql(seasonFilters, push);
+  const body = buildFlatSeasonQuotesSql(seasonFilters, push, QUOTES_FLAT_TABLE);
   const limitPh = push(HARD_ROW_CAP);
   const text = `${body}\n    LIMIT ${limitPh}`;
 
@@ -62,6 +82,8 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
     );
   }
 
+  const bmNames = await loadBookmakerNames();
+
   const out: Quote[] = [];
   for (const row of rows) {
     const marketType = str(row.market_type) ?? "UNKNOWN";
@@ -72,9 +94,10 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
     const closing = num(row.closing);
     if (opening == null && closing == null) continue;
 
-    const marketLine = str(row.market_line);
-    const line = resolveLine(marketType, marketLine, side);
-    const sideName = prettySideName(side, str(row.side_name_raw), marketType);
+    // market_line yok (flat quotes tablosunda serbest metin market bilgisi
+    // taşınmıyor) — line, side token'ından türetiliyor (örn. "OVER:2.5").
+    const line = resolveLine(marketType, null, side);
+    const sideName = prettySideName(side, null, marketType);
     const bookmakerId = str(row.bookmaker_id);
 
     out.push({
@@ -92,16 +115,16 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
       awayHtScore: num(row.away_ht_score),
       marketType,
       marketScope,
-      marketKey: str(row.market_key) ?? `${marketType}:${marketScope}`,
-      marketName: str(row.market_name) ?? marketType,
+      marketKey: `${marketType}:${marketScope}`,
+      marketName: marketType,
       line,
       side,
       sideName,
       opening,
       closing,
       bookmakerId,
-      bookmakerName: str(row.bookmaker_name),
-      suspended: Boolean(row.suspended),
+      bookmakerName: bookmakerId ? bmNames.get(bookmakerId) ?? null : null,
+      suspended: row.active === false || row.active === "false",
     });
   }
 
