@@ -39,7 +39,25 @@ function sqlQuoteLiteral(v: string): string {
 
 async function createInstance(): Promise<DuckDBInstance> {
   const { DuckDBInstance } = await import("@duckdb/node-api");
-  const instance = await DuckDBInstance.create(":memory:");
+
+  // quotes_flat artık TEK bir kriterin filtrelediği dar bir sonuç değil,
+  // 60 sezonun TÜM market/seçenek/bahisçi kombinasyonu — bu, process RAM'ine
+  // sığmayacak kadar büyük olabiliyor ve ":memory:" ile OOM'a (Killed) yol
+  // açıyordu. Disk-backed bir DuckDB dosyasına geçiyoruz: DuckDB, verinin
+  // RAM'e sığmayan kısmını diske yazıp out-of-core çalışabiliyor — tam bu
+  // senaryo için tasarlanmış özelliği. Container restart'ında zaten TTL ile
+  // yeniden inşa ediliyor, dosyanın kalıcı olması gerekmiyor (/tmp yeterli).
+  const dbPath = process.env.DUCKDB_FILE_PATH || "/tmp/oddsvig-duckdb/main.db";
+  const { mkdirSync } = await import("node:fs");
+  const { dirname } = await import("node:path");
+  mkdirSync(dirname(dbPath), { recursive: true });
+
+  const instance = await DuckDBInstance.create(dbPath, {
+    // Konteynerin gerçek RAM tavanının altında bir hedef veriyoruz ki
+    // DuckDB agresif şekilde diske spill etsin, kernel OOM killer'ından
+    // önce kendi limitini uygulasın. DUCKDB_MEMORY_LIMIT ile ayarlanabilir.
+    memory_limit: process.env.DUCKDB_MEMORY_LIMIT || "1GB",
+  });
 
   // ATTACH, instance/catalog seviyesinde kalıcıdır — bir kez bootstrap
   // connection'ıyla yapılır, sonrasında aynı instance'tan açılan TÜM
