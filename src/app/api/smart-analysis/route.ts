@@ -1,12 +1,26 @@
 import { NextResponse } from "next/server";
-import { getSeasonGzStatus, startSeasonGzWarm } from "@/lib/analysis/seasonGzCache";
+import { koyebCacheConfigured } from "@/lib/koyebCache";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-/** Legacy GET — archive warm status. Match analysis: POST /api/smart-analysis/match */
+/**
+ * Legacy GET — eskiden Node içi arşiv ısınma durumunu dönerdi.
+ * Artık ısınacak bir şey yok: tarama Koyeb'de, her /match isteğinde
+ * stream ediliyor. Burası sadece Koyeb bağlantısının yapılandırılıp
+ * yapılandırılmadığını raporlar (frontend'in polling'i anında durur).
+ */
 export async function GET() {
-  startSeasonGzWarm();
-  const status = getSeasonGzStatus();
-  return NextResponse.json({ ok: true, archiveStatus: status });
+  const configured = koyebCacheConfigured();
+  return NextResponse.json({
+    ok: true,
+    archiveStatus: {
+      status: configured ? "ready" : "error",
+      phase: "idle",
+      files: 0,
+      filesDone: 0,
+      matches: 0,
+      error: configured ? undefined : "KOYEB_CACHE_URL tanımlı değil",
+    },
+  });
 }
