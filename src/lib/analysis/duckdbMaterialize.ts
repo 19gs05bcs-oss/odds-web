@@ -25,7 +25,12 @@ import { sql } from "@/lib/db";
 
 const TABLE = "quotes_flat";
 
-const DEFAULT_SEASON_SCAN_LIMIT = Number(process.env.ANALYZE_DEFAULT_SEASON_SCAN_LIMIT) || 60;
+// quotes_flat, tek bir kriterle filtrelenmiş dar bir sonuç DEĞİL — o sezon
+// aralığındaki HER market/seçenek/bahisçi kombinasyonunu içeriyor. 60 sezonda
+// bu, süreci OOM'a (Killed) götürecek kadar büyüktü. Disk-backed DuckDB'ye
+// geçiş (bkz. duckdb.ts) bunu out-of-core yapılabilir kılıyor, ama yine de
+// daha güvenli/küçük bir varsayılanla başlayıp gerekirse yükseltiyoruz.
+const DEFAULT_SEASON_SCAN_LIMIT = Number(process.env.ANALYZE_DEFAULT_SEASON_SCAN_LIMIT) || 20;
 const REFRESH_TTL_MS = Number(process.env.ANALYZE_QUOTES_REFRESH_TTL_MS) || 15 * 60_000;
 
 export type MaterializeStatus = {
