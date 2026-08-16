@@ -2,7 +2,7 @@ import { unstable_cache } from "next/cache";
 import { analyzeQuotes } from "@/lib/analysis/analyze";
 import { parseFilterState } from "@/lib/analysis/filters";
 import { eventsMetaAndQuotesToTableRows, profileMatchToTableRow, PREFERRED_BM_NAME, type TableRow } from "@/lib/analysis/tableRows";
-import { fetchQuoteRowsByEventIds, listDistinctBookmakerIds, listDistinctSeasonMarketTypes } from "@/lib/analysis/marketQuotes";
+import { fetchQuoteRowsByEventIds, listDistinctSeasonMarketTypes } from "@/lib/analysis/marketQuotes";
 import { loadBookmakerNames } from "@/lib/analysis/bookmakerNames";
 import type { ProfileQuery, ProfileResult } from "@/lib/analysis/profile";
 import type { AnalyzeResult, FilterState } from "@/lib/analysis/types";
@@ -192,12 +192,24 @@ export async function searchProfile(
     };
   }
 
-  // match_odds.bookmaker artık isim (ör. "bet365") — sayısal Flashscore id değil.
-  const preferredBm = query.bookmakerId || PREFERRED_BM_NAME;
+  // match_odds.bookmaker isim (ör. "bet365") bekliyor; UI'daki bookmaker seçici
+  // artık fixture tabanlı SAYISAL Flashscore id gönderiyor (bkz. listBookmakers).
+  // Sayısalsa fixture.bookmakers map'inden karşılık gelen ismi çözüyoruz —
+  // aksi halde "16" gibi bir string'i match_odds.bookmaker = '16' diye arayıp
+  // hiçbir satır bulamazdık (arşiv sonuçları sessizce boş dönerdi).
+  let preferredBm = query.bookmakerId || PREFERRED_BM_NAME;
+  if (query.bookmakerId && /^\d+$/.test(query.bookmakerId)) {
+    const names = await loadBookmakerNames();
+    preferredBm = names.get(query.bookmakerId) || preferredBm;
+  }
+  // SQL katmanı (searchOddsProfileSQL) da match_odds.bookmaker'a karşı METİN
+  // isim bekliyor — çözülmüş ismi query'ye geri yazıp aşağı iletiyoruz,
+  // yoksa SQL filtresi sayısal id ile hiçbir satır bulamazdı.
+  const resolvedQuery: ProfileQuery = { ...query, bookmakerId: preferredBm };
 
   try {
     const { searchOddsProfileSQL } = await import("@/lib/analysis/searchOddsProfileSQL");
-    const result = await searchOddsProfileSQL(query);
+    const result = await searchOddsProfileSQL(resolvedQuery);
 
     // Eşleşen event'lerin tüm bookmaker grid'ini TEK sorguda match_odds'tan
     // çekiyoruz — events.markets_json'a hiç dokunmuyoruz.
@@ -223,15 +235,28 @@ export async function searchProfile(
   }
 }
 
-/** Bookmaker id → isim listesi — match_odds'taki distinct id'ler, fixture.bookmakers'tan isimlendirilir. */
-async function fetchBookmakersUncached(seasonSlug?: string): Promise<BookmakerOption[]> {
+/**
+ * Bookmaker id → isim listesi.
+ *
+ * ESKİSİ: `listDistinctBookmakerIds()` ile match_odds'ta tam tablo taramalı
+ * `SELECT DISTINCT bookmaker` çalıştırıyordu — hem CPU'yu yiyen en pahalı
+ * sorgulardan biriydi HEM DE döndürdüğü değerler match_odds'un METİN isimleri
+ * ("bet365") idi, oysa fixture.odds (günün bülten tablosu) SAYISAL Flashscore
+ * id bekliyor ("16"). Number("bet365") = NaN olduğu için dropdown'dan hangi
+ * bookmaker seçilirse seçilsin kod hep PREFERRED_BM'e (16/bet365) düşüyor,
+ * bülten tablosundaki oranlar asla değişmiyordu.
+ *
+ * ŞİMDİ: doğrudan `loadBookmakerNames()`'ın ürettiği SAYISAL
+ * (fixture.bookmakers JSONB kaynaklı) id → isim map'inden listeliyoruz. Bu
+ * hem doğru id tipini verir (fixture.odds ile eşleşir) HEM DE zaten LIMIT 30
+ * satırlık hafif bir sorgu — match_odds'taki pahalı DISTINCT taramasına hiç
+ * gerek kalmıyor.
+ */
+async function fetchBookmakersUncached(): Promise<BookmakerOption[]> {
   try {
-    const [ids, names] = await Promise.all([
-      listDistinctBookmakerIds(seasonSlug || null),
-      loadBookmakerNames(),
-    ]);
-    return ids
-      .map((id) => ({ id, name: names.get(id) || id }))
+    const names = await loadBookmakerNames();
+    return [...names.entries()]
+      .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name, "en"));
   } catch (err) {
     console.error("listBookmakers error:", err);
@@ -239,14 +264,6 @@ async function fetchBookmakersUncached(seasonSlug?: string): Promise<BookmakerOp
   }
 }
 
-/**
- * `listDistinctBookmakerIds` match_odds üzerinde tam tablo taramalı bir
- * `SELECT DISTINCT` çalıştırıyor — bookmaker listesi neredeyse hiç
- * değişmediği halde bu her sayfa yüklemesinde (force-dynamic SSR) tekrar
- * çalışıyordu ve Supabase compute/CPU'yu tüketen asıl sorgulardan biriydi.
- * unstable_cache ile sarmalayıp 1 saatlik bir pencerede tek sorguya
- * düşürüyoruz; argümanlar (seasonSlug) otomatik olarak cache key'e dahil olur.
- */
 export const listBookmakers = unstable_cache(fetchBookmakersUncached, ["match-odds-bookmakers"], {
   revalidate: 3600,
   tags: ["bookmakers"],
