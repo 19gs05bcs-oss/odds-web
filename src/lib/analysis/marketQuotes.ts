@@ -25,6 +25,8 @@
  */
 import { sql } from "@/lib/db";
 import { marketTypeLabel } from "./labels";
+import { splitMarket } from "./marketFormat";
+export { splitMarket };
 
 /** Gerçek tablo adı market_quotes DEĞİL, match_odds. */
 export const MATCH_ODDS_TABLE = "match_odds";
@@ -60,14 +62,6 @@ export type MatchOddsWithMetaRow = MatchOddsRow & {
   home_ht_score: number | string | null;
   away_ht_score: number | string | null;
 };
-
-/** `market` kolonunu "TYPE:SCOPE" biçiminden ayırır. */
-export function splitMarket(market: string | null): { marketType: string; marketScope: string } {
-  if (!market) return { marketType: "UNKNOWN", marketScope: "FULL_TIME" };
-  const idx = market.indexOf(":");
-  if (idx === -1) return { marketType: market, marketScope: "FULL_TIME" };
-  return { marketType: market.slice(0, idx), marketScope: market.slice(idx + 1) };
-}
 
 /** Bir quote satırının kendi kolonları — meta hariç. */
 const QUOTE_COLS = `q.event_id, q.season_slug, q.kickoff_at, q.bookmaker, q.market, q.selection, q.line, q.odds, q.opening, q.active`;
