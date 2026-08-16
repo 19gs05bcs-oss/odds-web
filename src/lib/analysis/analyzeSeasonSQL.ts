@@ -6,12 +6,12 @@
  * drift, edge) DEĞİŞMEDEN çalışır — o da zaten quoteMatchesFilters ile
  * kesin filtreyi tekrar uygular.
  *
- * NOT: match_odds, market_key/market_name/side_name_raw gibi kolonları
- * (bunlar markets_json'daki serbest metin isimlerdi) taşımıyor —
- * marketKey/marketName/line/sideName burada marketType+marketScope+side'dan
- * (labels.ts/normalize.ts'teki AYNI fonksiyonlarla) türetiliyor.
+ * NOT: match_odds gerçek şeması — bookmaker/market/selection/line/odds/opening
+ * (bkz. marketQuotes.ts başlığı). market_type+market_scope, market (birleşik
+ * "TYPE:SCOPE") kolonundan splitMarket ile ayrılıyor; side = selection;
+ * closing = odds; bookmakerId = bookmaker (metin).
  */
-import { fetchSeasonQuoteRows, HARD_ROW_CAP, type MatchOddsRow, type SeasonQuotesFilters } from "./marketQuotes";
+import { fetchSeasonQuoteRows, HARD_ROW_CAP, splitMarket, type MatchOddsWithMetaRow, type SeasonQuotesFilters } from "./marketQuotes";
 import { loadBookmakerNames } from "./bookmakerNames";
 import { prettySideName } from "./labels";
 import { resolveLine } from "./normalize";
@@ -43,7 +43,7 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
     dateTo: filters.dateTo,
   };
 
-  const rows: MatchOddsRow[] = await fetchSeasonQuoteRows(seasonFilters, HARD_ROW_CAP);
+  const rows: MatchOddsWithMetaRow[] = await fetchSeasonQuoteRows(seasonFilters, HARD_ROW_CAP);
 
   if (rows.length >= HARD_ROW_CAP) {
     console.warn(
@@ -55,19 +55,18 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
 
   const out: Quote[] = [];
   for (const row of rows) {
-    const marketType = str(row.market_type) ?? "UNKNOWN";
-    const marketScope = str(row.market_scope) ?? "FULL_TIME";
-    const side = str(row.side);
+    const { marketType, marketScope } = splitMarket(row.market);
+    const side = str(row.selection);
     if (!side) continue;
     const opening = num(row.opening);
-    const closing = num(row.closing);
+    const closing = num(row.odds);
     if (opening == null && closing == null) continue;
 
-    // market_line yok (match_odds tablosunda serbest metin market bilgisi
-    // taşınmıyor) — line, side token'ından türetiliyor (örn. "OVER:2.5").
-    const line = resolveLine(marketType, null, side);
-    const sideName = prettySideName(side, null, marketType);
-    const bookmakerId = str(row.bookmaker_id);
+    // Gerçek line kolonu varsa onu kullan; yoksa side token'ından türet
+    // (ör. "OVER:2.5").
+    const line = resolveLine(marketType, str(row.line), side);
+    const sideName = prettySideName(side, line, marketType);
+    const bookmakerId = str(row.bookmaker);
 
     out.push({
       eventId: String(row.event_id),
@@ -92,7 +91,7 @@ export async function loadSeasonQuotesSQL(filters: FilterState): Promise<Quote[]
       opening,
       closing,
       bookmakerId,
-      bookmakerName: bookmakerId ? bmNames.get(bookmakerId) ?? null : null,
+      bookmakerName: bookmakerId ? bmNames.get(bookmakerId) ?? bookmakerId : null,
       suspended: row.active === false || row.active === "false",
     });
   }

@@ -13,8 +13,12 @@
  * SQL filtresi kasıtlı olarak biraz gevşek (side için prefix/OR eşleşmesi) —
  * sonuç seti (yüzlerce satır) üzerinde profile.ts'teki BİREBİR AYNI
  * `quoteMatchesCriterion` fonksiyonu ile kesin doğrulama yapılıyor.
+ *
+ * NOT: match_odds maç meta'sı (home_team/away_team/score/competition) TAŞIMAZ
+ * — o `events` tablosunda (id = match_odds.event_id). Meta burada match_odds
+ * üzerinden değil, doğrudan events'ten JOIN edilir.
  */
-import { MATCH_ODDS_EVENT_META_SELECT, MATCH_ODDS_TABLE } from "./marketQuotes";
+import { MATCH_ODDS_TABLE } from "./marketQuotes";
 import { buildQuoteCandidateCte, runCriteriaQuery } from "./marketQuoteCriteria";
 import { loadBookmakerNames } from "./bookmakerNames";
 import { prettySideName } from "./labels";
@@ -27,6 +31,8 @@ import {
   type CriterionHit,
 } from "./profile";
 import type { Quote } from "./types";
+
+const EVENTS_TABLE = "events";
 
 type SqlRow = Record<string, unknown>;
 
@@ -102,8 +108,10 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
       ${outerJoinCols}
     FROM joined j
     JOIN (
-      SELECT DISTINCT ${MATCH_ODDS_EVENT_META_SELECT}
-      FROM ${MATCH_ODDS_TABLE}
+      SELECT id AS event_id, source_event_id, competition, season_slug, round,
+             home_team, away_team, kickoff_at, home_score, away_score,
+             home_ht_score, away_ht_score
+      FROM ${EVENTS_TABLE}
       ${seasonWhere}
     ) e ON e.event_id = j.event_id
     LIMIT ${limitPh}
@@ -182,7 +190,7 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
         opening,
         closing,
         bookmakerId,
-        bookmakerName: bookmakerId ? bmNames.get(bookmakerId) ?? null : null,
+        bookmakerName: bookmakerId ? bmNames.get(bookmakerId) ?? bookmakerId : null,
         suspended: false,
       };
 

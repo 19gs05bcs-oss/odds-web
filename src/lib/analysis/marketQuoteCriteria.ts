@@ -10,6 +10,11 @@
  * SQL filtresi kasıtlı olarak biraz gevşek (side için prefix/OR eşleşmesi) —
  * sonuç seti (yüzlerce satır) üzerinde profile.ts'teki BİREBİR AYNI
  * `quoteMatchesCriterion` fonksiyonu ile kesin doğrulama yapılıyor.
+ *
+ * NOT: match_odds gerçek şeması — market (birleşik "TYPE:SCOPE"), selection
+ * (side), bookmaker (metin isim), odds (güncel/kapanış). market_type +
+ * market_scope ayrı kolon DEĞİL — tek eşitlik olarak birleştirilip
+ * filtreleniyor.
  */
 import { sql } from "@/lib/db";
 import { MATCH_ODDS_EVENT_META_SELECT, MATCH_ODDS_TABLE } from "./marketQuotes";
@@ -50,7 +55,7 @@ export type QuoteCandidateOpts = {
 };
 
 /**
- * Bir kriter için event_id/bookmaker_id/side/opening/current döndüren CTE —
+ * Bir kriter için event_id/bookmaker/side/opening/current döndüren CTE —
  * match_odds'a karşı basit WHERE.
  */
 export function buildQuoteCandidateCte(
@@ -60,12 +65,12 @@ export function buildQuoteCandidateCte(
 ): string {
   const { exact, prefixes } = sideCandidates(opts.side);
   const sideExactPh = exact.map((v) => push(v));
-  const sideConds = [`side IN (${sideExactPh.join(", ")})`];
+  const sideConds = [`selection IN (${sideExactPh.join(", ")})`];
   for (const p of prefixes) {
     const ph = push(p);
     const phPrefix = push(`${p}:%`);
-    sideConds.push(`side = ${ph}`);
-    sideConds.push(`side LIKE ${phPrefix}`);
+    sideConds.push(`selection = ${ph}`);
+    sideConds.push(`selection LIKE ${phPrefix}`);
   }
   const sideCond = `(${sideConds.join(" OR ")})`;
 
@@ -73,14 +78,13 @@ export function buildQuoteCandidateCte(
   const loPh = push(lo);
   const hiPh = push(hi);
 
-  const typePh = push(opts.marketType);
-  const scopePh = push(opts.marketScope || "FULL_TIME");
+  const marketPh = push(`${opts.marketType}:${opts.marketScope || "FULL_TIME"}`);
 
-  // Nested (bookmaker_id dolu) satırlar bm filtresine tabi; bookmaker_id NULL
+  // Nested (bookmaker dolu) satırlar bm filtresine tabi; bookmaker NULL
   // olan satırlar (bookmaker bilgisi gelmemiş) over-inclusive kalır — JS'te
   // quoteMatchesCriterion zaten bookmakerId null ise BM filtresini atlıyor.
   const bmCond = opts.bookmakerId
-    ? `AND (bookmaker_id IS NULL OR bookmaker_id = ${push(String(opts.bookmakerId))})`
+    ? `AND (bookmaker IS NULL OR bookmaker = ${push(String(opts.bookmakerId))})`
     : "";
 
   const seasons = (opts.seasonSlugs ?? []).filter(Boolean);
@@ -94,15 +98,14 @@ export function buildQuoteCandidateCte(
     opts.price === "opening"
       ? `opening BETWEEN ${loPh} AND ${hiPh}`
       : opts.price === "closing"
-        ? `closing BETWEEN ${loPh} AND ${hiPh}`
-        : `(closing BETWEEN ${loPh} AND ${hiPh} OR opening BETWEEN ${loPh} AND ${hiPh})`;
+        ? `odds BETWEEN ${loPh} AND ${hiPh}`
+        : `(odds BETWEEN ${loPh} AND ${hiPh} OR opening BETWEEN ${loPh} AND ${hiPh})`;
 
   return `
     ${alias} AS (
-      SELECT event_id, bookmaker_id, side, opening, closing AS current
+      SELECT event_id, bookmaker AS bookmaker_id, selection AS side, opening, odds AS current
       FROM ${MATCH_ODDS_TABLE}
-      WHERE market_type = ${typePh}
-        AND market_scope = ${scopePh}
+      WHERE market = ${marketPh}
         AND ${sideCond}
         AND ${oddsCond}
         ${bmCond}

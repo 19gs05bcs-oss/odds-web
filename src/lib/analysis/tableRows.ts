@@ -3,11 +3,29 @@
 import type { MarketColumnDef, MetaField, TableColumnDef } from "@/lib/analysis/tableColumns";
 import { ALL_COLUMNS, criterionMatchesColumn } from "@/lib/analysis/tableColumns";
 import type { OddsCriterion, ProfileMatch } from "@/lib/analysis/profile";
-import type { MatchOddsRow } from "@/lib/analysis/marketQuotes";
+import type { MatchOddsWithMetaRow } from "@/lib/analysis/marketQuotes";
+import { splitMarket } from "@/lib/analysis/marketQuotes";
 import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
 import type { MarketsBlob, OddsEvent } from "@/lib/types";
 
+/** Canlı bülten (fixture.odds/markets_json) yolunda kullanılan Flashscore-numeric bookmaker id. */
 export const PREFERRED_BM = 16;
+
+/**
+ * match_odds.bookmaker artık isim (ör. "bet365"), sayısal Flashscore id
+ * DEĞİL. CompactOddsRow/oddsByColumn sayısal bm bekliyor — isimden basit,
+ * kararlı bir pseudo-id türetiyoruz. Bu id gerçek Flashscore id'siyle
+ * eşleşmek zorunda değil, sadece "aynı isim -> aynı sayı" tutarlılığı
+ * (tercih/eşleştirme karşılaştırması için) yeterli.
+ */
+export function bookmakerNameToPseudoId(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return (h % 999983) + 1; // 0 hariç — bazı yerlerde "bm > 0" kontrolü var
+}
+
+/** match_odds yolunda tercih edilen referans bookmaker (isim bazlı). */
+export const PREFERRED_BM_NAME = "bet365";
 
 export type RowSource = "fixture" | "archive";
 
@@ -954,17 +972,16 @@ export function filterTableRows(
  * beklediği CompactOddsRow tuple'larına çevirir. events.markets_json'a hiç
  * dokunmadan tam bookmaker grid'i kurmayı sağlar.
  */
-export function marketQuoteRowsToCompactOdds(rows: MatchOddsRow[]): CompactOddsRow[] {
+export function marketQuoteRowsToCompactOdds(rows: MatchOddsWithMetaRow[]): CompactOddsRow[] {
   const out: CompactOddsRow[] = [];
   for (const row of rows) {
-    const bm = Number(row.bookmaker_id);
-    if (!Number.isFinite(bm) || bm <= 0) continue;
-    const mtype = row.market_type || "UNKNOWN";
-    const scope = row.market_scope || "FULL_TIME";
-    const side = row.side;
+    if (!row.bookmaker) continue;
+    const bm = bookmakerNameToPseudoId(String(row.bookmaker));
+    const { marketType: mtype, marketScope: scope } = splitMarket(row.market);
+    const side = row.selection;
     if (!side) continue;
     const opening = row.opening == null ? null : Number(row.opening);
-    const current = row.closing == null ? null : Number(row.closing);
+    const current = row.odds == null ? null : Number(row.odds);
     if (opening == null && current == null) continue;
     const active = row.active !== false && row.active !== "false" && row.active !== "False";
     out.push([bm, mtype, scope, side, opening, current, active]);
@@ -974,15 +991,16 @@ export function marketQuoteRowsToCompactOdds(rows: MatchOddsRow[]): CompactOddsR
 
 /** match_odds satırının meta alanlarından (markets_json'suz) bir TableRow kurar. */
 export function eventMetaToTableRow(
-  meta: MatchOddsRow,
-  quoteRows: MatchOddsRow[],
-  bookmakerId: number = PREFERRED_BM,
+  meta: MatchOddsWithMetaRow,
+  quoteRows: MatchOddsWithMetaRow[],
+  bookmakerId: number | string = PREFERRED_BM_NAME,
 ): TableRow {
+  const bmNum = typeof bookmakerId === "string" ? bookmakerNameToPseudoId(bookmakerId) : bookmakerId;
   const parts = kickoffParts(meta.kickoff_at);
   const { lig, altLig } = splitLeague(meta.competition);
   const { h, a } = parseScore(meta.home_score, meta.away_score);
   const { h: htH, a: htA } = parseScore(meta.home_ht_score, meta.away_ht_score);
-  const odds = oddsByColumn(marketQuoteRowsToCompactOdds(quoteRows), { bookmakerId });
+  const odds = oddsByColumn(marketQuoteRowsToCompactOdds(quoteRows), { bookmakerId: bmNum });
   const settled = isMatchSettled(meta.kickoff_at, h, a);
   const skorOut = h != null && a != null && (settled || h > 0 || a > 0) ? `${h}-${a}` : "";
   const skor1yOut =
@@ -1014,10 +1032,10 @@ export function eventMetaToTableRow(
  * bırakmaz — match_odds zaten aynı veriyi flat taşıyor.
  */
 export function eventsMetaAndQuotesToTableRows(
-  rows: MatchOddsRow[],
-  bookmakerId: number = PREFERRED_BM,
+  rows: MatchOddsWithMetaRow[],
+  bookmakerId: number | string = PREFERRED_BM_NAME,
 ): Map<string, TableRow> {
-  const byEvent = new Map<string, MatchOddsRow[]>();
+  const byEvent = new Map<string, MatchOddsWithMetaRow[]>();
   for (const row of rows) {
     const id = String(row.event_id ?? "");
     if (!id) continue;
