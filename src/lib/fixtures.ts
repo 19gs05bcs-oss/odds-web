@@ -224,7 +224,7 @@ export async function searchProfile(
 }
 
 /** Bookmaker id → isim listesi — match_odds'taki distinct id'ler, fixture.bookmakers'tan isimlendirilir. */
-export async function listBookmakers(seasonSlug?: string): Promise<BookmakerOption[]> {
+async function fetchBookmakersUncached(seasonSlug?: string): Promise<BookmakerOption[]> {
   try {
     const [ids, names] = await Promise.all([
       listDistinctBookmakerIds(seasonSlug || null),
@@ -238,3 +238,16 @@ export async function listBookmakers(seasonSlug?: string): Promise<BookmakerOpti
     return [];
   }
 }
+
+/**
+ * `listDistinctBookmakerIds` match_odds üzerinde tam tablo taramalı bir
+ * `SELECT DISTINCT` çalıştırıyor — bookmaker listesi neredeyse hiç
+ * değişmediği halde bu her sayfa yüklemesinde (force-dynamic SSR) tekrar
+ * çalışıyordu ve Supabase compute/CPU'yu tüketen asıl sorgulardan biriydi.
+ * unstable_cache ile sarmalayıp 1 saatlik bir pencerede tek sorguya
+ * düşürüyoruz; argümanlar (seasonSlug) otomatik olarak cache key'e dahil olur.
+ */
+export const listBookmakers = unstable_cache(fetchBookmakersUncached, ["match-odds-bookmakers"], {
+  revalidate: 3600,
+  tags: ["bookmakers"],
+});
