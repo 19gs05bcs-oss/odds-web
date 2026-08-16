@@ -1,11 +1,13 @@
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 import { SiteHeader } from "@/components/SiteHeader";
 import { decodeCriterion } from "@/lib/analysis/profile";
 import { listBookmakers } from "@/lib/fixtures";
 import { listFixtureDates } from "@/lib/archiveCache";
 import styles from "./page.module.css";
 
-const AnalyzeClient = dynamic(() => import("@/components/AnalyzeClient"), {
+export const dynamic = "force-dynamic";
+
+const AnalyzeClient = nextDynamic(() => import("@/components/AnalyzeClient"), {
   ssr: false,
   loading: () => <p className={styles.loading}>Loading analyze…</p>,
 });

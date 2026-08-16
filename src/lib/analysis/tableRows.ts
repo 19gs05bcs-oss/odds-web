@@ -4,7 +4,7 @@ import type { MarketColumnDef, MetaField, TableColumnDef } from "@/lib/analysis/
 import { ALL_COLUMNS, criterionMatchesColumn } from "@/lib/analysis/tableColumns";
 import type { OddsCriterion, ProfileMatch } from "@/lib/analysis/profile";
 import type { MatchOddsWithMetaRow } from "@/lib/analysis/marketQuotes";
-import { splitMarket } from "@/lib/analysis/marketQuotes";
+import { splitMarket } from "@/lib/analysis/marketFormat";
 import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
 import type { MarketsBlob, OddsEvent } from "@/lib/types";
 

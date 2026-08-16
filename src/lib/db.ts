@@ -1,5 +1,5 @@
+import "server-only";
 import postgres from "postgres";
-
 // Supabase Transaction Pooler URL'ini environment değişkenlerinden okuyoruz
 const connectionString = process.env.DATABASE_URL!;
 
