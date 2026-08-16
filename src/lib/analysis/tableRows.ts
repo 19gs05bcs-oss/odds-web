@@ -978,8 +978,15 @@ export function marketQuoteRowsToCompactOdds(rows: MatchOddsWithMetaRow[]): Comp
     if (!row.bookmaker) continue;
     const bm = bookmakerNameToPseudoId(String(row.bookmaker));
     const { marketType: mtype, marketScope: scope } = splitMarket(row.market);
-    const side = row.selection;
+    let side = row.selection;
     if (!side) continue;
+    // match_odds şemasında line ayrı kolon (selection çıplak "OVER"/"H" gelir).
+    // compactMatchesCol/parseSideToken ise "OVER:2.5" gibi gömülü line formatı
+    // bekliyor — yoksa O/U ve AH kolonları line eşleşmesinde hep false dönüp
+    // boş kalıyordu. Zaten gömülüyse (":" içeriyorsa) dokunma.
+    if (row.line != null && String(row.line) !== "" && !side.includes(":")) {
+      side = `${side}:${row.line}`;
+    }
     const opening = row.opening == null ? null : Number(row.opening);
     const current = row.odds == null ? null : Number(row.odds);
     if (opening == null && current == null) continue;
