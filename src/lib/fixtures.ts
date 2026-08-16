@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
 import { analyzeQuotes } from "@/lib/analysis/analyze";
 import { parseFilterState } from "@/lib/analysis/filters";
-import { eventsMetaAndQuotesToTableRows, profileMatchToTableRow, PREFERRED_BM, type TableRow } from "@/lib/analysis/tableRows";
+import { eventsMetaAndQuotesToTableRows, profileMatchToTableRow, PREFERRED_BM_NAME, type TableRow } from "@/lib/analysis/tableRows";
 import { fetchQuoteRowsByEventIds, listDistinctBookmakerIds, listDistinctSeasonMarketTypes } from "@/lib/analysis/marketQuotes";
 import { loadBookmakerNames } from "@/lib/analysis/bookmakerNames";
 import type { ProfileQuery, ProfileResult } from "@/lib/analysis/profile";
@@ -192,8 +192,8 @@ export async function searchProfile(
     };
   }
 
-  const bm = Number(query.bookmakerId);
-  const preferredBm = Number.isFinite(bm) && bm > 0 ? bm : PREFERRED_BM;
+  // match_odds.bookmaker artık isim (ör. "bet365") — sayısal Flashscore id değil.
+  const preferredBm = query.bookmakerId || PREFERRED_BM_NAME;
 
   try {
     const { searchOddsProfileSQL } = await import("@/lib/analysis/searchOddsProfileSQL");
