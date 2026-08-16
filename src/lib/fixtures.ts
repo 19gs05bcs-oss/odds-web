@@ -264,7 +264,16 @@ async function fetchBookmakersUncached(): Promise<BookmakerOption[]> {
   }
 }
 
-export const listBookmakers = unstable_cache(fetchBookmakersUncached, ["match-odds-bookmakers"], {
+export const listBookmakers = async (): Promise<BookmakerOption[]> => {
+  const cached = await cachedBookmakersFetch();
+  if (cached.length > 0) return cached;
+  // Boş sonuç (geçici DB hatası / bülten geçiş anı) unstable_cache'te 1 saat
+  // takılı kalmasın — kimse revalidateTag("bookmakers") çağırmıyor, bu yüzden
+  // her boş isabette taze bir deneme daha yapıp kendini onarıyor.
+  return fetchBookmakersUncached();
+};
+
+const cachedBookmakersFetch = unstable_cache(fetchBookmakersUncached, ["match-odds-bookmakers"], {
   revalidate: 3600,
   tags: ["bookmakers"],
 });
