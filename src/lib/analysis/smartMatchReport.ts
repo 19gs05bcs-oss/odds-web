@@ -92,16 +92,16 @@ export type SmartMatchReport = {
   summary: string[];
 };
 
-function num(v: unknown): number | null {
+export function num(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1.01 ? n : null;
 }
 
-function pctChange(opening: number, closing: number): number {
+export function pctChange(opening: number, closing: number): number {
   return opening >= 1.01 ? ((closing - opening) / opening) * 100 : 0;
 }
 
-function moveKind(opening: number | null, closing: number | null): MoveKind | null {
+export function moveKind(opening: number | null, closing: number | null): MoveKind | null {
   if (opening == null || closing == null || opening < 1.01 || closing < 1.01) return null;
   const ch = pctChange(opening, closing);
   if (ch <= -2) return "shortened";
@@ -109,25 +109,25 @@ function moveKind(opening: number | null, closing: number | null): MoveKind | nu
   return "stable";
 }
 
-function oddsClose(a: number, b: number, tolPct: number): boolean {
+export function oddsClose(a: number, b: number, tolPct: number): boolean {
   if (tolPct <= 0) return Math.round(a * 100) === Math.round(b * 100);
   return Math.abs(a - b) / b <= tolPct;
 }
 
-function outcome1x2(h: number, a: number): "H" | "D" | "A" {
+export function outcome1x2(h: number, a: number): "H" | "D" | "A" {
   if (h > a) return "H";
   if (h < a) return "A";
   return "D";
 }
 
-function sideLabel(side: string): string {
+export function sideLabel(side: string): string {
   if (side === "H") return "1";
   if (side === "D") return "X";
   if (side === "A") return "2";
   return side;
 }
 
-function pickOdds(
+export function pickOdds(
   odds: CompactOddsRow[] | null | undefined,
   bmId: number,
   mtype: string,
@@ -158,7 +158,7 @@ function pickOdds(
   return { opening, closing };
 }
 
-function extract1x2(
+export function extract1x2(
   odds: CompactOddsRow[] | null | undefined,
   bmId: number,
   homeId?: string | null,
@@ -171,7 +171,7 @@ function extract1x2(
   return { H, D, A };
 }
 
-function favoriteSide(H: number | null, D: number | null, A: number | null): "H" | "D" | "A" | null {
+export function favoriteSide(H: number | null, D: number | null, A: number | null): "H" | "D" | "A" | null {
   const vals: Array<["H" | "D" | "A", number]> = [];
   if (H != null) vals.push(["H", H]);
   if (D != null) vals.push(["D", D]);
@@ -199,7 +199,7 @@ function sideWon(side: string, h: number, a: number, mtype: string, line?: strin
   return null;
 }
 
-function bmIds(odds: CompactOddsRow[] | null | undefined): number[] {
+export function bmIds(odds: CompactOddsRow[] | null | undefined): number[] {
   const s = new Set<number>();
   for (const row of odds || []) {
     if (!Array.isArray(row)) continue;
@@ -209,7 +209,7 @@ function bmIds(odds: CompactOddsRow[] | null | undefined): number[] {
   return [...s].sort((a, b) => a - b);
 }
 
-function buildBmGrid(
+export function buildBmGrid(
   odds: CompactOddsRow[] | null | undefined,
   bookmakers: Record<string, string> | null | undefined,
   homeId?: string | null,
@@ -234,7 +234,7 @@ function buildBmGrid(
   });
 }
 
-function countOutcomes(rows: SimilarMatchRow[]): OutcomeStats {
+export function countOutcomes(rows: SimilarMatchRow[]): OutcomeStats {
   const stats = { n: rows.length, H: 0, D: 0, A: 0, top: null as "H" | "D" | "A" | null, topPct: 0 };
   for (const r of rows) stats[r.outcome] += 1;
   if (!stats.n) return stats;
