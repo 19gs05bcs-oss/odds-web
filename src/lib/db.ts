@@ -3,16 +3,13 @@ import dns from "node:dns";
 import net from "node:net";
 import postgres from "postgres";
 
-// Railway'in container network'ü IPv6 egress desteklemiyor. Supabase pooler
-// hostname'i hem A (IPv4) hem AAAA (IPv6) kaydı döndürüyor.
-// 1) DNS sıralamasını IPv4-önce yap.
+// Railway'in container network'ü IPv6 egress desteklemiyor. dns.setDefaultResultOrder
+// ve net.setDefaultAutoSelectFamily(false) denendi ama hostname'in AAAA (IPv6) kaydı
+// tercih edilmeye devam etti — muhtemelen bu pooler hostname IPv6-öncelikli anycast
+// döndürüyor. Kesin çözüm: DNS'i burada MANUEL çözüp, SADECE IPv4 (family: 4) sonucu
+// kabul ederek, postgres.js'e ham TCP soketi doğrudan biz açıp veriyoruz. Böylece
+// hangi adresin kullanılacağı konusunda Node'a hiç seçim bırakmıyoruz.
 dns.setDefaultResultOrder("ipv4first");
-// 2) Node 18.13+/20'de varsayılan açık olan "Happy Eyeballs" (autoSelectFamily)
-//    algoritması, sıralama IPv4-önce olsa bile paralel/iç-içe denemelerle yine
-//    IPv6 adresine dokunabiliyor ve "connect ENETUNREACH <ipv6>:6543" ile
-//    patlıyor. Bunu tamamen kapatıp SADECE dns.lookup'ın döndürdüğü ilk
-//    (artık IPv4) adresi kullanmaya zorluyoruz.
-net.setDefaultAutoSelectFamily(false);
 
 // Supabase Transaction Pooler URL'ini environment değişkenlerinden okuyoruz
 const connectionString = process.env.DATABASE_URL!;
@@ -35,4 +32,30 @@ export const sql = postgres(connectionString, {
   types: {
     date: stringifyDate,
   },
+  // postgres.js'in kendi DNS/soket açma mantığını bypass ediyoruz — hostname'i
+  // burada family:4 zorlayarak çözüp, ham net.Socket'i doğrudan biz açıp
+  // veriyoruz. SSL upgrade'ini postgres.js zaten bu ham soketin üzerinde kendi
+  // yapıyor. NOT: runtime'da desteklenen bir seçenek ama kurulu postgres@3.4.9
+  // paketinin .d.ts'i bunu tanımıyor (bkz. node_modules/postgres/src/connection.js:132-133,345)
+  // — o yüzden ts-expect-error gerekiyor, gerçek bir hata değil.
+  // @ts-expect-error - `socket` runtime'da var, bu sürümün type tanımlarında yok
+  socket: ({ host, port }: { host: string[]; port: number[] }) =>
+    new Promise((resolve, reject) => {
+      const targetHost = host[0];
+      const targetPort = port[0];
+      dns.lookup(targetHost, { family: 4 }, (err, address) => {
+        if (err) {
+          console.error(
+            `[db] IPv4 (A kaydı) çözümlenemedi (${targetHost}): ${err.message}. ` +
+              `Bu hostname için gerçekten IPv4 adresi yok gibi görünüyor — Supabase ` +
+              `dashboard'dan farklı bir pooler endpoint'i / IPv4 add-on gerekebilir.`,
+          );
+          reject(err);
+          return;
+        }
+        const socket = net.connect({ host: address, port: targetPort });
+        socket.once("connect", () => resolve(socket));
+        socket.once("error", reject);
+      });
+    }),
 });
