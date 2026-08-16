@@ -452,7 +452,7 @@ export function SmartAnalysisClient({
                     <span className={m.move === "shortened" ? styles.pos : styles.neg}>
                       {m.move === "shortened" ? "▼ Steam" : "▲ Drift"} {Math.abs(m.changePct)}%
                     </span>{" "}
-                    {m.market} {m.sideLabel}: {formatOdds(m.opening)} → {formatOdds(m.closing)}
+                    {m.marketLabel} {m.sideLabel}: {formatOdds(m.opening)} → {formatOdds(m.closing)}
                     {m.historical ? (
                       <span className={styles.hint}> · {m.historical.note} (n={m.historical.n})</span>
                     ) : (
