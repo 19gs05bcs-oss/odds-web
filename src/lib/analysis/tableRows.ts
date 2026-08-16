@@ -729,20 +729,25 @@ export function profileMatchToTableRow(m: ProfileMatch): TableRow {
     if (c.kind === "market") odds[c.id] = null;
   }
   for (const hit of m.hits) {
+    // NOT: yalnızca criterionMatchesColumn kullan — marketType+marketScope+line
+    // doğrular. Eski kod burada "c.side === hit.side" kısayolu da deniyordu;
+    // bu scope'u hiç kontrol etmediği için ör. FT1 (ms_1) hit'i ALL_COLUMNS'ta
+    // ondan önce duran HT1 (ht_1) kolonuna yanlış eşleşiyordu (ikisi de side="H"),
+    // ve searchProfile() bu yanlış hücreyi full grid'in üzerine yazıp gerçek
+    // HT1 oranını FT1 değeriyle eziyordu.
     const col = ALL_COLUMNS.find(
       (c): c is MarketColumnDef =>
         c.kind === "market" &&
-        (c.side === hit.side ||
-          criterionMatchesColumn(
-            {
-              marketType: hit.marketType,
-              marketScope: hit.marketScope,
-              side: hit.side,
-              line: hit.line,
-              targetOdds: hit.targetOdds,
-            },
-            c,
-          )),
+        criterionMatchesColumn(
+          {
+            marketType: hit.marketType,
+            marketScope: hit.marketScope,
+            side: hit.side,
+            line: hit.line,
+            targetOdds: hit.targetOdds,
+          },
+          c,
+        ),
     );
     if (col) {
       const closing = hit.closing ?? hit.targetOdds;
