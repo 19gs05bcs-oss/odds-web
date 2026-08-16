@@ -1,5 +1,13 @@
 import "server-only";
+import dns from "node:dns";
 import postgres from "postgres";
+
+// Railway'in container network'ü IPv6 egress desteklemiyor. Supabase pooler
+// hostname'i hem A (IPv4) hem AAAA (IPv6) kaydı döndürüyor; Node bazen IPv6'yı
+// önceliklendirip "connect ENETUNREACH <ipv6-adres>:6543" ile patlıyor.
+// Bu, Node'un varsayılan DNS çözümlemesini IPv4-önce yapmaya zorlar.
+dns.setDefaultResultOrder("ipv4first");
+
 // Supabase Transaction Pooler URL'ini environment değişkenlerinden okuyoruz
 const connectionString = process.env.DATABASE_URL!;
 
