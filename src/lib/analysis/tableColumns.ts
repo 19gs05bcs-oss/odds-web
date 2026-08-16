@@ -14,7 +14,9 @@ export type ColumnGroupId =
   | "ou_ms"
   | "ou_2h"
   | "ah"
-  | "cs";
+  | "cs"
+  | "dnb"
+  | "eh";
 
 export type MetaField =
   | "kaynak"
@@ -68,6 +70,8 @@ export const COLUMN_GROUPS: { id: ColumnGroupId; label: string }[] = [
   { id: "ou_2h", label: "O/U 2H" },
   { id: "ah", label: "Asian Handicap" },
   { id: "cs", label: "Correct Score" },
+  { id: "dnb", label: "Draw No Bet" },
+  { id: "eh", label: "European Handicap" },
 ];
 
 const META: MetaColumnDef[] = [
@@ -232,6 +236,40 @@ const CS: MarketColumnDef[] = [
   ),
 ];
 
+/** Draw No Bet — confirmed archive format: plain "H"/"A" side, no line, FULL_TIME only. */
+const DNB: MarketColumnDef[] = [
+  m("dnb_h", "DNB 1", "dnb", "DRAW_NO_BET", "FULL_TIME", "H"),
+  m("dnb_a", "DNB 2", "dnb", "DRAW_NO_BET", "FULL_TIME", "A"),
+];
+
+/**
+ * European Handicap — confirmed archive format: three-way side token "H:<line>" /
+ * "D:<line>" / "A:<line>" (same shape as Asian Handicap's H:/A: tokens, plus D:).
+ * IMPORTANT: unlike AH, the away selection's embedded line is the NEGATION of the
+ * home/draw line — e.g. the "home -1" market posts H:-1.0, D:-1.0, but A:1.0 (confirmed
+ * against archive data: matching row counts pair H:-1.0/D:-1.0/A:1.0, and separately
+ * H:1.0/D:1.0/A:-1.0). `line` below is always the home-perspective handicap value.
+ * Only FULL_TIME scope confirmed so far.
+ */
+export const EH_LINES = [-6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6];
+
+function ehCols(idPrefix: string, headerPrefix: string, scope: string, lines: number[]): MarketColumnDef[] {
+  const out: MarketColumnDef[] = [];
+  for (const line of lines) {
+    const ls = String(line);
+    const lsId = ls.replace(".", "_").replace("-", "m");
+    const sign = line > 0 ? `+${ls}` : ls;
+    out.push(
+      m(`${idPrefix}_h_${lsId}`, `${headerPrefix}EH ${sign} 1`, "eh", "EUROPEAN_HANDICAP", scope, "H", ls, false),
+      m(`${idPrefix}_x_${lsId}`, `${headerPrefix}EH ${sign} X`, "eh", "EUROPEAN_HANDICAP", scope, "D", ls, false),
+      m(`${idPrefix}_a_${lsId}`, `${headerPrefix}EH ${sign} 2`, "eh", "EUROPEAN_HANDICAP", scope, "A", String(-line), false),
+    );
+  }
+  return out;
+}
+
+const EH = ehCols("eh", "", "FULL_TIME", EH_LINES);
+
 /** Column order: meta → HT markets → FT markets. */
 export const ALL_COLUMNS: TableColumnDef[] = [
   ...META,
@@ -246,20 +284,22 @@ export const ALL_COLUMNS: TableColumnDef[] = [
   ...OU_2H,
   ...AH,
   ...CS,
+  ...DNB,
+  ...EH,
 ];
 
 export function defaultVisibleGroupIds(): Set<ColumnGroupId> {
   return new Set(
-    COLUMN_GROUPS.map((g) => g.id).filter((id) => id !== "cs") as ColumnGroupId[],
+    COLUMN_GROUPS.map((g) => g.id).filter((id) => id !== "cs" && id !== "eh") as ColumnGroupId[],
   );
 }
 
-/** Visible columns: meta if defaultOn; market if defaultOn (or cs group on). */
+/** Visible columns: meta if defaultOn; market if defaultOn (or cs/eh group on — those are opt-in, all-or-nothing). */
 export function visibleColumns(groups: Set<ColumnGroupId>): TableColumnDef[] {
   return ALL_COLUMNS.filter((c) => {
     if (!groups.has(c.group)) return false;
     if (c.kind === "meta") return c.defaultOn;
-    if (c.group === "cs") return true;
+    if (c.group === "cs" || c.group === "eh") return true;
     return c.defaultOn;
   });
 }
@@ -296,7 +336,7 @@ export type MarketTone =
   | "bttsNo";
 
 export function marketColumnTone(col: MarketColumnDef): MarketTone | null {
-  if (col.marketType === "HOME_DRAW_AWAY") {
+  if (col.marketType === "HOME_DRAW_AWAY" || col.marketType === "DRAW_NO_BET" || col.marketType === "EUROPEAN_HANDICAP") {
     if (col.side === "H" || col.side.startsWith("H:")) return "home";
     if (col.side === "D" || col.side.startsWith("D:")) return "draw";
     if (col.side === "A" || col.side.startsWith("A:")) return "away";
