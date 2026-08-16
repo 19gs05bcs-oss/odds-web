@@ -1,4 +1,4 @@
-import dynamic from "next/dynamic";
+import nextDynamic from "next/dynamic";
 import { SiteHeader } from "@/components/SiteHeader";
 import { listBookmakers } from "@/lib/fixtures";
 import { listFixtureDates } from "@/lib/archiveCache";
@@ -9,7 +9,9 @@ export const metadata = {
   description: "Fixture-driven smart analysis from season json.gz archive.",
 };
 
-const SmartAnalysisClient = dynamic(
+export const dynamic = "force-dynamic";
+
+const SmartAnalysisClient = nextDynamic(
   () => import("@/components/SmartAnalysisClient").then((m) => m.SmartAnalysisClient),
   {
     ssr: false,
