@@ -170,7 +170,7 @@ const OU_HT = ouCols("ou_ht", "FIRST_HALF", [0.5, 1.5], "HT ");
 const OU_MS = ouCols("ou_ms", "FULL_TIME", [0.5, 1.5, 2.5, 3.5, 4.5], "");
 
 /** Home AH lines (compact side H:<line>). */
-const AH_LINES = [-1.5, -1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.5];
+export const AH_LINES = [-1.5, -1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1, 1.5];
 const AH: MarketColumnDef[] = AH_LINES.map((line) => {
   const ls = String(line);
   const sign = line > 0 ? `+${ls}` : ls;
@@ -186,7 +186,7 @@ const AH: MarketColumnDef[] = AH_LINES.map((line) => {
 });
 
 /** Common CS — off by default. */
-const CS_SCORES = ["1:0", "2:0", "2:1", "0:0", "1:1", "0:1", "0:2", "1:2", "2:2", "3:1", "3:2"];
+export const CS_SCORES = ["1:0", "2:0", "2:1", "0:0", "1:1", "0:1", "0:2", "1:2", "2:2", "3:1", "3:2"];
 const CS: MarketColumnDef[] = CS_SCORES.map((s) =>
   m(`cs_${s.replace(":", "_")}`, s, "cs", "CORRECT_SCORE", "FULL_TIME", `score:${s}`, null, false),
 );

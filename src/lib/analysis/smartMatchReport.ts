@@ -10,6 +10,7 @@ import {
   type TableRow,
 } from "@/lib/analysis/tableRows";
 import type { SeasonGzMatch } from "@/lib/analysis/seasonGzCache";
+import { marketTypeLabel } from "@/lib/analysis/labels";
 
 export type MoveKind = "shortened" | "lengthened" | "stable";
 
@@ -36,6 +37,7 @@ export type OutcomeStats = {
 
 export type MovementInsight = {
   market: string;
+  marketLabel: string;
   scope: string;
   side: string;
   sideLabel: string;
@@ -125,6 +127,47 @@ export function sideLabel(side: string): string {
   if (side === "D") return "X";
   if (side === "A") return "2";
   return side;
+}
+
+/**
+ * Bir market/side/line üçlüsü için UI'da gösterilecek market adı + taraf
+ * etiketi — genişletilmiş market kapsamı (HT 1X2, Double Chance, Asian
+ * Handicap, Correct Score) dahil. side burada henüz line eklenmemiş "çıplak"
+ * token (H/D/A, OVER/UNDER, DC:1X, score:1:0…), line ayrı parametre.
+ */
+export function describeMovement(
+  mtype: string,
+  scope: string,
+  side: string,
+  line?: string | null,
+): { marketLabel: string; sideLabel: string } {
+  const scopeTag = scope === "FIRST_HALF" ? "İY " : "";
+  if (mtype === "HOME_DRAW_AWAY") {
+    return { marketLabel: `${scopeTag}1X2`, sideLabel: sideLabel(side) };
+  }
+  if (mtype === "BOTH_TEAMS_TO_SCORE") {
+    return { marketLabel: "KG (BTTS)", sideLabel: /YES/i.test(side) ? "Var" : "Yok" };
+  }
+  if (mtype === "OVER_UNDER") {
+    const base = side.split(":")[0];
+    const ln = line ?? side.split(":")[1] ?? "";
+    return { marketLabel: `${scopeTag}A/Ü ${ln}`, sideLabel: base === "OVER" ? "Üst" : "Alt" };
+  }
+  if (mtype === "DOUBLE_CHANCE") {
+    return { marketLabel: "Çifte Şans", sideLabel: side.replace(/^DC:/, "") };
+  }
+  if (mtype === "ASIAN_HANDICAP") {
+    const n = line != null ? Number(line) : NaN;
+    const lnLabel = Number.isFinite(n) ? (n > 0 ? `+${n}` : String(n)) : String(line ?? "");
+    return { marketLabel: `Asian Handikap ${lnLabel}`, sideLabel: "Ev" };
+  }
+  if (mtype === "HALF_FULL_TIME") {
+    return { marketLabel: "İY/MS", sideLabel: side.replace(/^htft:/, "") };
+  }
+  if (mtype === "CORRECT_SCORE") {
+    return { marketLabel: "Kesin Skor", sideLabel: side.replace(/^score:/, "") };
+  }
+  return { marketLabel: marketTypeLabel(mtype), sideLabel: side };
 }
 
 export function pickOdds(
@@ -450,11 +493,13 @@ export function buildSmartMatchReport(input: {
     const move = moveKind(p.opening, p.closing);
     if (!move || move === "stable") continue;
     const ch = pctChange(p.opening, p.closing);
+    const { marketLabel, sideLabel: sideLbl } = describeMovement(mtype, scope, side, line);
     movements.push({
       market: mtype,
+      marketLabel,
       scope,
       side: sideTok,
-      sideLabel: sideLabel(side.split(":")[0]),
+      sideLabel: sideLbl,
       bookmakerId: String(bm),
       bookmakerName: bmName(String(bm)),
       opening: p.opening,

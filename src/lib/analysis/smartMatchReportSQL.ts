@@ -22,6 +22,7 @@ import {
   moveKind,
   pctChange,
   sideLabel,
+  describeMovement,
   outcome1x2,
   countOutcomes,
   type SmartMatchReport,
@@ -30,7 +31,11 @@ import {
   type MoveKind,
   type OutcomeStats,
 } from "./smartMatchReport";
+import { AH_LINES, CS_SCORES } from "./tableColumns";
 import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
+
+/** Genişletilmiş kapsamda sorgu patlamasın diye CS'de en sık görülen skorlar. */
+const CS_KEY_SCORES = CS_SCORES.slice(0, 6);
 
 type SqlParamPusher = (v: unknown) => string;
 
@@ -112,26 +117,76 @@ async function findSimilar1x2SQL(
   return out;
 }
 
-/** 1X2/BTTS/OU dışında market yok — kazanan tarafı skordan (events) türeten SQL ifadesi. */
-function winCaseSql(mtype: string, side: string, line?: string): string | null {
+/**
+ * Genişletilmiş market kapsamı — kazanan tarafı skordan (events) türeten
+ * numeric (0/0.5/1) SQL ifadesi. HT scope'lu marketler home_ht_score/
+ * away_ht_score kullanır (extraWhere ile NULL satırlar elenir). Asian
+ * Handicap çeyrek çizgiler (±.25/±.75) iki yarım-bahis ortalaması olarak
+ * (0/0.5/1 karışımı) hesaplanır — klasik boolean win/lose yetmez.
+ */
+function winExprSql(
+  mtype: string,
+  scope: string,
+  side: string,
+  line?: string,
+): { expr: string; extraWhere?: string } | null {
+  const isHt = scope === "FIRST_HALF";
+  const hCol = isHt ? "e.home_ht_score" : "e.home_score";
+  const aCol = isHt ? "e.away_ht_score" : "e.away_score";
+  const htGuard = isHt ? `${hCol} IS NOT NULL AND ${aCol} IS NOT NULL` : undefined;
+
   if (mtype === "HOME_DRAW_AWAY") {
-    if (side === "H") return "e.home_score > e.away_score";
-    if (side === "D") return "e.home_score = e.away_score";
-    if (side === "A") return "e.home_score < e.away_score";
-    return null;
+    let cond: string | null = null;
+    if (side === "H") cond = `${hCol} > ${aCol}`;
+    else if (side === "D") cond = `${hCol} = ${aCol}`;
+    else if (side === "A") cond = `${hCol} < ${aCol}`;
+    if (!cond) return null;
+    return { expr: `(CASE WHEN ${cond} THEN 1 ELSE 0 END)`, extraWhere: htGuard };
   }
   if (mtype === "BOTH_TEAMS_TO_SCORE") {
     const yes = /YES/i.test(side);
-    return yes
-      ? "(e.home_score > 0 AND e.away_score > 0)"
-      : "NOT (e.home_score > 0 AND e.away_score > 0)";
+    const cond = "(e.home_score > 0 AND e.away_score > 0)";
+    return { expr: `(CASE WHEN ${yes ? cond : `NOT ${cond}`} THEN 1 ELSE 0 END)` };
   }
   if (mtype === "OVER_UNDER" && line != null) {
     const ln = Number(line);
     if (!Number.isFinite(ln)) return null;
-    return side.startsWith("OVER")
-      ? `(e.home_score + e.away_score) > ${ln}`
-      : `(e.home_score + e.away_score) < ${ln}`;
+    const cond = side.startsWith("OVER")
+      ? `(${hCol} + ${aCol}) > ${ln}`
+      : `(${hCol} + ${aCol}) < ${ln}`;
+    return { expr: `(CASE WHEN ${cond} THEN 1 ELSE 0 END)`, extraWhere: htGuard };
+  }
+  if (mtype === "DOUBLE_CHANCE") {
+    const code = side.replace(/^DC:/, "");
+    const wants: Record<string, string[]> = { "1X": ["H", "D"], "12": ["H", "A"], "X2": ["D", "A"] };
+    const allowed = wants[code];
+    if (!allowed) return null;
+    const outcome =
+      "(CASE WHEN e.home_score > e.away_score THEN 'H' WHEN e.home_score < e.away_score THEN 'A' ELSE 'D' END)";
+    return {
+      expr: `(CASE WHEN ${outcome} IN (${allowed.map((w) => `'${w}'`).join(", ")}) THEN 1 ELSE 0 END)`,
+    };
+  }
+  if (mtype === "ASIAN_HANDICAP" && line != null) {
+    if (!side.startsWith("H")) return null;
+    const ln = Number(line);
+    if (!Number.isFinite(ln)) return null;
+    const margin = (l: number) => `((e.home_score - e.away_score) + (${l}))`;
+    const singleResult = (l: number) =>
+      `(CASE WHEN ${margin(l)} > 0 THEN 1 WHEN ${margin(l)} = 0 THEN 0.5 ELSE 0 END)`;
+    const isQuarter = Math.abs((ln * 4) % 2) === 1;
+    if (isQuarter) {
+      const l1 = ln - 0.25;
+      const l2 = ln + 0.25;
+      return { expr: `((${singleResult(l1)} + ${singleResult(l2)}) / 2.0)` };
+    }
+    return { expr: singleResult(ln) };
+  }
+  if (mtype === "CORRECT_SCORE") {
+    const code = side.replace(/^score:/, "");
+    const [hs, as] = code.split(":").map((v) => Number(v));
+    if (!Number.isFinite(hs) || !Number.isFinite(as)) return null;
+    return { expr: `(CASE WHEN e.home_score = ${hs} AND e.away_score = ${as} THEN 1 ELSE 0 END)` };
   }
   return null;
 }
@@ -151,8 +206,8 @@ async function historicalForMoveSQL(
   line?: string,
 ): Promise<MovementInsight["historical"]> {
   if (move === "stable") return null;
-  const winCase = winCaseSql(mtype, side, line);
-  if (!winCase) return null;
+  const w = winExprSql(mtype, scope, side, line);
+  if (!w) return null;
 
   const { exact, prefixes } = sideCandidates(side);
   const params: unknown[] = [];
@@ -163,6 +218,14 @@ async function historicalForMoveSQL(
   for (const p of prefixes) {
     sideConds.push(`q.selection = ${push(p)}`);
     sideConds.push(`q.selection LIKE ${push(`${p}:%`)}`);
+  }
+  // AH/OU compact token yerine ayrı `line` kolonu kullanan satırları da
+  // yakalamak için ek fallback (side'ın "base" kısmı + numeric line eşleşmesi).
+  if (line != null && (mtype === "OVER_UNDER" || mtype === "ASIAN_HANDICAP")) {
+    const base = side.split(":")[0];
+    const basePh = push(base);
+    const lineNumPh = push(Number(line));
+    sideConds.push(`(q.selection = ${basePh} AND q.line IS NOT NULL AND q.line::numeric = ${lineNumPh})`);
   }
   const sideCond = `(${sideConds.join(" OR ")})`;
 
@@ -181,7 +244,7 @@ async function historicalForMoveSQL(
 
   const text = `
     SELECT COUNT(*)::int AS n,
-           SUM(CASE WHEN ${winCase} THEN 1 ELSE 0 END)::int AS wins,
+           SUM(${w.expr})::float AS wins,
            SUM(1.0 / q.odds) AS sum_impl
     FROM ${MATCH_ODDS_TABLE} q
     JOIN events e ON e.id = q.event_id
@@ -191,6 +254,7 @@ async function historicalForMoveSQL(
       AND q.odds BETWEEN ${lo} AND ${hi}
       AND (${moveExpr}) = ${movePh}
       AND e.home_score IS NOT NULL AND e.away_score IS NOT NULL
+      ${w.extraWhere ? `AND ${w.extraWhere}` : ""}
   `;
 
   const rows = (await sql.unsafe(text, params as never[])) as Record<string, unknown>[];
@@ -321,14 +385,23 @@ export async function buildSmartMatchReportSQL(input: {
     ["HOME_DRAW_AWAY", "FULL_TIME", "H"],
     ["HOME_DRAW_AWAY", "FULL_TIME", "D"],
     ["HOME_DRAW_AWAY", "FULL_TIME", "A"],
+    ["HOME_DRAW_AWAY", "FIRST_HALF", "H"],
+    ["HOME_DRAW_AWAY", "FIRST_HALF", "D"],
+    ["HOME_DRAW_AWAY", "FIRST_HALF", "A"],
     ["BOTH_TEAMS_TO_SCORE", "FULL_TIME", "btts:YES"],
     ["BOTH_TEAMS_TO_SCORE", "FULL_TIME", "btts:NO"],
     ["OVER_UNDER", "FULL_TIME", "OVER", "2.5"],
     ["OVER_UNDER", "FULL_TIME", "UNDER", "2.5"],
+    ["DOUBLE_CHANCE", "FULL_TIME", "DC:1X"],
+    ["DOUBLE_CHANCE", "FULL_TIME", "DC:12"],
+    ["DOUBLE_CHANCE", "FULL_TIME", "DC:X2"],
+    ...AH_LINES.map((l): [string, string, string, string] => ["ASIAN_HANDICAP", "FULL_TIME", "H", String(l)]),
+    ...CS_KEY_SCORES.map((s): [string, string, string] => ["CORRECT_SCORE", "FULL_TIME", `score:${s}`]),
   ];
 
   for (const [mtype, scope, side, line] of keyMarkets) {
-    const sideTok = line && mtype === "OVER_UNDER" ? `${side}:${line}` : side;
+    const sideTok =
+      line && (mtype === "OVER_UNDER" || mtype === "ASIAN_HANDICAP") ? `${side}:${line}` : side;
     const p = pickOdds(f.odds, bm, mtype, scope, sideTok, f.home_id, f.away_id);
     if (p.opening == null || p.closing == null) continue;
     const move = moveKind(p.opening, p.closing);
@@ -344,11 +417,13 @@ export async function buildSmartMatchReportSQL(input: {
       tol,
       line,
     );
+    const { marketLabel, sideLabel: sideLbl } = describeMovement(mtype, scope, side, line);
     movements.push({
       market: mtype,
+      marketLabel,
       scope,
       side: sideTok,
-      sideLabel: sideLabel(side.split(":")[0]),
+      sideLabel: sideLbl,
       bookmakerId: String(bm),
       bookmakerName: bmDisplayName(String(bm)),
       opening: p.opening,
@@ -359,6 +434,7 @@ export async function buildSmartMatchReportSQL(input: {
     });
   }
   movements.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+  const limitedMovements = movements.slice(0, 20);
 
   const summary: string[] = [];
   if (profile && similar1x2.n >= 5) {
@@ -396,7 +472,7 @@ export async function buildSmartMatchReportSQL(input: {
     archiveSource: "supabase:match_odds",
     profile1x2: profile,
     similar1x2,
-    movements,
+    movements: limitedMovements,
     bookmakerGrid: grid,
     consensus: {
       favorite: totalBm ? topFav : null,
