@@ -24,6 +24,8 @@ const FILTER_GROUPS: ColumnGroupId[] = [
   "htft",
   "ah",
   "cs",
+  "dnb",
+  "eh",
 ];
 
 type MarketOption = {
