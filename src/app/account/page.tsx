@@ -130,10 +130,10 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                 <dd>{fmtDate(profile.current_period_end)}</dd>
               </div>
             ) : null}
-            {profile?.lemon_subscription_id ? (
+                        {profile?.dodo_subscription_id ? (
               <div>
                 <dt>Subscription ID</dt>
-                <dd className={styles.mono}>{profile.lemon_subscription_id}</dd>
+                <dd className={styles.mono}>{profile.dodo_subscription_id}</dd>
               </div>
             ) : null}
           </dl>
