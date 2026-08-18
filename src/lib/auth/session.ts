@@ -15,7 +15,7 @@ export async function getProfile(userId: string): Promise<ProfileRow | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id,email,plan_id,subscription_status,is_admin,lemon_customer_id,lemon_subscription_id,lemon_variant_id,current_period_end",
+      "id,email,plan_id,subscription_status,is_admin,dodo_customer_id,dodo_subscription_id,dodo_product_id,current_period_end",
     )
     .eq("id", userId)
     .maybeSingle();
