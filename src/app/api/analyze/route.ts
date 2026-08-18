@@ -5,6 +5,7 @@ import {
   type ProfileQuery,
 } from "@/lib/analysis/profile";
 import { searchProfile } from "@/lib/fixtures";
+import { enforceAnalyzeSearchLimits } from "@/lib/auth/enforceSearchLimits";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,6 +36,9 @@ export async function GET(req: Request) {
       { status: 400 },
     );
   }
+  const gate = await enforceAnalyzeSearchLimits(query.criteria.length);
+  if (!gate.ok) return gate.response;
+
   const result = await searchProfile(query);
   if (!result.ok) {
     return NextResponse.json(result, { status: result.missingEnv ? 503 : 500 });
@@ -68,6 +72,9 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  const gate = await enforceAnalyzeSearchLimits(query.criteria.length);
+  if (!gate.ok) return gate.response;
+
   const result = await searchProfile(query);
   if (!result.ok) {
     return NextResponse.json(result, { status: result.missingEnv ? 503 : 500 });
