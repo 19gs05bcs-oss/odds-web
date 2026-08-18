@@ -12,6 +12,8 @@
   "dependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",
     "@supabase/ssr": "^0.6.1",
+    "dodopayments": "^2.32.0",
+    "standardwebhooks": "^1.0.0",
     "@supabase/supabase-js": "^2.49.1",
     "@types/node": "^20.19.43",
     "@types/react": "^18",
