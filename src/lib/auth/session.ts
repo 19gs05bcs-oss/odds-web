@@ -41,9 +41,9 @@ export async function upsertProfileFromWebhook(row: {
   email?: string | null;
   planId?: string | null;
   subscriptionStatus: string;
-  lemonCustomerId?: string | null;
-  lemonSubscriptionId?: string | null;
-  lemonVariantId?: string | null;
+  dodoCustomerId?: string | null;
+  dodoSubscriptionId?: string | null;
+  dodoProductId?: string | null;
   currentPeriodEnd?: string | null;
 }) {
   const admin = getSupabaseAdmin();
@@ -54,9 +54,9 @@ export async function upsertProfileFromWebhook(row: {
     email: row.email ?? null,
     plan_id: row.planId ?? null,
     subscription_status: row.subscriptionStatus,
-    lemon_customer_id: row.lemonCustomerId ?? null,
-    lemon_subscription_id: row.lemonSubscriptionId ?? null,
-    lemon_variant_id: row.lemonVariantId ?? null,
+    dodo_customer_id: row.dodoCustomerId ?? null,
+    dodo_subscription_id: row.dodoSubscriptionId ?? null,
+    dodo_product_id: row.dodoProductId ?? null,
     current_period_end: row.currentPeriodEnd ?? null,
     updated_at: new Date().toISOString(),
   };
