@@ -89,8 +89,20 @@ export function criterionLabel(c: OddsCriterion): string {
   if (c.marketType === "ASIAN_HANDICAP" || c.marketType === "EUROPEAN_HANDICAP") {
     const n = c.line != null && c.line !== "" ? Number(c.line) : NaN;
     const lineLabel = Number.isFinite(n) ? (n > 0 ? `+${n}` : String(n)) : c.line || "";
-    const side = c.side === "H" || c.side.startsWith("H") ? "H" : c.side === "A" || c.side.startsWith("A") ? "A" : c.side;
-    return `AH ${lineLabel} ${side}${oc}${odds}`;
+    const side =
+      c.side === "H" || c.side.startsWith("H")
+        ? "H"
+        : c.side === "D" || c.side.startsWith("D")
+          ? "X"
+          : c.side === "A" || c.side.startsWith("A")
+            ? "A"
+            : c.side;
+    const label = c.marketType === "EUROPEAN_HANDICAP" ? "EH" : "AH";
+    return `${label} ${lineLabel} ${side}${oc}${odds}`;
+  }
+  if (c.marketType === "DRAW_NO_BET") {
+    const side = c.side === "H" ? "1" : c.side === "A" ? "2" : c.side;
+    return `DNB${scope} ${side}${oc}${odds}`;
   }
   if (c.marketType === "BOTH_TEAMS_TO_SCORE") {
     const yn = /YES|True/i.test(c.side) ? "Yes" : "No";

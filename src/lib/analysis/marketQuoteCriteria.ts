@@ -47,6 +47,8 @@ export type QuoteCandidateOpts = {
   marketType: string;
   marketScope: string;
   side: string;
+  /** O/U, AH, EH gibi line zorunlu marketler için — match_odds.line kolonuna karşı filtrelenir. */
+  line?: string | number | null;
   /** [lo, hi] — opening/closing/current oran aralığı (tolerans dahil edilmiş). */
   oddsRange: [number, number];
   price?: "opening" | "closing";
@@ -78,7 +80,25 @@ export function buildQuoteCandidateCte(
   const loPh = push(lo);
   const hiPh = push(hi);
 
-  const marketPh = push(`${opts.marketType}:${opts.marketScope || "FULL_TIME"}`);
+  // match_odds.market line'lı marketlerde 3 parçalı gelir ("OVER_UNDER:
+  // FIRST_HALF:3.5"), line'sız marketlerde 2 parçalı ("HOME_DRAW_AWAY:
+  // FULL_TIME"). Line biliniyorsa tam değeri kurup TEK satıra daraltıyoruz;
+  // bilinmiyorsa TYPE:SCOPE ile başlayan (line'lı VEYA line'sız) her satırı
+  // kabul ediyoruz.
+  const marketBase = `${opts.marketType}:${opts.marketScope || "FULL_TIME"}`;
+  const hasLine = opts.line != null && String(opts.line) !== "";
+  const marketCond = hasLine
+    ? `market = ${push(`${marketBase}:${opts.line}`)}`
+    : `(market = ${push(marketBase)} OR market LIKE ${push(`${marketBase}:%`)})`;
+
+  // line zorunlu marketlerde (O/U, AH, EH) match_odds.line kolonuna karşı da
+  // ayrıca doğrula — market string'i zaten line içeriyor ama bu ek kontrol
+  // veri tutarsızlığına karşı bir güvenlik supabı.
+  let lineCond = "";
+  if (hasLine) {
+    const linePh = push(String(opts.line));
+    lineCond = `AND line::text = ${linePh}`;
+  }
 
   // Nested (bookmaker dolu) satırlar bm filtresine tabi; bookmaker NULL
   // olan satırlar (bookmaker bilgisi gelmemiş) over-inclusive kalır — JS'te
@@ -103,11 +123,12 @@ export function buildQuoteCandidateCte(
 
   return `
     ${alias} AS (
-      SELECT event_id, bookmaker AS bookmaker_id, selection AS side, opening, odds AS current
+      SELECT event_id, bookmaker AS bookmaker_id, selection AS side, line, opening, odds AS current
       FROM ${MATCH_ODDS_TABLE}
-      WHERE market = ${marketPh}
+      WHERE ${marketCond}
         AND ${sideCond}
         AND ${oddsCond}
+        ${lineCond}
         ${bmCond}
         ${seasonCond}
     )`;

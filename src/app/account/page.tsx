@@ -130,10 +130,10 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
                 <dd>{fmtDate(profile.current_period_end)}</dd>
               </div>
             ) : null}
-            {profile?.lemon_subscription_id ? (
+                        {profile?.dodo_subscription_id ? (
               <div>
                 <dt>Subscription ID</dt>
-                <dd className={styles.mono}>{profile.lemon_subscription_id}</dd>
+                <dd className={styles.mono}>{profile.dodo_subscription_id}</dd>
               </div>
             ) : null}
           </dl>
@@ -176,10 +176,15 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           </button>
         </form>
 
-        <p className={styles.hint}>
-          Billing receipts and cancellation: Lemon Squeezy customer portal (link in payment
-          email).
-        </p>
+                {profile?.dodo_customer_id ? (
+          <p className={styles.hint}>
+            Billing receipts and cancellation: <a href="/api/customer-portal">customer portal</a>.
+          </p>
+        ) : (
+          <p className={styles.hint}>
+            Billing receipts and cancellation: available after your first payment.
+          </p>
+        )}
       </main>
     </>
   );

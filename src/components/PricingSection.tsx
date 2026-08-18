@@ -58,7 +58,7 @@ export function PricingSection() {
           <span className={styles.kicker}>Pricing</span>
           <h2 className={styles.title}>Paid access only</h2>
           <p className={styles.lead}>
-            No free tier. No trial. Subscribe via Lemon Squeezy to unlock live fixtures and
+            No free tier. No trial. Subscribe via Dodo Payments to unlock live fixtures and
             the full archive. Try the{" "}
             <Link href="#demo" className={styles.inlineLink}>
               interactive demo
@@ -107,7 +107,7 @@ export function PricingSection() {
         </div>
 
         <ul className={styles.notes}>
-          <li>Secure checkout powered by Lemon Squeezy · cancel anytime</li>
+                    <li>Secure checkout powered by Dodo Payments · cancel anytime</li>
           <li>Archive served only through secured API — not via browser console or direct DB</li>
           <li>Prices in USD</li>
         </ul>

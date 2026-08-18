@@ -15,7 +15,7 @@ export async function getProfile(userId: string): Promise<ProfileRow | null> {
   const { data, error } = await supabase
     .from("profiles")
     .select(
-      "id,email,plan_id,subscription_status,is_admin,lemon_customer_id,lemon_subscription_id,lemon_variant_id,current_period_end",
+      "id,email,plan_id,subscription_status,is_admin,dodo_customer_id,dodo_subscription_id,dodo_product_id,current_period_end",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -41,9 +41,9 @@ export async function upsertProfileFromWebhook(row: {
   email?: string | null;
   planId?: string | null;
   subscriptionStatus: string;
-  lemonCustomerId?: string | null;
-  lemonSubscriptionId?: string | null;
-  lemonVariantId?: string | null;
+  dodoCustomerId?: string | null;
+  dodoSubscriptionId?: string | null;
+  dodoProductId?: string | null;
   currentPeriodEnd?: string | null;
 }) {
   const admin = getSupabaseAdmin();
@@ -54,9 +54,9 @@ export async function upsertProfileFromWebhook(row: {
     email: row.email ?? null,
     plan_id: row.planId ?? null,
     subscription_status: row.subscriptionStatus,
-    lemon_customer_id: row.lemonCustomerId ?? null,
-    lemon_subscription_id: row.lemonSubscriptionId ?? null,
-    lemon_variant_id: row.lemonVariantId ?? null,
+    dodo_customer_id: row.dodoCustomerId ?? null,
+    dodo_subscription_id: row.dodoSubscriptionId ?? null,
+    dodo_product_id: row.dodoProductId ?? null,
     current_period_end: row.currentPeriodEnd ?? null,
     updated_at: new Date().toISOString(),
   };

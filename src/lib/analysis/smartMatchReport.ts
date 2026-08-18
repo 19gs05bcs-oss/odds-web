@@ -10,6 +10,7 @@ import {
   type TableRow,
 } from "@/lib/analysis/tableRows";
 import type { SeasonGzMatch } from "@/lib/analysis/seasonGzCache";
+import { marketTypeLabel } from "@/lib/analysis/labels";
 
 export type MoveKind = "shortened" | "lengthened" | "stable";
 
@@ -36,6 +37,7 @@ export type OutcomeStats = {
 
 export type MovementInsight = {
   market: string;
+  marketLabel: string;
   scope: string;
   side: string;
   sideLabel: string;
@@ -92,16 +94,16 @@ export type SmartMatchReport = {
   summary: string[];
 };
 
-function num(v: unknown): number | null {
+export function num(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1.01 ? n : null;
 }
 
-function pctChange(opening: number, closing: number): number {
+export function pctChange(opening: number, closing: number): number {
   return opening >= 1.01 ? ((closing - opening) / opening) * 100 : 0;
 }
 
-function moveKind(opening: number | null, closing: number | null): MoveKind | null {
+export function moveKind(opening: number | null, closing: number | null): MoveKind | null {
   if (opening == null || closing == null || opening < 1.01 || closing < 1.01) return null;
   const ch = pctChange(opening, closing);
   if (ch <= -2) return "shortened";
@@ -109,25 +111,66 @@ function moveKind(opening: number | null, closing: number | null): MoveKind | nu
   return "stable";
 }
 
-function oddsClose(a: number, b: number, tolPct: number): boolean {
+export function oddsClose(a: number, b: number, tolPct: number): boolean {
   if (tolPct <= 0) return Math.round(a * 100) === Math.round(b * 100);
   return Math.abs(a - b) / b <= tolPct;
 }
 
-function outcome1x2(h: number, a: number): "H" | "D" | "A" {
+export function outcome1x2(h: number, a: number): "H" | "D" | "A" {
   if (h > a) return "H";
   if (h < a) return "A";
   return "D";
 }
 
-function sideLabel(side: string): string {
+export function sideLabel(side: string): string {
   if (side === "H") return "1";
   if (side === "D") return "X";
   if (side === "A") return "2";
   return side;
 }
 
-function pickOdds(
+/**
+ * Bir market/side/line üçlüsü için UI'da gösterilecek market adı + taraf
+ * etiketi — genişletilmiş market kapsamı (HT 1X2, Double Chance, Asian
+ * Handicap, Correct Score) dahil. side burada henüz line eklenmemiş "çıplak"
+ * token (H/D/A, OVER/UNDER, DC:1X, score:1:0…), line ayrı parametre.
+ */
+export function describeMovement(
+  mtype: string,
+  scope: string,
+  side: string,
+  line?: string | null,
+): { marketLabel: string; sideLabel: string } {
+  const scopeTag = scope === "FIRST_HALF" ? "İY " : "";
+  if (mtype === "HOME_DRAW_AWAY") {
+    return { marketLabel: `${scopeTag}1X2`, sideLabel: sideLabel(side) };
+  }
+  if (mtype === "BOTH_TEAMS_TO_SCORE") {
+    return { marketLabel: "KG (BTTS)", sideLabel: /YES/i.test(side) ? "Var" : "Yok" };
+  }
+  if (mtype === "OVER_UNDER") {
+    const base = side.split(":")[0];
+    const ln = line ?? side.split(":")[1] ?? "";
+    return { marketLabel: `${scopeTag}A/Ü ${ln}`, sideLabel: base === "OVER" ? "Üst" : "Alt" };
+  }
+  if (mtype === "DOUBLE_CHANCE") {
+    return { marketLabel: "Çifte Şans", sideLabel: side.replace(/^DC:/, "") };
+  }
+  if (mtype === "ASIAN_HANDICAP") {
+    const n = line != null ? Number(line) : NaN;
+    const lnLabel = Number.isFinite(n) ? (n > 0 ? `+${n}` : String(n)) : String(line ?? "");
+    return { marketLabel: `Asian Handikap ${lnLabel}`, sideLabel: "Ev" };
+  }
+  if (mtype === "HALF_FULL_TIME") {
+    return { marketLabel: "İY/MS", sideLabel: side.replace(/^htft:/, "") };
+  }
+  if (mtype === "CORRECT_SCORE") {
+    return { marketLabel: "Kesin Skor", sideLabel: side.replace(/^score:/, "") };
+  }
+  return { marketLabel: marketTypeLabel(mtype), sideLabel: side };
+}
+
+export function pickOdds(
   odds: CompactOddsRow[] | null | undefined,
   bmId: number,
   mtype: string,
@@ -158,7 +201,7 @@ function pickOdds(
   return { opening, closing };
 }
 
-function extract1x2(
+export function extract1x2(
   odds: CompactOddsRow[] | null | undefined,
   bmId: number,
   homeId?: string | null,
@@ -171,7 +214,7 @@ function extract1x2(
   return { H, D, A };
 }
 
-function favoriteSide(H: number | null, D: number | null, A: number | null): "H" | "D" | "A" | null {
+export function favoriteSide(H: number | null, D: number | null, A: number | null): "H" | "D" | "A" | null {
   const vals: Array<["H" | "D" | "A", number]> = [];
   if (H != null) vals.push(["H", H]);
   if (D != null) vals.push(["D", D]);
@@ -199,7 +242,7 @@ function sideWon(side: string, h: number, a: number, mtype: string, line?: strin
   return null;
 }
 
-function bmIds(odds: CompactOddsRow[] | null | undefined): number[] {
+export function bmIds(odds: CompactOddsRow[] | null | undefined): number[] {
   const s = new Set<number>();
   for (const row of odds || []) {
     if (!Array.isArray(row)) continue;
@@ -209,7 +252,7 @@ function bmIds(odds: CompactOddsRow[] | null | undefined): number[] {
   return [...s].sort((a, b) => a - b);
 }
 
-function buildBmGrid(
+export function buildBmGrid(
   odds: CompactOddsRow[] | null | undefined,
   bookmakers: Record<string, string> | null | undefined,
   homeId?: string | null,
@@ -234,7 +277,7 @@ function buildBmGrid(
   });
 }
 
-function countOutcomes(rows: SimilarMatchRow[]): OutcomeStats {
+export function countOutcomes(rows: SimilarMatchRow[]): OutcomeStats {
   const stats = { n: rows.length, H: 0, D: 0, A: 0, top: null as "H" | "D" | "A" | null, topPct: 0 };
   for (const r of rows) stats[r.outcome] += 1;
   if (!stats.n) return stats;
@@ -450,11 +493,13 @@ export function buildSmartMatchReport(input: {
     const move = moveKind(p.opening, p.closing);
     if (!move || move === "stable") continue;
     const ch = pctChange(p.opening, p.closing);
+    const { marketLabel, sideLabel: sideLbl } = describeMovement(mtype, scope, side, line);
     movements.push({
       market: mtype,
+      marketLabel,
       scope,
       side: sideTok,
-      sideLabel: sideLabel(side.split(":")[0]),
+      sideLabel: sideLbl,
       bookmakerId: String(bm),
       bookmakerName: bmName(String(bm)),
       opening: p.opening,

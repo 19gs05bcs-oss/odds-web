@@ -110,8 +110,11 @@ export type SeasonQuotesFilters = {
 export function buildSeasonQuotesSql(f: SeasonQuotesFilters, push: SqlParamPusher): string {
   const conds = [`q.season_slug = ${push(f.seasonSlug)}`];
   if (f.marketType) {
-    const marketPh = push(`${f.marketType}:${f.marketScope || "FULL_TIME"}`);
-    conds.push(`q.market = ${marketPh}`);
+    // market kolonu line'lı marketlerde 3 parçalı ("OVER_UNDER:FIRST_HALF:
+    // 3.5") gelir; burada belirli bir line bilgisi yok, o yüzden TYPE:SCOPE
+    // ile başlayan her satırı (line'lı ya da line'sız) kabul ediyoruz.
+    const base = `${f.marketType}:${f.marketScope || "FULL_TIME"}`;
+    conds.push(`(q.market = ${push(base)} OR q.market LIKE ${push(`${base}:%`)})`);
   }
   if (f.bookmakerId) {
     conds.push(`(q.bookmaker IS NULL OR q.bookmaker = ${push(String(f.bookmakerId))})`);

@@ -6,18 +6,16 @@ export type ProfileRow = {
   plan_id: PlanId | null;
   subscription_status: string;
   is_admin?: boolean | null;
-  lemon_customer_id: string | null;
-  lemon_subscription_id: string | null;
-  lemon_variant_id: string | null;
+  dodo_customer_id: string | null;
+  dodo_subscription_id: string | null;
+  dodo_product_id: string | null;
   current_period_end: string | null;
 };
 
-/** Lemon Squeezy statuses that grant product access. */
+/** Dodo Payments statuses that grant product access. */
 const ACTIVE_STATUSES = new Set([
   "active",
-  "on_trial",
-  "past_due",
-  "paused",
+  "on_hold",
 ]);
 
 export function adminEmails(): Set<string> {
@@ -90,23 +88,22 @@ export function hasActiveSubscription(
   return hasMemberAccess(profile);
 }
 
-export function mapLemonStatus(status: string): string {
+export function mapDodoStatus(status: string): string {
   const s = status.toLowerCase();
-  if (s === "cancelled") return "cancelled";
+  if (s === "cancelled" || s === "canceled") return "cancelled";
   if (s === "expired") return "expired";
-  if (s === "unpaid") return "unpaid";
-  if (s === "past_due") return "past_due";
-  if (s === "paused") return "paused";
-  if (s === "on_trial") return "on_trial";
+  if (s === "failed") return "failed";
+  if (s === "on_hold") return "on_hold";
+  if (s === "pending") return "pending";
   return "active";
 }
 
-export function planFromVariantId(variantId: string | number | null | undefined): PlanId | null {
-  if (variantId == null) return null;
-  const v = String(variantId);
-  const starter = process.env.LEMONSQUEEZY_VARIANT_STARTER?.trim();
-  const pro = process.env.LEMONSQUEEZY_VARIANT_PRO?.trim();
-  const analyst = process.env.LEMONSQUEEZY_VARIANT_ANALYST?.trim();
+export function planFromProductId(productId: string | number | null | undefined): PlanId | null {
+  if (productId == null) return null;
+  const v = String(productId);
+  const starter = process.env.DODO_PRODUCT_STARTER?.trim();
+  const pro = process.env.DODO_PRODUCT_PRO?.trim();
+  const analyst = process.env.DODO_PRODUCT_ANALYST?.trim();
   if (starter && v === starter) return "starter";
   if (pro && v === pro) return "pro";
   if (analyst && v === analyst) return "analyst";

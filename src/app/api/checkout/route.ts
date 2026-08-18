@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import type { PlanId } from "@/lib/auth/subscription";
 import { getSessionUser } from "@/lib/auth/session";
-import { createCheckout } from "@/lib/lemon-squeezy/client";
-
+import { createCheckout } from "@/lib/dodo-payments/client";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 

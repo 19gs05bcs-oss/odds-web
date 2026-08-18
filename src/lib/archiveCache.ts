@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { sql } from "@/lib/db";
 
 /** Compact odds row from fetchday / season schema_version=2. */
@@ -186,7 +187,7 @@ export async function listFixtures(bulletinDate?: string): Promise<FixtureRow[]>
   });
 }
 
-export async function listFixtureDates(limit = 14): Promise<string[]> {
+async function fetchFixtureDatesUncached(limit = 14): Promise<string[]> {
   try {
     const query = "SELECT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 300";
     const data = await withTimeout(
@@ -206,6 +207,17 @@ export async function listFixtureDates(limit = 14): Promise<string[]> {
     return [];
   }
 }
+
+/**
+ * ORDER BY bulletin_date DESC LIMIT 300 — index yoksa fixture tablosunun
+ * büyük bir kısmını sıralıyor. Bülten tarihleri günde en fazla 1 kez değişir,
+ * bu yüzden her /analyze veya /smart-analysis sayfa açılışında yeniden
+ * sorgulamak yerine 5 dakikalık pencerede cache'liyoruz.
+ */
+export const listFixtureDates = unstable_cache(fetchFixtureDatesUncached, ["fixture-dates"], {
+  revalidate: 300,
+  tags: ["fixture-dates"],
+});
 
 export function fixtureTitle(f: FixtureRow): string {
   return `${f.home_name || "?"} – ${f.away_name || "?"}`;

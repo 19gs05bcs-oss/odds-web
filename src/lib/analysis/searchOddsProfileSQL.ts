@@ -60,6 +60,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
         marketType: c.marketType,
         marketScope: c.marketScope || "FULL_TIME",
         side: c.side,
+        line: c.line ?? null,
         oddsRange: [c.targetOdds - effTol, c.targetOdds + effTol],
         price: c.price,
         bookmakerId: bm,
@@ -72,7 +73,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
   const joinCols = criteria
     .map(
       (_, i) =>
-        `q${i}.side AS c${i}_side, q${i}.opening AS c${i}_opening, q${i}.current AS c${i}_closing, q${i}.bookmaker_id AS c${i}_bookmaker_id`,
+        `q${i}.side AS c${i}_side, q${i}.line AS c${i}_line, q${i}.opening AS c${i}_opening, q${i}.current AS c${i}_closing, q${i}.bookmaker_id AS c${i}_bookmaker_id`,
     )
     .join(",\n      ");
 
@@ -82,7 +83,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
     .join("\n      ");
 
   const outerJoinCols = criteria
-    .map((_, i) => `j.c${i}_side, j.c${i}_opening, j.c${i}_closing, j.c${i}_bookmaker_id`)
+    .map((_, i) => `j.c${i}_side, j.c${i}_line, j.c${i}_opening, j.c${i}_closing, j.c${i}_bookmaker_id`)
     .join(",\n      ");
 
   let seasonWhere = "";
@@ -156,6 +157,7 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     for (let i = 0; i < criteria.length; i++) {
       const c = criteria[i];
       const side = row[`c${i}_side`] as string | null;
+      const line = row[`c${i}_line`] as string | number | null;
       const opening = num(row[`c${i}_opening`]);
       const closing = num(row[`c${i}_closing`]);
       const bookmakerIdRaw = row[`c${i}_bookmaker_id`];
@@ -184,7 +186,7 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
         marketScope: c.marketScope,
         marketKey: `${c.marketType}:${c.marketScope}`,
         marketName: c.marketType,
-        line: null,
+        line: line != null ? String(line) : null,
         side,
         sideName: "",
         opening,

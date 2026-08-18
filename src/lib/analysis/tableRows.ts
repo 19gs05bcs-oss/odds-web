@@ -729,20 +729,25 @@ export function profileMatchToTableRow(m: ProfileMatch): TableRow {
     if (c.kind === "market") odds[c.id] = null;
   }
   for (const hit of m.hits) {
+    // NOT: yalnızca criterionMatchesColumn kullan — marketType+marketScope+line
+    // doğrular. Eski kod burada "c.side === hit.side" kısayolu da deniyordu;
+    // bu scope'u hiç kontrol etmediği için ör. FT1 (ms_1) hit'i ALL_COLUMNS'ta
+    // ondan önce duran HT1 (ht_1) kolonuna yanlış eşleşiyordu (ikisi de side="H"),
+    // ve searchProfile() bu yanlış hücreyi full grid'in üzerine yazıp gerçek
+    // HT1 oranını FT1 değeriyle eziyordu.
     const col = ALL_COLUMNS.find(
       (c): c is MarketColumnDef =>
         c.kind === "market" &&
-        (c.side === hit.side ||
-          criterionMatchesColumn(
-            {
-              marketType: hit.marketType,
-              marketScope: hit.marketScope,
-              side: hit.side,
-              line: hit.line,
-              targetOdds: hit.targetOdds,
-            },
-            c,
-          )),
+        criterionMatchesColumn(
+          {
+            marketType: hit.marketType,
+            marketScope: hit.marketScope,
+            side: hit.side,
+            line: hit.line,
+            targetOdds: hit.targetOdds,
+          },
+          c,
+        ),
     );
     if (col) {
       const closing = hit.closing ?? hit.targetOdds;
@@ -978,8 +983,15 @@ export function marketQuoteRowsToCompactOdds(rows: MatchOddsWithMetaRow[]): Comp
     if (!row.bookmaker) continue;
     const bm = bookmakerNameToPseudoId(String(row.bookmaker));
     const { marketType: mtype, marketScope: scope } = splitMarket(row.market);
-    const side = row.selection;
+    let side = row.selection;
     if (!side) continue;
+    // match_odds şemasında line ayrı kolon (selection çıplak "OVER"/"H" gelir).
+    // compactMatchesCol/parseSideToken ise "OVER:2.5" gibi gömülü line formatı
+    // bekliyor — yoksa O/U ve AH kolonları line eşleşmesinde hep false dönüp
+    // boş kalıyordu. Zaten gömülüyse (":" içeriyorsa) dokunma.
+    if (row.line != null && String(row.line) !== "" && !side.includes(":")) {
+      side = `${side}:${row.line}`;
+    }
     const opening = row.opening == null ? null : Number(row.opening);
     const current = row.odds == null ? null : Number(row.odds);
     if (opening == null && current == null) continue;
