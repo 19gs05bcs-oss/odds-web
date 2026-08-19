@@ -15,7 +15,7 @@ const SmartAnalysisClient = nextDynamic(
   () => import("@/components/SmartAnalysisClient").then((m) => m.SmartAnalysisClient),
   {
     ssr: false,
-    loading: () => <p className={styles.loading}>Smart Analysis yükleniyor…</p>,
+    loading: () => <p className={styles.loading}>Loading Smart Analysis…</p>,
   },
 );
 
