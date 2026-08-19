@@ -161,14 +161,26 @@ export async function fetchSeasonQuoteRows(
   return sql.unsafe(text, params as never[]) as unknown as Promise<MatchOddsWithMetaRow[]>;
 }
 
-/** Verilen event_id listesi için TÜM quote satırlarını (tam bookmaker grid'i) çeker. */
-export async function fetchQuoteRowsByEventIds(eventIds: string[]): Promise<MatchOddsWithMetaRow[]> {
+/**
+ * Verilen event_id listesi için quote satırlarını çeker.
+ * bookmaker verilirse SADECE o bookmaker'ın satırları çekilir (20 değil 1) —
+ * similarity/route.ts bunu kullanıyor. Verilmezse eski davranış (tam grid) aynen korunur.
+ */
+export async function fetchQuoteRowsByEventIds(
+  eventIds: string[],
+  bookmaker?: string | null,
+): Promise<MatchOddsWithMetaRow[]> {
   const ids = [...new Set(eventIds)].filter(Boolean);
   if (!ids.length) return [];
-  const rows = await sql.unsafe(
-    `SELECT ${MATCH_ODDS_FULL_SELECT} ${FROM_JOIN} WHERE q.event_id = ANY($1)`,
-    [ids] as never[],
-  );
+  const rows = bookmaker
+    ? await sql.unsafe(
+        `SELECT ${MATCH_ODDS_FULL_SELECT} ${FROM_JOIN} WHERE q.event_id = ANY($1) AND q.bookmaker = $2`,
+        [ids, bookmaker] as never[],
+      )
+    : await sql.unsafe(
+        `SELECT ${MATCH_ODDS_FULL_SELECT} ${FROM_JOIN} WHERE q.event_id = ANY($1)`,
+        [ids] as never[],
+      );
   return rows as unknown as MatchOddsWithMetaRow[];
 }
 
