@@ -6,6 +6,7 @@ import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import type { SmartMatchReport } from "@/lib/analysis/smartMatchReport";
 import { PREFERRED_BM } from "@/lib/analysis/tableRows";
 import type { SimilarityResult } from "@/lib/analysis/similarityEngine";
+type SimilarityResultV2 = SimilarityResult & { error?: string; durationMs?: number };
 import type { BookmakerOption } from "@/lib/types";
 import type { FixtureRow } from "@/lib/fixtures";
 import { formatCount, formatKickoff, formatOdds } from "@/lib/format";
@@ -47,7 +48,7 @@ export function SmartAnalysisClient({
   const [referenceBm, setReferenceBm] = useState(String(PREFERRED_BM));
   const [tolerancePct, setTolerancePct] = useState("3");
   const [report, setReport] = useState<
-    (SmartMatchReport & { similarityV2?: SimilarityResult & { error?: string } }) | null
+    (SmartMatchReport & { similarityV2?: SimilarityResultV2 }) | null
   >(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -149,7 +150,7 @@ export function SmartAnalysisClient({
       const j = (await res.json()) as {
         ok?: boolean;
         error?: string;
-        report?: SmartMatchReport & { similarityV2?: SimilarityResult & { error?: string } };
+        report?: SmartMatchReport & { similarityV2?: SimilarityResultV2 };
         archiveStatus?: ArchiveWarm;
       };
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -390,12 +391,21 @@ export function SmartAnalysisClient({
             <section className={styles.card}>
               <h3>Similarity engine v2 (test)</h3>
               {report.similarityV2.error ? (
-                <p className={styles.error}>{report.similarityV2.error}</p>
+                <p className={styles.error}>
+                  {report.similarityV2.error}
+                  {report.similarityV2.durationMs != null
+                    ? ` (${(report.similarityV2.durationMs / 1000).toFixed(1)}s)`
+                    : ""}
+                </p>
               ) : (
                 <>
                   <p className={styles.cardLead}>
                     <strong>{report.similarityV2.matchedCount}</strong> matched ·{" "}
-                    {report.similarityV2.usedCodes.length} active codes:{" "}
+                    {report.similarityV2.usedCodes.length} active codes
+                    {report.similarityV2.durationMs != null
+                      ? ` · ${(report.similarityV2.durationMs / 1000).toFixed(1)}s`
+                      : ""}
+                    :{" "}
                     <span className={styles.muted}>
                       {report.similarityV2.usedCodes.slice(0, 12).join(", ")}
                       {report.similarityV2.usedCodes.length > 12 ? "…" : ""}
