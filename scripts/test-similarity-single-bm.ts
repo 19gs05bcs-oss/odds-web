@@ -32,12 +32,11 @@ async function main() {
     }
     if (!bookmaker) bookmaker = "bet365";
 
-    console.log(`\n=== HYBRID NODE.JS + SQL MİMARİSİ TEST EDİLİYOR ===`);
+    console.log(`\n=== HYBRID NODE.JS + SQL MİMARİSİ (SAF SQL) TEST EDİLİYOR ===`);
     console.log(`eventId=${eventId}  bookmaker=${bookmaker}`);
 
     const t0 = Date.now();
 
-    // 1. Fixture satırları
     const fixtureRows = (await sql.unsafe(
       `SELECT market, selection, odds, opening FROM ${MATCH_ODDS_TABLE} WHERE event_id = $1 AND bookmaker = $2 AND opening IS NOT NULL AND opening != 0`,
       [eventId, bookmaker] as never[]
@@ -73,31 +72,38 @@ async function main() {
     const minRequiredCodes = Math.ceil(activeCodes.length * MIN_COVERAGE_RATIO);
     console.log(`Aktif kod: ${activeCodes.length} | %60 Barajı: En az ${minRequiredCodes} kod`);
 
-    // --- AŞAMA 1: SADECE DRIFTLERİ ÇEK ---
+    // --- AŞAMA 1: SADECE HAM DRIFTLERİ ÇEK (SQL'İ YORMADAN) ---
     const driftValues = activeCodes.map(c => `('${c.market}', '${c.side}')`).join(', ');
 
     console.log(`\n1. Aşama: driftQuery çalıştırılıyor...`);
     const driftRows = (await sql.unsafe(`
-      SELECT mo.event_id, mo.market, mo.selection,
-             MAX((mo.odds::float - mo.opening::float) / mo.opening::float) AS drift
+      SELECT mo.event_id, mo.market, mo.selection, mo.odds, mo.opening
       FROM ${MATCH_ODDS_TABLE} mo
       JOIN (VALUES ${driftValues}) AS c(market, selection)
         ON mo.market = c.market AND mo.selection = c.selection
       WHERE mo.bookmaker = $1
-        AND mo.event_id != $2
         AND mo.opening IS NOT NULL AND mo.opening != 0
-      GROUP BY mo.event_id, mo.market, mo.selection
-    `, [bookmaker, eventId] as never[])) as { event_id: string, market: string, selection: string, drift: number }[];
+    `, [bookmaker] as never[])) as { event_id: string, market: string, selection: string, odds: number, opening: number }[];
 
-    // --- AŞAMA 2: NODE.JS'DE HIZLI FİLTRELEME (ÇÖP KUTUSU) ---
+    // --- AŞAMA 2: NODE.JS'DE FİLTRELEME VE MAX HESAPLAMA ---
     const driftByEvent = new Map<string, Map<string, number>>();
     for (const r of driftRows) {
+      if (r.event_id === eventId) continue; // != koşulunu JS'ye aldık
+      
+      const drift = (r.odds - r.opening) / r.opening;
+      const key = `${r.market}\0${r.selection}`;
+      
       let m = driftByEvent.get(r.event_id);
       if (!m) {
         m = new Map();
         driftByEvent.set(r.event_id, m);
       }
-      m.set(`${r.market}\0${r.selection}`, r.drift);
+      
+      // SQL'deki MAX() işleminin JS karşılığı
+      const existingDrift = m.get(key);
+      if (existingDrift === undefined || drift > existingDrift) {
+        m.set(key, drift);
+      }
     }
 
     const validCandidateIds: string[] = [];
@@ -110,10 +116,10 @@ async function main() {
     console.log(`2. Aşama: Barajı geçen maç sayısı: ${validCandidateIds.length}`);
     if (!validCandidateIds.length) return console.log("Eşleşen aday bulunamadı.");
 
-    // --- AŞAMA 3: CHUNK HALİNDE SPREAD ÇEKME (VERİTABANI DOSTU) ---
+    // --- AŞAMA 3: CHUNK HALİNDE SPREAD ÇEKME ---
     console.log(`3. Aşama: spreadQuery chunk'lar halinde çalıştırılıyor...`);
     const spreadByEvent = new Map<string, Map<string, number>>();
-    const chunkSize = 500;
+    const chunkSize = 100; // IN array'i çok büyüyüp veritabanını bozmasın diye 100'e çektik
     
     for (let i = 0; i < validCandidateIds.length; i += chunkSize) {
       const chunk = validCandidateIds.slice(i, i + chunkSize);
@@ -137,7 +143,7 @@ async function main() {
       }
     }
 
-    // --- AŞAMA 4: SKOR HESAPLAMA (ÖLÜ DALLAR HARİÇ) ---
+    // --- AŞAMA 4: SKOR HESAPLAMA ---
     const groupCounts = new Map<string, number>();
     for (const c of activeCodes) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1);
 
