@@ -73,7 +73,7 @@ async function main() {
     console.log(`Aktif kod: ${activeCodes.length} | %60 Barajı: En az ${minRequiredCodes} kod`);
 
     const codeValues: string[] = [];
-    const params: unknown[] = [bookmaker, eventId, minRequiredCodes, SIMILARITY_THRESHOLD, 500];
+    const params: any[] = [bookmaker, eventId, minRequiredCodes, SIMILARITY_THRESHOLD, 500];
     let pIdx = 6;
 
     const groupCounts = new Map<string, number>();
