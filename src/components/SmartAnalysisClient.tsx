@@ -5,8 +5,17 @@ import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import type { SmartMatchReport } from "@/lib/analysis/smartMatchReport";
 import { PREFERRED_BM } from "@/lib/analysis/tableRows";
-import type { SimilarityResult } from "@/lib/analysis/similarityEngine";
-type SimilarityResultV2 = SimilarityResult & { error?: string; durationMs?: number };
+import type { TableRow } from "@/lib/analysis/tableRows";
+type SimilarityCardState = {
+  status: "idle" | "loading" | "done" | "error";
+  matchedCount?: number;
+  usedCodes?: string[];
+  tableRows?: (TableRow & { similarityScore?: number })[];
+  cached?: boolean;
+  computedAt?: string;
+  durationMs?: number;
+  error?: string;
+};
 import type { BookmakerOption } from "@/lib/types";
 import type { FixtureRow } from "@/lib/fixtures";
 import { formatCount, formatKickoff, formatOdds } from "@/lib/format";
@@ -47,11 +56,10 @@ export function SmartAnalysisClient({
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
   const [referenceBm, setReferenceBm] = useState(String(PREFERRED_BM));
   const [tolerancePct, setTolerancePct] = useState("3");
-  const [report, setReport] = useState<
-    (SmartMatchReport & { similarityV2?: SimilarityResultV2 }) | null
-  >(null);
+  const [report, setReport] = useState<SmartMatchReport | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [simState, setSimState] = useState<SimilarityCardState>({ status: "idle" });
   const [archiveWarm, setArchiveWarm] = useState<ArchiveWarm>({
     status: "idle",
     phase: "idle",
@@ -61,6 +69,7 @@ export function SmartAnalysisClient({
   });
 
   const bmNum = Number(referenceBm) || PREFERRED_BM;
+  const bmName = bookmakers.find((b) => b.id === referenceBm)?.name || "";
   const selectedFixture = useMemo(
     () => fixtures.find((f) => f.match_id === selectedFixtureId) ?? null,
     [fixtures, selectedFixtureId],
@@ -150,7 +159,7 @@ export function SmartAnalysisClient({
       const j = (await res.json()) as {
         ok?: boolean;
         error?: string;
-        report?: SmartMatchReport & { similarityV2?: SimilarityResultV2 };
+        report?: SmartMatchReport;
         archiveStatus?: ArchiveWarm;
       };
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -236,6 +245,51 @@ export function SmartAnalysisClient({
     if (archiveWarm.status !== "ready") return;
     void runAnalysis();
   }, [selectedFixtureId, selectedFixture?.odds?.length, referenceBm, tolerancePct, archiveWarm.status, runAnalysis]);
+
+  // Maç veya referans bookmaker değiştiğinde önceki similarity sonucu artık
+  // geçersiz — kart "idle"a dönsün, otomatik yeniden hesaplamıyoruz (bkz.
+  // runSimilarity: ~2-3 dk sürebiliyor, kullanıcı butona basınca çalışır).
+  useEffect(() => {
+    setSimState({ status: "idle" });
+  }, [selectedFixtureId, referenceBm]);
+
+  const runSimilarity = useCallback(
+    async (force = false) => {
+      if (!selectedFixture?.match_id || !bmName) return;
+      setSimState({ status: "loading" });
+      try {
+        const res = await fetch("/api/smart-analysis/similarity", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ eventId: selectedFixture.match_id, bookmaker: bmName, force }),
+        });
+        const j = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          cached?: boolean;
+          computedAt?: string;
+          matchedCount?: number;
+          usedCodes?: string[];
+          durationMs?: number;
+          tableRows?: (TableRow & { similarityScore?: number })[];
+        };
+        if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
+        setSimState({
+          status: "done",
+          matchedCount: j.matchedCount,
+          usedCodes: j.usedCodes,
+          tableRows: j.tableRows,
+          cached: j.cached,
+          computedAt: j.computedAt,
+          durationMs: j.durationMs,
+        });
+      } catch (e) {
+        setSimState({ status: "error", error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+    [selectedFixture?.match_id, bmName],
+  );
 
   const archiveLabel =
     archiveWarm.status === "ready"
@@ -387,45 +441,55 @@ export function SmartAnalysisClient({
             ) : null}
           </section>
 
-          {report.similarityV2 ? (
-            <section className={styles.card}>
-              <h3>Similarity engine v2 (test)</h3>
-              {report.similarityV2.error ? (
-                <p className={styles.error}>
-                  {report.similarityV2.error}
-                  {report.similarityV2.durationMs != null
-                    ? ` (${(report.similarityV2.durationMs / 1000).toFixed(1)}s)`
-                    : ""}
+          <section className={styles.card}>
+            <h3>Similar matches (advanced, multi-market)</h3>
+            <p className={styles.cardLead}>
+              Weighted similarity across every market this bookmaker quotes for this match (1X2,
+              O/U, AH, BTTS, HT/FT, DC) instead of just 1X2. Can take a few minutes to compute the
+              first time — cached afterwards.
+            </p>
+
+            {simState.status === "idle" ? (
+              <button type="button" className={styles.primaryButton} onClick={() => void runSimilarity(false)}>
+                Compute similar matches
+              </button>
+            ) : null}
+
+            {simState.status === "loading" ? (
+              <p className={styles.loading}>Computing… this can take a few minutes, please wait.</p>
+            ) : null}
+
+            {simState.status === "error" ? (
+              <>
+                <p className={styles.error}>{simState.error}</p>
+                <button type="button" className={styles.primaryButton} onClick={() => void runSimilarity(false)}>
+                  Retry
+                </button>
+              </>
+            ) : null}
+
+            {simState.status === "done" ? (
+              <>
+                <p className={styles.cardLead}>
+                  <strong>{simState.matchedCount}</strong> matched ·{" "}
+                  {simState.usedCodes?.length ?? 0} active codes
+                  {simState.durationMs != null ? ` · ${(simState.durationMs / 1000).toFixed(1)}s` : ""}
+                  {simState.cached ? " · cached" : ""}
+                  {simState.computedAt ? (
+                    <span className={styles.muted}> · computed {new Date(simState.computedAt).toLocaleString()}</span>
+                  ) : null}
                 </p>
-              ) : (
-                <>
-                  <p className={styles.cardLead}>
-                    <strong>{report.similarityV2.matchedCount}</strong> matched ·{" "}
-                    {report.similarityV2.usedCodes.length} active codes
-                    {report.similarityV2.durationMs != null
-                      ? ` · ${(report.similarityV2.durationMs / 1000).toFixed(1)}s`
-                      : ""}
-                    :{" "}
-                    <span className={styles.muted}>
-                      {report.similarityV2.usedCodes.slice(0, 12).join(", ")}
-                      {report.similarityV2.usedCodes.length > 12 ? "…" : ""}
-                    </span>
-                  </p>
-                  {report.similarityV2.samples.length ? (
-                    <p className={styles.hint}>
-                      Top matches:{" "}
-                      {report.similarityV2.samples
-                        .slice(0, 10)
-                        .map((s) => `${s.event_id} (${s.score.toFixed(3)})`)
-                        .join(", ")}
-                    </p>
-                  ) : (
-                    <p className={styles.empty}>No matches under the similarity threshold.</p>
-                  )}
-                </>
-              )}
-            </section>
-          ) : null}
+                {simState.tableRows?.length ? (
+                  <AnalyzeTable rows={simState.tableRows} mode="archive" compact />
+                ) : (
+                  <p className={styles.empty}>No matches under the similarity threshold.</p>
+                )}
+                <button type="button" className={styles.secondaryButton} onClick={() => void runSimilarity(true)}>
+                  Recompute
+                </button>
+              </>
+            ) : null}
+          </section>
 
           <section className={styles.card}>
             <h3>20 bookmakers · 1X2 comparison</h3>
