@@ -32,12 +32,11 @@ async function main() {
     }
     if (!bookmaker) bookmaker = "bet365";
 
-    console.log(`\n=== PURE UNION ALL MİMARİSİ TEST EDİLİYOR ===`);
+    console.log(`\n=== MATEMATİKSEL KISAYOL (EARLY PRUNING) MİMARİSİ TEST EDİLİYOR ===`);
     console.log(`eventId=${eventId}  bookmaker=${bookmaker}`);
 
     const t0 = Date.now();
 
-    // 1. Fixture satırları
     const fixtureRows = (await sql.unsafe(
       `SELECT market, selection, odds, opening FROM ${MATCH_ODDS_TABLE} WHERE event_id = $1 AND bookmaker = $2 AND opening IS NOT NULL AND opening != 0`,
       [eventId, bookmaker] as never[]
@@ -73,128 +72,94 @@ async function main() {
     const minRequiredCodes = Math.ceil(activeCodes.length * MIN_COVERAGE_RATIO);
     console.log(`Aktif kod: ${activeCodes.length} | %60 Barajı: En az ${minRequiredCodes} kod`);
 
-    // --- AŞAMA 1: SAF UNION ALL İLE DRIFT ÇEK VE FİLTRELE ---
-    // Her bir kod için mükemmel Index Scan yapacak basit SELECT'ler hazırlıyoruz
-    const driftBranches = activeCodes.map(c => `
-      SELECT event_id, '${c.market}' AS market, '${c.side}' AS selection, ((odds::float - opening::float) / opening::float) AS drift
-      FROM ${MATCH_ODDS_TABLE}
-      WHERE bookmaker = $1 AND market = '${c.market}' AND selection = '${c.side}'
-        AND opening IS NOT NULL AND opening != 0
-    `);
+    const codeValues: string[] = [];
+    const params: unknown[] = [bookmaker, eventId, minRequiredCodes, SIMILARITY_THRESHOLD, 500];
+    let pIdx = 6;
 
-    // Window fonksiyonu (COUNT OVER) ile db içinde 60% filtrelemesini yapıp sadece geçerli maçları node.js'e alıyoruz
-    const driftSql = `
-      WITH unified_drift AS (
-        ${driftBranches.join('\n        UNION ALL\n')}
-      )
-      SELECT event_id, market, selection, drift
-      FROM (
-        SELECT event_id, market, selection, drift, COUNT(*) OVER(PARTITION BY event_id) as c
-        FROM unified_drift
-      ) sub
-      WHERE c >= $3::int AND event_id != $2
-    `;
-
-    console.log(`\n1. Aşama: driftQuery (UNION ALL) çalıştırılıyor...`);
-    const driftRows = (await sql.unsafe(driftSql, [bookmaker, eventId, minRequiredCodes] as never[])) as { event_id: string, market: string, selection: string, drift: number }[];
-    const t1 = Date.now();
-    console.log(`-> Drift çekildi ve filtrelendi: ${t1 - t0}ms, Satır sayısı: ${driftRows.length}`);
-
-    // Çekilen veriyi Map'e diziyoruz
-    const driftByEvent = new Map<string, Map<string, number>>();
-    const validCandidateIds = new Set<string>();
-    
-    for (const r of driftRows) {
-      let m = driftByEvent.get(r.event_id);
-      if (!m) {
-        m = new Map();
-        driftByEvent.set(r.event_id, m);
-      }
-      m.set(`${r.market}\0${r.selection}`, r.drift);
-      validCandidateIds.add(r.event_id);
-    }
-
-    const candidates = Array.from(validCandidateIds);
-    console.log(`-> Barajı geçen (%60 üstü eşleşen) maç sayısı: ${candidates.length}`);
-    if (!candidates.length) return console.log("Eşleşen aday bulunamadı.");
-
-    // --- AŞAMA 2: CHUNK HALİNDE SPREAD ÇEKME ---
-    console.log(`\n2. Aşama: spreadQuery chunk'lar halinde çalıştırılıyor...`);
-    const spreadByEvent = new Map<string, Map<string, number>>();
-    const chunkSize = 200; // Index dostu olması için 200'erli paketler
-    
-    for (let i = 0; i < candidates.length; i += chunkSize) {
-      const chunk = candidates.slice(i, i + chunkSize);
-      // Sadece ilgilendiğimiz maçlar için STDDEV hesaplıyoruz
-      const spreadRows = (await sql.unsafe(`
-        SELECT event_id, market, selection, STDDEV(odds::float) AS spread
-        FROM ${MATCH_ODDS_TABLE}
-        WHERE event_id = ANY($1::text[])
-        GROUP BY event_id, market, selection
-      `, [chunk] as never[])) as { event_id: string, market: string, selection: string, spread: number | null }[];
-
-      for (const r of spreadRows) {
-        if (r.spread == null) continue;
-        let m = spreadByEvent.get(r.event_id);
-        if (!m) {
-          m = new Map();
-          spreadByEvent.set(r.event_id, m);
-        }
-        m.set(`${r.market}\0${r.selection}`, r.spread);
-      }
-    }
-    const t2 = Date.now();
-    console.log(`-> Spread hesaplandı: ${t2 - t1}ms`);
-
-    // --- AŞAMA 3: SKOR HESAPLAMA ---
     const groupCounts = new Map<string, number>();
     for (const c of activeCodes) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1);
 
-    const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
-    const scored: { event_id: string; score: number }[] = [];
+    activeCodes.forEach((c) => {
+      const stats = STATS[c.code];
+      const [medDrift, madDrift] = stats.mean_drift_pct;
+      const [medSpread, madSpread] = stats.spread_close;
+      const groupWeight = WEIGHTS[c.group] ?? 1;
+      const weight = groupWeight / (groupCounts.get(c.group) ?? 1);
 
-    for (const evId of candidates) {
-      const drifts = driftByEvent.get(evId);
-      const spreads = spreadByEvent.get(evId);
-      if (!drifts || !spreads) continue;
+      codeValues.push(`($${pIdx}, $${pIdx+1}, $${pIdx+2}::float, $${pIdx+3}::float, $${pIdx+4}::float, $${pIdx+5}::float, $${pIdx+6}::float)`);
+      params.push(c.market, c.side, weight, medDrift, madDrift || 1, medSpread, madSpread || 1);
+      pIdx += 7;
+    });
 
-      let sum = 0;
-      let matchedWeight = 0;
-      let matchedCodesCount = 0;
+    const sqlQuery = `
+      WITH codes(market, selection, weight, med_drift, mad_drift, med_spread, mad_spread) AS (
+        VALUES ${codeValues.join(',\n        ')}
+      ),
+      -- ADIM 1: Sadece Drifti Çek
+      drift_raw AS (
+        SELECT mo.event_id, mo.market, mo.selection,
+               ((mo.odds::float - mo.opening::float) / mo.opening::float) AS drift
+        FROM ${MATCH_ODDS_TABLE} mo
+        JOIN codes c ON mo.market = c.market AND mo.selection = c.selection
+        WHERE mo.bookmaker = $1
+          AND mo.event_id != $2
+          AND mo.opening IS NOT NULL AND mo.opening != 0
+      ),
+      -- ADIM 2: Drift Skorunu (Kısmi Skoru) Hesapla
+      drift_agg AS (
+        SELECT d.event_id,
+               COUNT(*) AS matched_count,
+               SUM(c.weight) AS matched_weight,
+               SUM(c.weight * POWER(GREATEST(LEAST((d.drift - c.med_drift)/c.mad_drift, 6), -6), 2)) AS sum_drift_sq
+        FROM drift_raw d
+        JOIN codes c ON d.market = c.market AND d.selection = c.selection
+        GROUP BY d.event_id
+      ),
+      -- ADIM 3: İŞTE O MATEMATİKSEL KISAYOL! Drift skoru eşiği aşıyorsa maçı hemen çöpe at!
+      valid_events AS (
+        SELECT event_id
+        FROM drift_agg
+        WHERE matched_count >= $3::int
+          AND (sum_drift_sq / matched_weight) < $4::float
+      ),
+      -- ADIM 4: Spread'i SADECE şanslı ve çok az sayıdaki maç için çek
+      spread_raw AS (
+        SELECT mo.event_id, mo.market, mo.selection, STDDEV(mo.odds::float) AS spread
+        FROM ${MATCH_ODDS_TABLE} mo
+        JOIN valid_events ve ON mo.event_id = ve.event_id
+        JOIN codes c ON mo.market = c.market AND mo.selection = c.selection
+        GROUP BY mo.event_id, mo.market, mo.selection
+      )
+      -- ADIM 5: Final Skoru birleştir ve getir
+      SELECT
+        d.event_id,
+        SUM(
+          c.weight * (
+            POWER(GREATEST(LEAST((d.drift - c.med_drift)/c.mad_drift, 6), -6), 2) +
+            POWER(GREATEST(LEAST((s.spread - c.med_spread)/c.mad_spread, 6), -6), 2)
+          )
+        ) / SUM(c.weight) AS final_score
+      FROM drift_raw d
+      JOIN spread_raw s ON d.event_id = s.event_id AND d.market = s.market AND d.selection = s.selection
+      JOIN codes c ON d.market = c.market AND d.selection = c.selection
+      WHERE s.spread IS NOT NULL
+      GROUP BY d.event_id
+      HAVING COUNT(*) >= $3::int
+      ORDER BY final_score ASC
+      LIMIT $5::int
+    `;
 
-      for (const c of activeCodes) {
-        const key = `${c.market}\0${c.side}`;
-        const drift = drifts.get(key);
-        const spread = spreads.get(key);
-        
-        if (drift == null || spread == null) continue;
+    console.log(`\nSorgu çalıştırılıyor... Lütfen bekleyin.`);
+    const results = (await sql.unsafe(sqlQuery, params)) as { event_id: string; final_score: number }[];
+    const ms = Date.now() - t0;
 
-        const stats = STATS[c.code];
-        const [medDrift, madDrift] = stats.mean_drift_pct;
-        const [medSpread, madSpread] = stats.spread_close;
-        const groupWeight = WEIGHTS[c.group] ?? 1;
-        const wPerCode = groupWeight / (groupCounts.get(c.group) ?? 1);
+    const validResults = results.filter((r) => r.final_score < SIMILARITY_THRESHOLD);
 
-        const zDrift = clamp((drift - medDrift) / (madDrift || 1), -6, 6);
-        const zSpread = clamp((spread - medSpread) / (madSpread || 1), -6, 6);
-        
-        sum += wPerCode * (zDrift * zDrift + zSpread * zSpread);
-        matchedWeight += wPerCode;
-        matchedCodesCount++;
-      }
-
-      if (matchedCodesCount >= minRequiredCodes) {
-        const score = sum / matchedWeight;
-        if (score < SIMILARITY_THRESHOLD) scored.push({ event_id: evId, score });
-      }
+    console.log(`\n=== BAŞARILI (${ms}ms) ===`);
+    console.log("Geçerli Eşleşme Sayısı:", validResults.length);
+    if (validResults.length > 0) {
+      console.log("Örnekler (İlk 10):", validResults.slice(0, 10));
     }
-
-    scored.sort((a, b) => a.score - b.score);
-    const totalMs = Date.now() - t0;
-
-    console.log(`\n=== BAŞARILI (Toplam Süre: ${totalMs}ms) ===`);
-    console.log("Geçerli Eşleşme Sayısı:", scored.length);
-    if (scored.length > 0) console.log("Örnekler (İlk 10):", scored.slice(0, 10));
 
   } catch (err) {
     console.error("\n=== SİSTEM HATASI ===");
