@@ -161,32 +161,14 @@ export async function fetchSeasonQuoteRows(
   return sql.unsafe(text, params as never[]) as unknown as Promise<MatchOddsWithMetaRow[]>;
 }
 
-/**
- * Verilen event_id listesi için quote satırlarını çeker.
- *
- * bookmaker verilirse (ör. similarity/route.ts) SADECE o bookmaker'ın
- * satırları çekilir — 20 bookmaker'ın tamamı değil. eventsMetaAndQuotesToTableRows
- * zaten referans bookmaker'ı tercih edip diğerlerini sadece boş hücre
- * doldurma (fallback) için kullanıyordu; similarity ekranında bu fallback'i
- * feda edip satır sayısını ~20x azaltmak, Railway'in 1GB RAM limitinde OOM
- * (bkz. deploy log'undaki "Killed") sorununu önlemek için tercih edildi.
- * bookmaker verilmezse eski davranış (tam grid) korunur — diğer çağıranlar etkilenmez.
- */
-export async function fetchQuoteRowsByEventIds(
-  eventIds: string[],
-  bookmaker?: string | null,
-): Promise<MatchOddsWithMetaRow[]> {
+/** Verilen event_id listesi için TÜM quote satırlarını (tam bookmaker grid'i) çeker. */
+export async function fetchQuoteRowsByEventIds(eventIds: string[]): Promise<MatchOddsWithMetaRow[]> {
   const ids = [...new Set(eventIds)].filter(Boolean);
   if (!ids.length) return [];
-  const rows = bookmaker
-    ? await sql.unsafe(
-        `SELECT ${MATCH_ODDS_FULL_SELECT} ${FROM_JOIN} WHERE q.event_id = ANY($1) AND q.bookmaker = $2`,
-        [ids, bookmaker] as never[],
-      )
-    : await sql.unsafe(
-        `SELECT ${MATCH_ODDS_FULL_SELECT} ${FROM_JOIN} WHERE q.event_id = ANY($1)`,
-        [ids] as never[],
-      );
+  const rows = await sql.unsafe(
+    `SELECT ${MATCH_ODDS_FULL_SELECT} ${FROM_JOIN} WHERE q.event_id = ANY($1)`,
+    [ids] as never[],
+  );
   return rows as unknown as MatchOddsWithMetaRow[];
 }
 
