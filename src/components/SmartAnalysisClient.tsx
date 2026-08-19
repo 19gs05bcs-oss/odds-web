@@ -255,14 +255,19 @@ export function SmartAnalysisClient({
 
   const runSimilarity = useCallback(
     async (force = false) => {
-      if (!selectedFixture?.match_id || !bmName) return;
+      if (!selectedFixture?.match_id || !selectedFixture.odds?.length || !bmName) return;
       setSimState({ status: "loading" });
       try {
         const res = await fetch("/api/smart-analysis/similarity", {
           method: "POST",
           headers: { "content-type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ eventId: selectedFixture.match_id, bookmaker: bmName, force }),
+          body: JSON.stringify({
+            eventId: selectedFixture.match_id,
+            bookmaker: bmName,
+            odds: selectedFixture.odds,
+            force,
+          }),
         });
         const j = (await res.json()) as {
           ok?: boolean;
