@@ -43,13 +43,25 @@ function round2(n: number): number {
 
 /** Python'un f"{x:g}" davranışının bu sınırlı değer kümesi (çeyrek adımlı,
  * en fazla 2 ondalık) için birebir karşılığı: sondaki sıfırları ve varsa
- * noktayı at. */
+ * noktayı at. SADECE kod isimlendirmesi (lineTag) için kullanılır. */
 function trimG(absValue: number): string {
   let s = absValue.toFixed(2); // "0.25", "0.50", "1.00", "2.75", "7.00"
   if (s.includes(".")) {
     s = s.replace(/0+$/, ""); // "0.50" -> "0.5", "1.00" -> "1."
     s = s.replace(/\.$/, ""); // "1." -> "1"
   }
+  return s;
+}
+
+/** Python'un varsayılan str(float) davranışı — f"OVER:{line}" gibi f-string'lerde
+ * kullanılan format. :g'den FARKLI: en az 1 ondalık basamağı HER ZAMAN korur
+ * (str(1.0)=='1.0', str(-1.0)=='-1.0'). Gerçek match_odds verisinde 'A:-1.0'
+ * gözlemlendi (yani '-1' DEĞİL) — side string'i için doğru fonksiyon bu.
+ * match_odds.selection ile eşleşecek her sayısal line burada üretilmeli. */
+function pyFloatStr(n: number): string {
+  let s = n.toFixed(2); // "-1.00", "0.25", "2.50"
+  s = s.replace(/(\.\d*?)0+$/, "$1"); // "-1.00" -> "-1.", "2.50" -> "2.5"
+  s = s.replace(/\.$/, ".0"); // "-1." -> "-1.0"
   return s;
 }
 
@@ -82,7 +94,7 @@ function buildCodes(): SimilarityCode[] {
     const st = SCOPE_TAG[scope];
     for (const line of OU_LINES) {
       const tag = lineTag(line);
-      const lineStr = trimG(line); // side string'inde de aynı format kullanılıyor ("OVER:2.5")
+      const lineStr = pyFloatStr(line); // OU_LINES hep pozitif, örn. 2.5 -> "2.5", 1.0 -> "1.0"
       items.push({
         code: `OU_${st}_OVER${tag}`,
         group: "OU",
@@ -160,19 +172,18 @@ function buildCodes(): SimilarityCode[] {
     const st = SCOPE_TAG[scope];
     for (const line of AH_LINES) {
       const tag = lineTag(line);
-      const lineStr = trimG(Math.abs(line));
-      const signedLineStr = line < 0 ? `-${lineStr}` : lineStr;
+      const lineStr = pyFloatStr(line); // işaret dahil doğru: -1.0 -> "-1.0", 0.25 -> "0.25"
       items.push({
         code: `AH_${st}_HOME${tag}`,
         group: "AH",
         market: `ASIAN_HANDICAP:${scope}`,
-        side: `H:${signedLineStr}`,
+        side: `H:${lineStr}`,
       });
       items.push({
         code: `AH_${st}_AWAY${tag}`,
         group: "AH",
         market: `ASIAN_HANDICAP:${scope}`,
-        side: `A:${signedLineStr}`,
+        side: `A:${lineStr}`,
       });
     }
   }
