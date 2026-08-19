@@ -163,7 +163,7 @@ export function buildSimilarityQueries(opts: {
 export async function findSimilarForBookmaker(opts: {
   eventId: string;
   bookmaker: string;
-  fixtureOdds: FixtureOddsRow[]; // seçili maçın TÜM market/selection satırları (tüm bookmaker'lar dahil, spread hesabı için)
+  fixtureOdds: FixtureOddsRow[]; // seçili maçın TÜM market/selection satırları
   limit?: number;
 }): Promise<SimilarityResult> {
   const { eventId, bookmaker, fixtureOdds, limit = 500 } = opts;
@@ -218,27 +218,32 @@ export async function findSimilarForBookmaker(opts: {
 
   const groupCounts = new Map<string, number>();
   for (const c of activeCodes) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1);
-  const totalWeight = activeCodes.reduce((s, c) => {
-    const gw = WEIGHTS[c.group] ?? 1;
-    return s + gw / (groupCounts.get(c.group) ?? 1);
-  }, 0);
 
   const scored: { event_id: string; score: number }[] = [];
+  
+  // KISMİ KAPSAM: Hedef eşleşme oranı (%60)
+  const MIN_COVERAGE_RATIO = 0.6; 
+  const minRequiredCodes = Math.ceil(activeCodes.length * MIN_COVERAGE_RATIO);
+
   for (const evId of candidateEventIds) {
     const drifts = driftByEvent.get(evId);
     const spreads = spreadByEvent.get(evId);
     if (!drifts || !spreads) continue;
 
     let sum = 0;
-    let complete = true;
+    let matchedWeight = 0;
+    let matchedCodesCount = 0;
+
     for (const c of activeCodes) {
       const key = codeKey(c.market, c.side);
       const drift = drifts.get(key);
       const spread = spreads.get(key);
+      
+      // Veri yoksa maçı tamamen silmek yerine sadece bu kodu pas geçiyoruz
       if (drift == null || spread == null) {
-        complete = false; // orijinal davranış: eksik kod varsa event elenir
-        break;
+        continue; 
       }
+
       const stats = STATS[c.code];
       const [medDrift, madDrift] = stats.mean_drift_pct;
       const [medSpread, madSpread] = stats.spread_close;
@@ -247,17 +252,28 @@ export async function findSimilarForBookmaker(opts: {
 
       const zDrift = clamp((drift - medDrift) / (madDrift || 1), -6, 6);
       const zSpread = clamp((spread - medSpread) / (madSpread || 1), -6, 6);
+      
       sum += wPerCode * (zDrift * zDrift + zSpread * zSpread);
+      matchedWeight += wPerCode;
+      matchedCodesCount++;
     }
-    if (!complete) continue;
 
-    const score = sum / totalWeight;
+    // Yeterli sayıda kodla (ör. en az %60) eşleşmediyse maçı o zaman ele
+    if (matchedCodesCount < minRequiredCodes) {
+      continue;
+    }
+
+    // Skorlamayı statik 'totalWeight' yerine, sadece eşleşen kodların toplam ağırlığıyla yapıyoruz.
+    // Bu sayede, eksik kodlar kalan ortalamayı sahte bir şekilde iyileştirmiyor veya bozmuyor.
+    const score = sum / matchedWeight;
+    
     if (score < SIMILARITY_THRESHOLD) scored.push({ event_id: evId, score });
   }
 
   scored.sort((a, b) => a.score - b.score);
   const limited = scored.slice(0, limit);
   const k = Math.max(K_MIN, Math.min(K_DEFAULT, limited.length));
+  
   return {
     matchedCount: limited.length,
     samples: limited.slice(0, k),
