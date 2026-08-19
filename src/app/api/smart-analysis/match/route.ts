@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildSmartMatchReportSQL } from "@/lib/analysis/smartMatchReportSQL";
 import { fetchQuoteRowsByEventIds } from "@/lib/analysis/marketQuotes";
-import { findSimilarForBookmaker, type FixtureOddsRow } from "@/lib/analysis/similarityEngine";
 import {
   fixtureToTableRow,
   eventsMetaAndQuotesToTableRows,
@@ -102,65 +101,12 @@ export async function POST(req: Request) {
       .filter((r): r is NonNullable<typeof r> => Boolean(r));
   }
 
-  // Yeni similarity engine (deneysel, çok-market ağırlıklı z-distance) —
-  // ayrı ve izole: hata verirse mevcut similar1x2 akışını etkilemez,
-  // sadece response'a ek "similarityV2" alanı olarak eklenir (test amaçlı).
-  // SERT ZAMAN SINIRI: 357 olası kod var (bkz. similarityCodes.ts), aktif
-  // olanlar tek dev SQL'de CTE+JOIN'e dönüşüyor — yavaş kalırsa tüm
-  // response'u (ve mevcut analiz sonucunu) timeout'a sürüklememesi için
-  // Promise.race ile kesiliyor.
-  let similarityV2: {
-    matchedCount: number;
-    samples: { event_id: string; score: number }[];
-    usedCodes: string[];
-    error?: string;
-    durationMs?: number;
-  } = { matchedCount: 0, samples: [], usedCodes: [] };
-  {
-    const SIMILARITY_V2_TIMEOUT_MS = 20_000;
-    const t0 = Date.now();
-    try {
-      const fixtureOddsForEngine: FixtureOddsRow[] = (fixture.odds as CompactOddsRow[])
-        .filter((row) => row[5] != null)
-        .map((row) => ({
-          market: `${row[1]}:${row[2]}`,
-          selection: row[3],
-          odds: row[5] as number,
-          opening: row[4],
-        }));
-      const timeout = new Promise<never>((_, reject) => {
-        setTimeout(
-          () => reject(new Error(`similarityV2 ${SIMILARITY_V2_TIMEOUT_MS}ms içinde tamamlanmadı (timeout)`)),
-          SIMILARITY_V2_TIMEOUT_MS,
-        );
-      });
-      const result = await Promise.race([
-        findSimilarForBookmaker({
-          eventId: fixture.match_id,
-          bookmaker: bmName,
-          fixtureOdds: fixtureOddsForEngine,
-        }),
-        timeout,
-      ]);
-      similarityV2 = { ...result, durationMs: Date.now() - t0 };
-    } catch (e) {
-      similarityV2 = {
-        matchedCount: 0,
-        samples: [],
-        usedCodes: [],
-        error: e instanceof Error ? e.message : String(e),
-        durationMs: Date.now() - t0,
-      };
-    }
-  }
-
   return NextResponse.json({
     ok: true,
     report: {
       ...report,
       selectedRow: fixtureToTableRow(fixtureRow, bm),
       similarTableRows,
-      similarityV2,
     },
     archiveStatus: { status: "ready", dir: "supabase:match_odds" },
     archivePartial: false,
