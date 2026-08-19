@@ -5,6 +5,7 @@ import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import type { SmartMatchReport } from "@/lib/analysis/smartMatchReport";
 import { PREFERRED_BM } from "@/lib/analysis/tableRows";
+import type { SimilarityResult } from "@/lib/analysis/similarityEngine";
 import type { BookmakerOption } from "@/lib/types";
 import type { FixtureRow } from "@/lib/fixtures";
 import { formatCount, formatKickoff, formatOdds } from "@/lib/format";
@@ -27,9 +28,9 @@ type Props = {
 };
 
 function sideTr(s: string | null): string {
-  if (s === "H") return "1 (Ev)";
-  if (s === "D") return "X (Ber.)";
-  if (s === "A") return "2 (Dep.)";
+  if (s === "H") return "1 (Home)";
+  if (s === "D") return "X (Draw)";
+  if (s === "A") return "2 (Away)";
   return s || "—";
 }
 
@@ -45,7 +46,9 @@ export function SmartAnalysisClient({
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
   const [referenceBm, setReferenceBm] = useState(String(PREFERRED_BM));
   const [tolerancePct, setTolerancePct] = useState("3");
-  const [report, setReport] = useState<SmartMatchReport | null>(null);
+  const [report, setReport] = useState<
+    (SmartMatchReport & { similarityV2?: SimilarityResult & { error?: string } }) | null
+  >(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [archiveWarm, setArchiveWarm] = useState<ArchiveWarm>({
@@ -146,7 +149,7 @@ export function SmartAnalysisClient({
       const j = (await res.json()) as {
         ok?: boolean;
         error?: string;
-        report?: SmartMatchReport;
+        report?: SmartMatchReport & { similarityV2?: SimilarityResult & { error?: string } };
         archiveStatus?: ArchiveWarm;
       };
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -205,7 +208,7 @@ export function SmartAnalysisClient({
             files: j.files ?? 0,
             filesDone: j.filesDone ?? 0,
             matches: j.matches ?? 0,
-            error: j.error || "Arşiv yüklenemedi",
+            error: j.error || "Failed to load archive",
           });
           if (timer) clearInterval(timer);
           return;
@@ -235,32 +238,32 @@ export function SmartAnalysisClient({
 
   const archiveLabel =
     archiveWarm.status === "ready"
-      ? `${formatCount(archiveWarm.matches)} maç · ${archiveWarm.files} sezon`
+      ? `${formatCount(archiveWarm.matches)} matches · ${archiveWarm.files} seasons`
       : archiveWarm.status === "loading"
         ? archiveWarm.phase === "listing"
-          ? "Arşiv sezon listesi alınıyor…"
-          : `Arşiv yükleniyor ${archiveWarm.filesDone}/${archiveWarm.files || "…"} sezon…`
+          ? "Fetching archive season list…"
+          : `Loading archive ${archiveWarm.filesDone}/${archiveWarm.files || "…"} seasons…`
         : archiveWarm.status === "error"
-          ? archiveWarm.error || "Arşiv hatası"
-          : "Arşiv hazırlanıyor…";
+          ? archiveWarm.error || "Archive error"
+          : "Preparing archive…";
 
   return (
     <div className={styles.wrap}>
       <header className={styles.hero}>
         <p className={styles.kicker}>Smart Analysis · Pro</p>
-        <h1 className={styles.title}>Maç seç → arşiv dökümü</h1>
+        <h1 className={styles.title}>Select match → archive breakdown</h1>
         <p className={styles.lead}>
-          Bültenden maç seçin; benzer oran geçmişi, oran hareketi (steam/drift) ve bookmaker
-          karşılaştırması gösterilir.
+          Select a match from the bulletin; similar odds history, odds movement (steam/drift) and
+          bookmaker comparison are shown.
         </p>
-        <p className={styles.meta}>Arşiv: {archiveLabel}</p>
+        <p className={styles.meta}>Archive: {archiveLabel}</p>
       </header>
 
       <div className={filterStyles.wrap}>
         <div className={filterStyles.topBar}>
           <div className={filterStyles.topBarRow}>
             <label className={filterStyles.field}>
-              <span>Gün</span>
+              <span>Day</span>
               <select
                 value={bulletinDate}
                 onChange={(e) => setBulletinDate(e.target.value)}
@@ -275,7 +278,7 @@ export function SmartAnalysisClient({
             </label>
 
             <label className={filterStyles.field}>
-              <span>Referans BM</span>
+              <span>Reference BM</span>
               <select value={referenceBm} onChange={(e) => setReferenceBm(e.target.value)}>
                 {bookmakers.map((b) => (
                   <option key={b.id} value={b.id}>
@@ -286,7 +289,7 @@ export function SmartAnalysisClient({
             </label>
 
             <label className={filterStyles.field}>
-              <span>Tolerans %</span>
+              <span>Tolerance %</span>
               <input
                 type="number"
                 min={0}
@@ -314,10 +317,10 @@ export function SmartAnalysisClient({
       {archiveWarm.status === "loading" ? (
         <p className={styles.loading}>{archiveLabel}</p>
       ) : null}
-      {pending ? <p className={styles.loading}>Analiz hesaplanıyor…</p> : null}
+      {pending ? <p className={styles.loading}>Calculating analysis…</p> : null}
 
       {!selectedFixture && !fixturesLoading ? (
-        <p className={styles.empty}>Bültenden bir maç seçin.</p>
+        <p className={styles.empty}>Select a match from the bulletin.</p>
       ) : null}
 
       {report ? (
@@ -331,7 +334,7 @@ export function SmartAnalysisClient({
               {report.profile1x2 ? (
                 <>
                   {" "}
-                  · MS 1X2 (BM #{report.referenceBm}):{" "}
+                  · 1X2 (BM #{report.referenceBm}):{" "}
                   <strong>
                     {formatOdds(report.profile1x2.H)} / {formatOdds(report.profile1x2.D)} /{" "}
                     {formatOdds(report.profile1x2.A)}
@@ -348,24 +351,24 @@ export function SmartAnalysisClient({
 
           {report.selectedRow ? (
             <section className={styles.card}>
-              <h3>Seçili maç oranları</h3>
+              <h3>Selected match odds</h3>
               <AnalyzeTable rows={[report.selectedRow]} mode="bulletin" compact />
             </section>
           ) : null}
 
           <section className={styles.card}>
-            <h3>Benzer oran geçmişi (MS 1X2)</h3>
+            <h3>Similar odds history (1X2)</h3>
             <p className={styles.cardLead}>
-              ±{(report.tolerancePct * 100).toFixed(0)}% bandında{" "}
-              <strong>{report.similar1x2.n}</strong> bitmiş maç.
+              ±{(report.tolerancePct * 100).toFixed(0)}% band,{" "}
+              <strong>{report.similar1x2.n}</strong> finished matches.
               {report.similar1x2.n >= 5 ? (
                 <>
                   {" "}
-                  En sık: <strong>{sideTr(report.similar1x2.top)}</strong> (
+                  Most frequent: <strong>{sideTr(report.similar1x2.top)}</strong> (
                   {report.similar1x2.topPct.toFixed(0)}%)
                 </>
               ) : (
-                " Yeterli örnek yok — toleransı artırın."
+                " Not enough samples — increase tolerance."
               )}
             </p>
             {report.similar1x2.n >= 5 ? (
@@ -377,22 +380,53 @@ export function SmartAnalysisClient({
             ) : null}
             {report.similarTableRows.length ? (
               <>
-                <h4 className={styles.subHead}>Benzer maçlar</h4>
+                <h4 className={styles.subHead}>Similar matches</h4>
                 <AnalyzeTable rows={report.similarTableRows} mode="archive" compact />
               </>
             ) : null}
           </section>
 
+          {report.similarityV2 ? (
+            <section className={styles.card}>
+              <h3>Similarity engine v2 (test)</h3>
+              {report.similarityV2.error ? (
+                <p className={styles.error}>{report.similarityV2.error}</p>
+              ) : (
+                <>
+                  <p className={styles.cardLead}>
+                    <strong>{report.similarityV2.matchedCount}</strong> matched ·{" "}
+                    {report.similarityV2.usedCodes.length} active codes:{" "}
+                    <span className={styles.muted}>
+                      {report.similarityV2.usedCodes.slice(0, 12).join(", ")}
+                      {report.similarityV2.usedCodes.length > 12 ? "…" : ""}
+                    </span>
+                  </p>
+                  {report.similarityV2.samples.length ? (
+                    <p className={styles.hint}>
+                      Top matches:{" "}
+                      {report.similarityV2.samples
+                        .slice(0, 10)
+                        .map((s) => `${s.event_id} (${s.score.toFixed(3)})`)
+                        .join(", ")}
+                    </p>
+                  ) : (
+                    <p className={styles.empty}>No matches under the similarity threshold.</p>
+                  )}
+                </>
+              )}
+            </section>
+          ) : null}
+
           <section className={styles.card}>
-            <h3>20 bookmaker · MS 1X2 karşılaştırması</h3>
+            <h3>20 bookmakers · 1X2 comparison</h3>
             <p className={styles.cardLead}>
               {report.consensus.aligned ? (
                 <>
-                  <strong>{report.consensus.alignedPct.toFixed(0)}%</strong> BM aynı favoriyi (
-                  {sideTr(report.consensus.favorite)}) gösteriyor.
+                  <strong>{report.consensus.alignedPct.toFixed(0)}%</strong> of bookmakers show the
+                  same favorite ({sideTr(report.consensus.favorite)}).
                 </>
               ) : (
-                <>Bookmaker&apos;lar dağılmış — tek yön konsensüsü zayıf.</>
+                <>Bookmakers are scattered — one-way consensus is weak.</>
               )}
             </p>
             <div className={styles.tableWrap}>
@@ -403,8 +437,8 @@ export function SmartAnalysisClient({
                     <th>1</th>
                     <th>X</th>
                     <th>2</th>
-                    <th>Favori</th>
-                    <th>Hareket</th>
+                    <th>Favorite</th>
+                    <th>Movement</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -430,21 +464,22 @@ export function SmartAnalysisClient({
             </div>
             {report.consensus.historical ? (
               <p className={styles.hint}>
-                Geçmişte tüm BM&apos;ler aynı yönde hizalandığında (benzer profil): MS{" "}
-                {sideTr(report.consensus.historical.top)} %{report.consensus.historical.topPct.toFixed(0)}{" "}
+                Historically, when all BMs aligned in the same direction (similar profile): 1X2{" "}
+                {sideTr(report.consensus.historical.top)} {report.consensus.historical.topPct.toFixed(0)}%
+                {" "}
                 (n={report.consensus.historical.n})
               </p>
             ) : null}
           </section>
 
           <section className={styles.card}>
-            <h3>Oran hareketi → geçmiş sonuç</h3>
+            <h3>Odds movement → historical outcome</h3>
             <p className={styles.cardLead}>
-              Açılış → kapanış hareketi (≥2%). Steam (▼) = oran düştü; drift (▲) = oran uzadı.
-              Arşivde aynı hareket + benzer oran bandında ne olmuş?
+              Opening → closing movement (≥2%). Steam (▼) = odds shortened; drift (▲) = odds
+              drifted. What happened in the archive under the same movement + similar odds band?
             </p>
             {!report.movements.length ? (
-              <p className={styles.empty}>Bu maçta belirgin hareket yok (referans BM).</p>
+              <p className={styles.empty}>No notable movement in this match (reference BM).</p>
             ) : (
               <ul className={styles.moveList}>
                 {report.movements.map((m, i) => (
@@ -456,7 +491,7 @@ export function SmartAnalysisClient({
                     {m.historical ? (
                       <span className={styles.hint}> · {m.historical.note} (n={m.historical.n})</span>
                     ) : (
-                      <span className={styles.muted}> · yeterli arşiv örneği yok</span>
+                      <span className={styles.muted}> · not enough archive samples</span>
                     )}
                   </li>
                 ))}
