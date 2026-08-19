@@ -42,7 +42,9 @@ function findFixtureRowForCode(code: SimilarityCode, rows: FixtureOddsRow[]): Fi
   if (direct) return direct;
 
   if (code.group === "BTTS") {
-    const alt = code.side === "YES" ? ["True", "btts:YES", "btts:True"] : ["False", "btts:NO", "btts:False"];
+    // 'btts:YES'/'btts:NO' zaten birincil format (doğrulandı); bazı eski
+    // kayıtlarda farklı bir yazım olabilir ihtimaline karşı esnek bırakıldı.
+    const alt = code.side === "btts:YES" ? ["YES", "True", "btts:True"] : ["NO", "False", "btts:False"];
     for (const s of alt) {
       const r = rows.find((r) => r.market === code.market && r.selection === s);
       if (r) return r;
