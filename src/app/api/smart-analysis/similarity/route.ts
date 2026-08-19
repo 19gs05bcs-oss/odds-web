@@ -156,7 +156,7 @@ export async function POST(req: Request) {
 async function buildTableRows(samples: { event_id: string; score: number }[], bookmaker: string) {
   const ids = samples.slice(0, 60).map((s) => s.event_id);
   if (!ids.length) return [];
-  const quoteRows = await fetchQuoteRowsByEventIds(ids);
+  const quoteRows = await fetchQuoteRowsByEventIds(ids, bookmaker);
   const rowsById = eventsMetaAndQuotesToTableRows(quoteRows, bookmaker);
   const scoreById = new Map(samples.map((s) => [s.event_id, s.score]));
   return ids
