@@ -3,6 +3,7 @@ import { sql } from "@/lib/db";
 import { findSimilarForBookmaker, type FixtureOddsRow } from "@/lib/analysis/similarityEngine";
 import { fetchQuoteRowsByEventIds } from "@/lib/analysis/marketQuotes";
 import { eventsMetaAndQuotesToTableRows, PREFERRED_BM_NAME } from "@/lib/analysis/tableRows";
+import type { CompactOddsRow } from "@/lib/archiveCache";
 
 // ÖNEMLİ: bu route bilerek match/route.ts'ten AYRI. Gerçek çalışma süresi
 // ~159sn (bkz. test-similarity-real-engine.ts çıktısı, index sonrası).
@@ -29,6 +30,11 @@ type Body = {
   eventId?: string;
   bookmaker?: string;
   force?: boolean;
+  odds?: CompactOddsRow[]; // seçili maçın KENDİ oranları (client'ın bulletin'den zaten yüklediği
+  // fixture.odds) — match_odds tablosu ARŞİV (geçmiş/bitmiş maçlar), henüz
+  // oynanmamış/canlı maçın kendi oranları orada olmayabilir. Bu yüzden
+  // match_odds'tan event_id ile sorgulamak yerine client'tan alıyoruz —
+  // aynen eski match/route.ts'in yaptığı gibi.
 };
 
 type CachedRow = {
@@ -81,18 +87,20 @@ export async function POST(req: Request) {
     }
   }
 
-  const rows = (await sql.unsafe(
-    `SELECT market, selection, odds, opening FROM match_odds WHERE event_id = $1`,
-    [eventId] as never[],
-  )) as { market: string; selection: string; odds: number | string | null; opening: number | string | null }[];
+  if (!Array.isArray(body.odds) || !body.odds.length) {
+    return NextResponse.json(
+      { ok: false, error: "odds is required (selected fixture's own odds, from the bulletin)." },
+      { status: 400 },
+    );
+  }
 
-  const fixtureOdds: FixtureOddsRow[] = rows
-    .filter((r) => r.market && r.selection && r.odds != null)
-    .map((r) => ({
-      market: r.market,
-      selection: r.selection,
-      odds: Number(r.odds),
-      opening: r.opening == null ? null : Number(r.opening),
+  const fixtureOdds: FixtureOddsRow[] = body.odds
+    .filter((row) => row[5] != null)
+    .map((row) => ({
+      market: `${row[1]}:${row[2]}`,
+      selection: row[3],
+      odds: row[5] as number,
+      opening: row[4],
     }));
 
   const t0 = Date.now();
