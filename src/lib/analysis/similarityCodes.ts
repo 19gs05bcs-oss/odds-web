@@ -116,13 +116,13 @@ function buildCodes(): SimilarityCode[] {
       code: `BTTS_${st}_YES`,
       group: "BTTS",
       market: `BOTH_TEAMS_TO_SCORE:${scope}`,
-      side: "YES", // ek varyantlar (True/btts:YES) engine tarafında ayrıca denenir
+      side: "btts:YES", // gerçek veriyle doğrulandı (SELECT DISTINCT selection ... 'btts:YES'/'btts:NO')
     });
     items.push({
       code: `BTTS_${st}_NO`,
       group: "BTTS",
       market: `BOTH_TEAMS_TO_SCORE:${scope}`,
-      side: "NO",
+      side: "btts:NO",
     });
   }
 
