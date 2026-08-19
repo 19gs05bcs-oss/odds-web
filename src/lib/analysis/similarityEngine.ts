@@ -64,12 +64,101 @@ export type SimilarityResult = {
   usedCodes: string[];
 };
 
+export type SimilarityBulkQueries = {
+  driftQuery: { text: string; params: unknown[] };
+  buildSpreadQuery: (eventIds: string[]) => { text: string; params: unknown[] };
+  activeCodes: SimilarityCode[];
+};
+
+function codeKey(market: string, side: string): string {
+  return `${market}\u0000${side}`;
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, v));
+}
+
+/**
+ * Aktif kodları belirler ve İKİ toplu sorguyu inşa eder — DB'ye dokunmaz.
+ * ESKİ TASARIM: kod başına 1 CTE + 1 JOIN (357 kod varsa 357 CTE + 714 JOIN
+ * tek dev sorguda) — canlıda 3dk+ sürüp Supabase'i timeout'a düşürdü.
+ * YENİ TASARIM: kod sayısından bağımsız olarak SADECE 2 sorgu:
+ *   1) driftQuery  — referans bookmaker'ın TÜM aktif kodlardaki satırları,
+ *      tek hash-join (VALUES listesi) ile.
+ *   2) spreadQuery — tüm bookmaker'ların STDDEV'i, yine tek hash-join;
+ *      sadece driftQuery'de event_id'si çıkan maçlarla sınırlı (tüm arşivi
+ *      taramak yerine).
+ * Ağırlıklı z-distance skorlaması artık SQL'de değil JS'de (bkz.
+ * findSimilarForBookmaker) — Postgres sadece ham drift/spread verisini
+ * çekiyor.
+ */
+export function buildSimilarityQueries(opts: {
+  bookmaker: string;
+  fixtureOdds: FixtureOddsRow[];
+}): SimilarityBulkQueries | null {
+  const { bookmaker, fixtureOdds } = opts;
+
+  const activeCodes = SIMILARITY_CODES.filter((c) => {
+    if (!STATS[c.code]) return false;
+    const row = findFixtureRowForCode(c, fixtureOdds);
+    return row != null && row.opening != null && row.opening !== 0;
+  });
+  if (!activeCodes.length) return null;
+
+  const driftParams: unknown[] = [bookmaker];
+  const driftValues = activeCodes
+    .map((c) => {
+      driftParams.push(c.market, c.side);
+      return `($${driftParams.length - 1}, $${driftParams.length})`;
+    })
+    .join(", ");
+  const driftQuery = {
+    text: `
+      SELECT mo.event_id, mo.market, mo.selection, mo.odds, mo.opening
+      FROM ${MATCH_ODDS_TABLE} mo
+      JOIN (VALUES ${driftValues}) AS codes(market, selection)
+        ON mo.market = codes.market AND mo.selection = codes.selection
+      WHERE mo.bookmaker = $1
+        AND mo.opening IS NOT NULL AND mo.opening != 0
+    `,
+    params: driftParams,
+  };
+
+  const buildSpreadQuery = (eventIds: string[]) => {
+    const params: unknown[] = [];
+    const values = activeCodes
+      .map((c) => {
+        params.push(c.market, c.side);
+        return `($${params.length - 1}, $${params.length})`;
+      })
+      .join(", ");
+    params.push(eventIds);
+    return {
+      text: `
+        SELECT mo.event_id, mo.market, mo.selection, STDDEV(mo.odds) AS spread_close
+        FROM ${MATCH_ODDS_TABLE} mo
+        JOIN (VALUES ${values}) AS codes(market, selection)
+          ON mo.market = codes.market AND mo.selection = codes.selection
+        WHERE mo.event_id = ANY($${params.length}::text[])
+        GROUP BY mo.event_id, mo.market, mo.selection
+      `,
+      params,
+    };
+  };
+
+  return { driftQuery, buildSpreadQuery, activeCodes };
+}
+
 /**
  * Tek bookmaker'ı referans alarak, o bookmaker'ın SUNDUĞU kodlar üzerinden
  * ağırlıklı z-distance ile geçmiş maçları eler.
  *   drift  = (odds - opening) / opening      (bu bookmaker'ın satırından)
  *   spread = STDDEV(odds) tüm bookmaker'lar  (aynı event/market/selection)
  *   z = (x - median) / MAD                   (similarityStats.json'dan, sabit)
+ *
+ * Bir maçın skorlanabilmesi için TÜM aktif kodlarda hem drift hem spread
+ * verisi bulunmalı (eski SQL'deki LEFT JOIN + NULL-propagation davranışıyla
+ * birebir aynı — eksik kod varsa o maç elenir).
  */
 export async function findSimilarForBookmaker(opts: {
   eventId: string;
@@ -78,94 +167,100 @@ export async function findSimilarForBookmaker(opts: {
   limit?: number;
 }): Promise<SimilarityResult> {
   const { eventId, bookmaker, fixtureOdds, limit = 500 } = opts;
-  const bmRows = fixtureOdds; // spread hesabı tüm bookmaker'ları gerektirir, filtre yapmıyoruz burada
 
-  const activeCodes = SIMILARITY_CODES.filter((c) => {
-    if (!STATS[c.code]) return false;
-    const row = findFixtureRowForCode(c, bmRows.filter(() => true));
-    return row != null && row.opening != null && row.opening !== 0;
-  });
-  if (!activeCodes.length) return { matchedCount: 0, samples: [], usedCodes: [] };
+  const built = buildSimilarityQueries({ bookmaker, fixtureOdds });
+  if (!built) return { matchedCount: 0, samples: [], usedCodes: [] };
+  const { driftQuery, buildSpreadQuery, activeCodes } = built;
 
-  const params: unknown[] = [];
-  const push = makePush(params);
+  const driftRows = (await sql.unsafe(driftQuery.text, driftQuery.params as never[])) as {
+    event_id: string;
+    market: string;
+    selection: string;
+    odds: number;
+    opening: number;
+  }[];
 
-  const ctes: string[] = [];
-  const distTerms: string[] = [];
+  const driftByEvent = new Map<string, Map<string, number>>();
+  const candidateEventIds = new Set<string>();
+  for (const r of driftRows) {
+    if (r.event_id === eventId) continue;
+    const drift = (r.odds - r.opening) / r.opening;
+    let m = driftByEvent.get(r.event_id);
+    if (!m) {
+      m = new Map();
+      driftByEvent.set(r.event_id, m);
+    }
+    m.set(codeKey(r.market, r.selection), drift);
+    candidateEventIds.add(r.event_id);
+  }
+  if (!candidateEventIds.size) {
+    return { matchedCount: 0, samples: [], usedCodes: activeCodes.map((c) => c.code) };
+  }
+
+  const spreadQuery = buildSpreadQuery([...candidateEventIds]);
+  const spreadRows = (await sql.unsafe(spreadQuery.text, spreadQuery.params as never[])) as {
+    event_id: string;
+    market: string;
+    selection: string;
+    spread_close: number | null;
+  }[];
+
+  const spreadByEvent = new Map<string, Map<string, number>>();
+  for (const r of spreadRows) {
+    if (r.spread_close == null) continue;
+    let m = spreadByEvent.get(r.event_id);
+    if (!m) {
+      m = new Map();
+      spreadByEvent.set(r.event_id, m);
+    }
+    m.set(codeKey(r.market, r.selection), r.spread_close);
+  }
+
   const groupCounts = new Map<string, number>();
   for (const c of activeCodes) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1);
-
-  activeCodes.forEach((c, i) => {
-    const alias = `q${i}`;
-    const marketPh = push(c.market);
-    const sidePh = push(c.side);
-    const bmPh = push(bookmaker);
-
-    ctes.push(`
-      ${alias} AS (
-        SELECT event_id,
-               (odds - opening) / NULLIF(opening, 0) AS drift
-        FROM ${MATCH_ODDS_TABLE}
-        WHERE bookmaker = ${bmPh} AND market = ${marketPh} AND selection = ${sidePh}
-          AND opening IS NOT NULL AND opening != 0
-      ),
-      ${alias}_spread AS (
-        SELECT event_id, STDDEV(odds) AS spread_close
-        FROM ${MATCH_ODDS_TABLE}
-        WHERE market = ${marketPh} AND selection = ${sidePh}
-        GROUP BY event_id
-      )`);
-
-    const stats = STATS[c.code];
-    const [medDrift, madDrift] = stats.mean_drift_pct;
-    const [medSpread, madSpread] = stats.spread_close;
-    const groupWeight = WEIGHTS[c.group] ?? 1;
-    const wPerCode = groupWeight / (groupCounts.get(c.group) ?? 1);
-
-    distTerms.push(`
-      ${push(wPerCode)} * (
-        POWER(LEAST(6, GREATEST(-6, (${alias}.drift - ${push(medDrift)}) / ${push(madDrift || 1)})), 2)
-      + POWER(LEAST(6, GREATEST(-6, (${alias}_spread.spread_close - ${push(medSpread)}) / ${push(madSpread || 1)})), 2)
-      )`);
-  });
-
-  const joins = activeCodes
-    .map((_, i) => `LEFT JOIN q${i} ON q${i}.event_id = base.event_id
-                     LEFT JOIN q${i}_spread ON q${i}_spread.event_id = base.event_id`)
-    .join("\n");
-
   const totalWeight = activeCodes.reduce((s, c) => {
     const gw = WEIGHTS[c.group] ?? 1;
     return s + gw / (groupCounts.get(c.group) ?? 1);
   }, 0);
 
-  const excludeEventPh = push(eventId);
-  const totalWeightPh = push(totalWeight);
-  const thresholdPh = push(SIMILARITY_THRESHOLD);
-  const limitPh = push(limit);
+  const scored: { event_id: string; score: number }[] = [];
+  for (const evId of candidateEventIds) {
+    const drifts = driftByEvent.get(evId);
+    const spreads = spreadByEvent.get(evId);
+    if (!drifts || !spreads) continue;
 
-  // Not: aggregate olmayan bir sütun (score) WHERE'de kullanılamadığı için
-  // dış sorguda tekrar hesaplanıyor.
-  const scoreExpr = `(${distTerms.join(" + ")}) / ${totalWeightPh}`;
-  const text = `
-    WITH ${ctes.join(",\n")},
-    base AS (SELECT DISTINCT event_id FROM q0)
-    SELECT event_id, score FROM (
-      SELECT base.event_id, ${scoreExpr} AS score
-      FROM base
-      ${joins}
-      WHERE base.event_id != ${excludeEventPh}
-    ) scored
-    WHERE score < ${thresholdPh}
-    ORDER BY score ASC
-    LIMIT ${limitPh}
-  `;
+    let sum = 0;
+    let complete = true;
+    for (const c of activeCodes) {
+      const key = codeKey(c.market, c.side);
+      const drift = drifts.get(key);
+      const spread = spreads.get(key);
+      if (drift == null || spread == null) {
+        complete = false; // orijinal davranış: eksik kod varsa event elenir
+        break;
+      }
+      const stats = STATS[c.code];
+      const [medDrift, madDrift] = stats.mean_drift_pct;
+      const [medSpread, madSpread] = stats.spread_close;
+      const groupWeight = WEIGHTS[c.group] ?? 1;
+      const wPerCode = groupWeight / (groupCounts.get(c.group) ?? 1);
 
-  const rows = (await sql.unsafe(text, params as never[])) as { event_id: string; score: number }[];
-  const k = Math.max(K_MIN, Math.min(K_DEFAULT, rows.length));
+      const zDrift = clamp((drift - medDrift) / (madDrift || 1), -6, 6);
+      const zSpread = clamp((spread - medSpread) / (madSpread || 1), -6, 6);
+      sum += wPerCode * (zDrift * zDrift + zSpread * zSpread);
+    }
+    if (!complete) continue;
+
+    const score = sum / totalWeight;
+    if (score < SIMILARITY_THRESHOLD) scored.push({ event_id: evId, score });
+  }
+
+  scored.sort((a, b) => a.score - b.score);
+  const limited = scored.slice(0, limit);
+  const k = Math.max(K_MIN, Math.min(K_DEFAULT, limited.length));
   return {
-    matchedCount: rows.length,
-    samples: rows.slice(0, k),
+    matchedCount: limited.length,
+    samples: limited.slice(0, k),
     usedCodes: activeCodes.map((c) => c.code),
   };
 }
