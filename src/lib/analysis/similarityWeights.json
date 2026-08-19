@@ -1,0 +1,14 @@
+{
+  "weights": {
+    "X12": 1,
+    "OU": 1,
+    "BTTS": 1,
+    "AH": 1,
+    "HTFT": 1,
+    "DC": 1,
+    "ODDEVEN": 1
+  },
+  "k_default": 6,
+  "k_min": 3,
+  "similarity_threshold": 2.5
+}
