@@ -155,6 +155,37 @@
   font-weight: 500;
 }
 
+.primaryButton {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background: var(--ink, #111);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+.primaryButton:hover {
+  opacity: 0.9;
+}
+
+.secondaryButton {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #ddd);
+  background: transparent;
+  color: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.secondaryButton:hover {
+  background: var(--surface-hover, #f2f2f2);
+}
+
 .pos {
   color: #047857;
   font-weight: 700;
