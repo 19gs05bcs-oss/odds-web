@@ -29,12 +29,12 @@ export const maxDuration = 280;
 type Body = {
   eventId?: string;
   bookmaker?: string;
+  bookmakerId?: number; // referans bookmaker'ın numeric id'si — fixture.odds ÇOK bookmaker'lı
+  // (CompactOddsRow[0] = bookmakerId) bir dizi olduğu için fixtureOdds'u BUNA göre
+  // filtrelemek şart. Eksikse (eski client) hiç filtrelenmez -> YANLIŞ bookmaker'ın
+  // satırı seçilebilir (bkz. aşağıdaki fixtureOdds inşası).
   force?: boolean;
-  odds?: CompactOddsRow[]; // seçili maçın KENDİ oranları (client'ın bulletin'den zaten yüklediği
-  // fixture.odds) — match_odds tablosu ARŞİV (geçmiş/bitmiş maçlar), henüz
-  // oynanmamış/canlı maçın kendi oranları orada olmayabilir. Bu yüzden
-  // match_odds'tan event_id ile sorgulamak yerine client'tan alıyoruz —
-  // aynen eski match/route.ts'in yaptığı gibi.
+  odds?: CompactOddsRow[];
 };
 
 type CachedRow = {
@@ -96,12 +96,20 @@ export async function POST(req: Request) {
 
   const fixtureOdds: FixtureOddsRow[] = body.odds
     .filter((row) => row[5] != null)
+    .filter((row) => body.bookmakerId == null || row[0] === body.bookmakerId)
     .map((row) => ({
       market: `${row[1]}:${row[2]}`,
       selection: row[3],
       odds: row[5] as number,
       opening: row[4],
     }));
+
+  if (body.bookmakerId == null) {
+    console.error(
+      "similarity route: bookmakerId gönderilmedi, fixtureOdds TÜM bookmaker'lardan " +
+        "karışık kalabilir — client'ın SmartAnalysisClient.tsx güncellemesi eksik olabilir.",
+    );
+  }
 
   const t0 = Date.now();
   let result: Awaited<ReturnType<typeof findSimilarForBookmaker>>;
