@@ -1,22 +1,3 @@
-/**
- * similarityEngine.ts — seçili bir maç için, TEK bir bookmaker'ı referans
- * alarak match_odds tablosundan ağırlıklı z-score mesafesiyle geçmiş
- * "benzer" maçları bulur. 20 bookmaker için bu fonksiyon ayrı ayrı çağrılır
- * (her biri kendi cohort'unu üretir) — bkz. bulk route.
- *
- * ÖNEMLİ — CANLIYA ALMADAN ÖNCE TEK BİR event_id İLE TEST ET:
- * similarityCodes.ts'teki market/side formatı odds-agent'ın raw arşiv
- * verisinden (memory/raw/*.parquet) doğrulandı; match_odds'un GERÇEKTEN
- * aynı formatı kullandığı (marketQuoteCriteria.ts'teki kalıplardan
- * çıkarım) henüz canlı sorguyla teyit edilmedi.
- *
- * NOT — DB BAĞLANTISI: db.ts'deki paylaşılan `sql` (Supavisor transaction
- * pooler, 6543) yerine bilerek dbDirect.ts'deki `sqlDirect` (5432, direct/
- * session) kullanılıyor. driftQuery/spreadQuery büyük VALUES-join sorguları
- * olduğu için pooler'da 502 ile kesiliyordu; direct connection'da sorun
- * yok. Railway'de DIRECT_DATABASE_URL env değişkeni set edilmiş olmalı.
- */
-
 import { sqlDirect as sql } from "@/lib/dbDirect";
 import { MATCH_ODDS_TABLE } from "./marketQuotes";
 import { SIMILARITY_CODES, type SimilarityCode } from "./similarityCodes";
@@ -29,35 +10,7 @@ const WEIGHTS = (weightsCfg as { weights: Record<string, number> }).weights;
 const K_DEFAULT = (weightsCfg as { k_default: number }).k_default;
 const K_MIN = (weightsCfg as { k_min: number }).k_min;
 
-/**
- * KADEMELİ (CASCADE) FİLTRELEME — neden gerekli:
- *
- * SIMILARITY_CODES ~357 kod üretiyor (28 O/U çizgisi × 2 yön × 3 scope, 25
- * AH çizgisi × 2 × 3 scope, vs.). Eski tasarım TEK geçişte tüm aktif
- * kodların ağırlıklı z-distance'ını alıp bir eşiğe (SIMILARITY_THRESHOLD)
- * ve %60 coverage şartına (minRequiredCodes) tabi tutuyordu. Sorun: gerçek
- * bookmaker verisinde uç O/U ve AH çizgileri (ör. AH -3.0, OU 6.75) çok
- * nadiren quote edilir, dolayısıyla geçmiş adayların büyük çoğunluğu bu
- * uç kodlarda drift/spread verisine sahip DEĞİL. Sonuç: hiçbir aday %60
- * coverage'ı geçemiyor, havuz boş kalıyor, similarity DAİMA sıfır dönüyor.
- * Ayrıca "tüm marketin AYNI ANDA benzer olması" istatistiksel olarak da
- * neredeyse imkansız bir şart.
- *
- * ÇÖZÜM — üç aşamalı huni (tüm veri zaten driftQuery/spreadQuery ile tek
- * seferde çekildiği için ek DB sorgusu GEREKMİYOR, sadece JS'te aday
- * havuzunu art arda daraltıyoruz):
- *   Aşama 1 (STAGE1_MARKET)  : sadece MS 1X2 (H/D/A) — 3 kod, hemen her
- *                               maçta var → havuzu STAGE1_POOL adaya indir.
- *   Aşama 2 (isLiquidCode)   : 1X2 (tüm scope) + Çifte Şans MS + KG Var/Yok
- *                               MS + ana O/U çizgileri (1.5/2.5/3.5) + ana
- *                               AH çizgileri (-1/-0.5/0/0.5/1) → STAGE2_POOL.
- *   Aşama 3 (activeCodes)    : TÜM aktif kodlarla (357'ye kadar) ince
- *                               skorlama, ama artık sadece STAGE2_POOL kadar
- *                               (~60) adayın üzerinde → en iyi k tanesi.
- * Her aşamada sabit bir "geç/kal" eşiği yerine sadece "en yakın N tanesini
- * al" mantığı var; bu yüzden sonuç asla sert bir eşik yüzünden sıfıra
- * düşmüyor — havuzda ne kadar aday varsa oradan en iyisi seçilir.
- */
+
 const STAGE1_MARKET = "HOME_DRAW_AWAY:FULL_TIME";
 const STAGE1_POOL = 400;
 const STAGE2_POOL = 60;
@@ -254,20 +207,39 @@ export async function findSimilarForBookmaker(opts: {
   }[];
 
   const driftByEvent = new Map<string, Map<string, number>>();
+  const oddsByEvent = new Map<string, Map<string, number>>();
   const candidateEventIds = new Set<string>();
   for (const r of driftRows) {
     if (r.event_id === eventId) continue;
     const drift = (r.odds - r.opening) / r.opening;
-    let m = driftByEvent.get(r.event_id);
-    if (!m) {
-      m = new Map();
-      driftByEvent.set(r.event_id, m);
+    const key = codeKey(r.market, r.selection);
+    let dm = driftByEvent.get(r.event_id);
+    if (!dm) {
+      dm = new Map();
+      driftByEvent.set(r.event_id, dm);
     }
-    m.set(codeKey(r.market, r.selection), drift);
+    dm.set(key, drift);
+    let om = oddsByEvent.get(r.event_id);
+    if (!om) {
+      om = new Map();
+      oddsByEvent.set(r.event_id, om);
+    }
+    om.set(key, r.odds);
     candidateEventIds.add(r.event_id);
   }
   if (!candidateEventIds.size) {
     return { matchedCount: 0, samples: [], usedCodes: activeCodes.map((c) => c.code) };
+  }
+
+  // Seçili maçın HER aktif kod için kendi (bu bookmaker'daki) oranı — oran
+  // seviyesi toleransı için referans. drift/spread z-score'ları oranın
+  // SEVİYESİNİ hiç görmüyordu (bkz. dosya başı notu); bu olmadan %5 hareket
+  // eden bir 1.40 ile %5 hareket eden bir 3.30 istatistiksel olarak "aynı"
+  // sayılıyordu.
+  const fixtureOddsByCode = new Map<string, number>();
+  for (const c of activeCodes) {
+    const row = findFixtureRowForCode(c, fixtureOdds);
+    if (row) fixtureOddsByCode.set(codeKey(c.market, c.side), row.odds);
   }
 
   const spreadQuery = buildSpreadQuery([...candidateEventIds]);
@@ -289,6 +261,13 @@ export async function findSimilarForBookmaker(opts: {
     m.set(codeKey(r.market, r.selection), r.spread_close);
   }
 
+  // Oran-seviyesi toleransı: bir kodun geçmiş maçtaki oranı, seçili maçın
+  // (bu bookmaker'daki) aynı kod için oranından bu oranın fazlasında
+  // sapıyorsa, o kod o aday için HİÇ SAYILMAZ (drift/spread verisi olsa
+  // bile). %20 -> ör. fixture 1.45 ise sadece [1.16, 1.74] aralığındaki
+  // geçmiş oranlar bu kodda katkı verebilir.
+  const ODDS_LEVEL_TOLERANCE = 0.2;
+
   /**
    * Verilen kod alt kümesiyle, verilen aday event_id listesini skorlar ve
    * artan skora (küçük = daha benzer) göre sıralı döner. En az 1 kod
@@ -307,6 +286,7 @@ export async function findSimilarForBookmaker(opts: {
     for (const evId of candidates) {
       const drifts = driftByEvent.get(evId);
       const spreads = spreadByEvent.get(evId);
+      const oddsMap = oddsByEvent.get(evId);
       if (!drifts || !spreads) continue;
 
       let sum = 0;
@@ -319,6 +299,14 @@ export async function findSimilarForBookmaker(opts: {
         const spread = spreads.get(key);
         if (drift == null || spread == null) continue;
 
+        // --- Oran-seviyesi kapısı ---
+        const fixtureOdds = fixtureOddsByCode.get(key);
+        const histOdds = oddsMap?.get(key);
+        if (fixtureOdds != null && histOdds != null) {
+          const relDiff = Math.abs(histOdds - fixtureOdds) / fixtureOdds;
+          if (relDiff > ODDS_LEVEL_TOLERANCE) continue; // bu kod bu aday için sayılmaz
+        }
+
         const stats = STATS[c.code];
         if (!stats) continue;
         const [medDrift, madDrift] = stats.mean_drift_pct;
@@ -328,6 +316,7 @@ export async function findSimilarForBookmaker(opts: {
 
         const zDrift = clamp((drift - medDrift) / (madDrift || 1), -6, 6);
         const zSpread = clamp((spread - medSpread) / (madSpread || 1), -6, 6);
+
 
         sum += wPerCode * (zDrift * zDrift + zSpread * zSpread);
         matchedWeight += wPerCode;
