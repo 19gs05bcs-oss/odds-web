@@ -25,7 +25,6 @@ const LIQUID_1X2_DC_BTTS_MARKETS = new Set([
 const LIQUID_OU_LINES = new Set([1.5, 2.5, 3.5]);
 const LIQUID_AH_LINES = new Set([-1, -0.5, 0, 0.5, 1]);
 
-/** code.side'dan sayısal çizgiyi çıkarır: "OVER:2.5" -> 2.5, "H:-1.0" -> -1. */
 function parseLine(side: string): number | null {
   const idx = side.indexOf(":");
   if (idx === -1) return null;
@@ -57,16 +56,13 @@ function makePush(params: unknown[]): SqlParamPusher {
   };
 }
 
-/** Seçili maçın (referans bookmaker'daki) hangi kodları "aktif" (o bookmaker
- * bu market/side'ı gerçekten quote etmiş) olduğunu bulur. BTTS için
- * YES/NO dışındaki gerçek varyantları (True/false, btts: önekli) da dener. */
+
 function findFixtureRowForCode(code: SimilarityCode, rows: FixtureOddsRow[]): FixtureOddsRow | null {
   const direct = rows.find((r) => r.market === code.market && r.selection === code.side);
   if (direct) return direct;
 
   if (code.group === "BTTS") {
-    // 'btts:YES'/'btts:NO' zaten birincil format (doğrulandı); bazı eski
-    // kayıtlarda farklı bir yazım olabilir ihtimaline karşı esnek bırakıldı.
+   
     const alt = code.side === "btts:YES" ? ["YES", "True", "btts:True"] : ["NO", "False", "btts:False"];
     for (const s of alt) {
       const r = rows.find((r) => r.market === code.market && r.selection === s);
@@ -101,20 +97,7 @@ function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
 
-/**
- * Aktif kodları belirler ve İKİ toplu sorguyu inşa eder — DB'ye dokunmaz.
- * ESKİ TASARIM: kod başına 1 CTE + 1 JOIN (357 kod varsa 357 CTE + 714 JOIN
- * tek dev sorguda) — canlıda 3dk+ sürüp Supabase'i timeout'a düşürdü.
- * YENİ TASARIM: kod sayısından bağımsız olarak SADECE 2 sorgu:
- *   1) driftQuery  — referans bookmaker'ın TÜM aktif kodlardaki satırları,
- *      tek hash-join (VALUES listesi) ile.
- *   2) spreadQuery — tüm bookmaker'ların STDDEV'i, yine tek hash-join;
- *      sadece driftQuery'de event_id'si çıkan maçlarla sınırlı (tüm arşivi
- *      taramak yerine).
- * Ağırlıklı z-distance skorlaması artık SQL'de değil JS'de (bkz.
- * findSimilarForBookmaker) — Postgres sadece ham drift/spread verisini
- * çekiyor.
- */
+
 export function buildSimilarityQueries(opts: {
   bookmaker: string;
   fixtureOdds: FixtureOddsRow[];
@@ -172,24 +155,11 @@ export function buildSimilarityQueries(opts: {
   return { driftQuery, buildSpreadQuery, activeCodes };
 }
 
-/**
- * Tek bookmaker'ı referans alarak, o bookmaker'ın SUNDUĞU kodlar üzerinden
- * ağırlıklı z-distance ile geçmiş maçları eler.
- *   drift  = (odds - opening) / opening      (bu bookmaker'ın satırından)
- *   spread = STDDEV(odds) tüm bookmaker'lar  (aynı event/market/selection)
- *   z = (x - median) / MAD                   (similarityStats.json'dan, sabit)
- *
- * Skorlama artık TEK geçiş değil, kademeli (bkz. yukarıdaki "KADEMELİ
- * FİLTRELEME" bloğu): önce sadece 1X2 ile, sonra likit pazarlarla, en
- * sonda TÜM aktif kodlarla daralan bir havuz üzerinden çalışır. Bir
- * maçın bir aşamada elenmemesi için o aşamadaki kodlardan EN AZ BİRİNDE
- * hem drift hem spread verisi olması yeterli — tüm kodlarda veri şartı
- * artık yok (bu şart sıfır sonuç sorununun asıl nedeniydi).
- */
+
 export async function findSimilarForBookmaker(opts: {
   eventId: string;
   bookmaker: string;
-  fixtureOdds: FixtureOddsRow[]; // seçili maçın TÜM market/selection satırları
+  fixtureOdds: FixtureOddsRow[];
   limit?: number;
 }): Promise<SimilarityResult> {
   const { eventId, bookmaker, fixtureOdds, limit = 500 } = opts;
@@ -231,11 +201,7 @@ export async function findSimilarForBookmaker(opts: {
     return { matchedCount: 0, samples: [], usedCodes: activeCodes.map((c) => c.code) };
   }
 
-  // Seçili maçın HER aktif kod için kendi (bu bookmaker'daki) oranı — oran
-  // seviyesi toleransı için referans. drift/spread z-score'ları oranın
-  // SEVİYESİNİ hiç görmüyordu (bkz. dosya başı notu); bu olmadan %5 hareket
-  // eden bir 1.40 ile %5 hareket eden bir 3.30 istatistiksel olarak "aynı"
-  // sayılıyordu.
+ 
   const fixtureOddsByCode = new Map<string, number>();
   for (const c of activeCodes) {
     const row = findFixtureRowForCode(c, fixtureOdds);
@@ -261,20 +227,9 @@ export async function findSimilarForBookmaker(opts: {
     m.set(codeKey(r.market, r.selection), r.spread_close);
   }
 
-  // Oran-seviyesi toleransı: bir kodun geçmiş maçtaki oranı, seçili maçın
-  // (bu bookmaker'daki) aynı kod için oranından bu oranın fazlasında
-  // sapıyorsa, o kod o aday için HİÇ SAYILMAZ (drift/spread verisi olsa
-  // bile). %20 -> ör. fixture 1.45 ise sadece [1.16, 1.74] aralığındaki
-  // geçmiş oranlar bu kodda katkı verebilir.
   const ODDS_LEVEL_TOLERANCE = 0.2;
 
-  /**
-   * Verilen kod alt kümesiyle, verilen aday event_id listesini skorlar ve
-   * artan skora (küçük = daha benzer) göre sıralı döner. En az 1 kod
-   * eşleşen her aday havuzda kalır — sert bir coverage/threshold şartı
-   * YOK, huninin bir sonraki (daha geniş kod setli) aşaması zaten daha
-   * sıkı bir eleme yapacak.
-   */
+ 
   function scoreCandidates(
     codes: SimilarityCode[],
     candidates: Iterable<string>,
@@ -299,7 +254,6 @@ export async function findSimilarForBookmaker(opts: {
         const spread = spreads.get(key);
         if (drift == null || spread == null) continue;
 
-        // --- Oran-seviyesi kapısı ---
         const fixtureOdds = fixtureOddsByCode.get(key);
         const histOdds = oddsMap?.get(key);
         if (fixtureOdds != null && histOdds != null) {
@@ -330,15 +284,20 @@ export async function findSimilarForBookmaker(opts: {
     return out;
   }
 
-  // --- Aşama 1: sadece MS 1X2 (tam maç) — geniş havuzu hızlıca daralt ---
+ 
   const stage1Codes = activeCodes.filter((c) => c.market === STAGE1_MARKET);
+  const stage1RequiredMatches = stage1Codes.length || activeCodes.length;
   const stage1Ranked = scoreCandidates(
     stage1Codes.length ? stage1Codes : activeCodes,
     candidateEventIds,
-  );
+  ).filter((r) => r.matched === stage1RequiredMatches);
   const stage1Pool = stage1Ranked.slice(0, STAGE1_POOL).map((r) => r.event_id);
 
-  // --- Aşama 2: likit pazarlar (1X2 tüm scope + ÇŞ + KG + ana O/U + ana AH) ---
+ 
+  if (stage1Codes.length > 0 && stage1Pool.length === 0) {
+    return { matchedCount: 0, samples: [], usedCodes: activeCodes.map((c) => c.code) };
+  }
+
   const stage2Codes = activeCodes.filter(isLiquidCode);
   const stage2Source = stage1Pool.length ? stage1Pool : candidateEventIds;
   const stage2Ranked = scoreCandidates(
