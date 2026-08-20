@@ -26,9 +26,73 @@ import statsCfg from "./similarityStats.json";
 type CodeStats = { mean_drift_pct: [number, number]; spread_close: [number, number] };
 const STATS = statsCfg as unknown as Record<string, CodeStats>;
 const WEIGHTS = (weightsCfg as { weights: Record<string, number> }).weights;
-const SIMILARITY_THRESHOLD = (weightsCfg as { similarity_threshold: number }).similarity_threshold;
 const K_DEFAULT = (weightsCfg as { k_default: number }).k_default;
 const K_MIN = (weightsCfg as { k_min: number }).k_min;
+
+/**
+ * KADEMELİ (CASCADE) FİLTRELEME — neden gerekli:
+ *
+ * SIMILARITY_CODES ~357 kod üretiyor (28 O/U çizgisi × 2 yön × 3 scope, 25
+ * AH çizgisi × 2 × 3 scope, vs.). Eski tasarım TEK geçişte tüm aktif
+ * kodların ağırlıklı z-distance'ını alıp bir eşiğe (SIMILARITY_THRESHOLD)
+ * ve %60 coverage şartına (minRequiredCodes) tabi tutuyordu. Sorun: gerçek
+ * bookmaker verisinde uç O/U ve AH çizgileri (ör. AH -3.0, OU 6.75) çok
+ * nadiren quote edilir, dolayısıyla geçmiş adayların büyük çoğunluğu bu
+ * uç kodlarda drift/spread verisine sahip DEĞİL. Sonuç: hiçbir aday %60
+ * coverage'ı geçemiyor, havuz boş kalıyor, similarity DAİMA sıfır dönüyor.
+ * Ayrıca "tüm marketin AYNI ANDA benzer olması" istatistiksel olarak da
+ * neredeyse imkansız bir şart.
+ *
+ * ÇÖZÜM — üç aşamalı huni (tüm veri zaten driftQuery/spreadQuery ile tek
+ * seferde çekildiği için ek DB sorgusu GEREKMİYOR, sadece JS'te aday
+ * havuzunu art arda daraltıyoruz):
+ *   Aşama 1 (STAGE1_MARKET)  : sadece MS 1X2 (H/D/A) — 3 kod, hemen her
+ *                               maçta var → havuzu STAGE1_POOL adaya indir.
+ *   Aşama 2 (isLiquidCode)   : 1X2 (tüm scope) + Çifte Şans MS + KG Var/Yok
+ *                               MS + ana O/U çizgileri (1.5/2.5/3.5) + ana
+ *                               AH çizgileri (-1/-0.5/0/0.5/1) → STAGE2_POOL.
+ *   Aşama 3 (activeCodes)    : TÜM aktif kodlarla (357'ye kadar) ince
+ *                               skorlama, ama artık sadece STAGE2_POOL kadar
+ *                               (~60) adayın üzerinde → en iyi k tanesi.
+ * Her aşamada sabit bir "geç/kal" eşiği yerine sadece "en yakın N tanesini
+ * al" mantığı var; bu yüzden sonuç asla sert bir eşik yüzünden sıfıra
+ * düşmüyor — havuzda ne kadar aday varsa oradan en iyisi seçilir.
+ */
+const STAGE1_MARKET = "HOME_DRAW_AWAY:FULL_TIME";
+const STAGE1_POOL = 400;
+const STAGE2_POOL = 60;
+
+const LIQUID_1X2_DC_BTTS_MARKETS = new Set([
+  "HOME_DRAW_AWAY:FULL_TIME",
+  "HOME_DRAW_AWAY:FIRST_HALF",
+  "HOME_DRAW_AWAY:SECOND_HALF",
+  "DOUBLE_CHANCE:FULL_TIME",
+  "BOTH_TEAMS_TO_SCORE:FULL_TIME",
+]);
+const LIQUID_OU_LINES = new Set([1.5, 2.5, 3.5]);
+const LIQUID_AH_LINES = new Set([-1, -0.5, 0, 0.5, 1]);
+
+/** code.side'dan sayısal çizgiyi çıkarır: "OVER:2.5" -> 2.5, "H:-1.0" -> -1. */
+function parseLine(side: string): number | null {
+  const idx = side.indexOf(":");
+  if (idx === -1) return null;
+  const n = Number(side.slice(idx + 1));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Aşama 2'de kullanılacak "likit" (çoğu bookmaker'ın gerçekten quote ettiği) kodlar. */
+function isLiquidCode(c: SimilarityCode): boolean {
+  if (LIQUID_1X2_DC_BTTS_MARKETS.has(c.market)) return true;
+  if (c.market === "OVER_UNDER:FULL_TIME") {
+    const line = parseLine(c.side);
+    return line != null && LIQUID_OU_LINES.has(line);
+  }
+  if (c.market === "ASIAN_HANDICAP:FULL_TIME") {
+    const line = parseLine(c.side);
+    return line != null && LIQUID_AH_LINES.has(line);
+  }
+  return false;
+}
 
 export type FixtureOddsRow = { market: string; selection: string; odds: number; opening: number | null };
 
@@ -162,9 +226,12 @@ export function buildSimilarityQueries(opts: {
  *   spread = STDDEV(odds) tüm bookmaker'lar  (aynı event/market/selection)
  *   z = (x - median) / MAD                   (similarityStats.json'dan, sabit)
  *
- * Bir maçın skorlanabilmesi için TÜM aktif kodlarda hem drift hem spread
- * verisi bulunmalı (eski SQL'deki LEFT JOIN + NULL-propagation davranışıyla
- * birebir aynı — eksik kod varsa o maç elenir).
+ * Skorlama artık TEK geçiş değil, kademeli (bkz. yukarıdaki "KADEMELİ
+ * FİLTRELEME" bloğu): önce sadece 1X2 ile, sonra likit pazarlarla, en
+ * sonda TÜM aktif kodlarla daralan bir havuz üzerinden çalışır. Bir
+ * maçın bir aşamada elenmemesi için o aşamadaki kodlardan EN AZ BİRİNDE
+ * hem drift hem spread verisi olması yeterli — tüm kodlarda veri şartı
+ * artık yok (bu şart sıfır sonuç sorununun asıl nedeniydi).
  */
 export async function findSimilarForBookmaker(opts: {
   eventId: string;
@@ -222,67 +289,84 @@ export async function findSimilarForBookmaker(opts: {
     m.set(codeKey(r.market, r.selection), r.spread_close);
   }
 
-  const groupCounts = new Map<string, number>();
-  for (const c of activeCodes) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1);
+  /**
+   * Verilen kod alt kümesiyle, verilen aday event_id listesini skorlar ve
+   * artan skora (küçük = daha benzer) göre sıralı döner. En az 1 kod
+   * eşleşen her aday havuzda kalır — sert bir coverage/threshold şartı
+   * YOK, huninin bir sonraki (daha geniş kod setli) aşaması zaten daha
+   * sıkı bir eleme yapacak.
+   */
+  function scoreCandidates(
+    codes: SimilarityCode[],
+    candidates: Iterable<string>,
+  ): { event_id: string; score: number; matched: number }[] {
+    const groupCounts = new Map<string, number>();
+    for (const c of codes) groupCounts.set(c.group, (groupCounts.get(c.group) ?? 0) + 1);
 
-  const scored: { event_id: string; score: number }[] = [];
-  
-  // KISMİ KAPSAM: Hedef eşleşme oranı (%60)
-  const MIN_COVERAGE_RATIO = 0.6; 
-  const minRequiredCodes = Math.ceil(activeCodes.length * MIN_COVERAGE_RATIO);
+    const out: { event_id: string; score: number; matched: number }[] = [];
+    for (const evId of candidates) {
+      const drifts = driftByEvent.get(evId);
+      const spreads = spreadByEvent.get(evId);
+      if (!drifts || !spreads) continue;
 
-  for (const evId of candidateEventIds) {
-    const drifts = driftByEvent.get(evId);
-    const spreads = spreadByEvent.get(evId);
-    if (!drifts || !spreads) continue;
+      let sum = 0;
+      let matchedWeight = 0;
+      let matched = 0;
 
-    let sum = 0;
-    let matchedWeight = 0;
-    let matchedCodesCount = 0;
+      for (const c of codes) {
+        const key = codeKey(c.market, c.side);
+        const drift = drifts.get(key);
+        const spread = spreads.get(key);
+        if (drift == null || spread == null) continue;
 
-    for (const c of activeCodes) {
-      const key = codeKey(c.market, c.side);
-      const drift = drifts.get(key);
-      const spread = spreads.get(key);
-      
-      // Veri yoksa maçı tamamen silmek yerine sadece bu kodu pas geçiyoruz
-      if (drift == null || spread == null) {
-        continue; 
+        const stats = STATS[c.code];
+        if (!stats) continue;
+        const [medDrift, madDrift] = stats.mean_drift_pct;
+        const [medSpread, madSpread] = stats.spread_close;
+        const groupWeight = WEIGHTS[c.group] ?? 1;
+        const wPerCode = groupWeight / (groupCounts.get(c.group) ?? 1);
+
+        const zDrift = clamp((drift - medDrift) / (madDrift || 1), -6, 6);
+        const zSpread = clamp((spread - medSpread) / (madSpread || 1), -6, 6);
+
+        sum += wPerCode * (zDrift * zDrift + zSpread * zSpread);
+        matchedWeight += wPerCode;
+        matched++;
       }
 
-      const stats = STATS[c.code];
-      const [medDrift, madDrift] = stats.mean_drift_pct;
-      const [medSpread, madSpread] = stats.spread_close;
-      const groupWeight = WEIGHTS[c.group] ?? 1;
-      const wPerCode = groupWeight / (groupCounts.get(c.group) ?? 1);
-
-      const zDrift = clamp((drift - medDrift) / (madDrift || 1), -6, 6);
-      const zSpread = clamp((spread - medSpread) / (madSpread || 1), -6, 6);
-      
-      sum += wPerCode * (zDrift * zDrift + zSpread * zSpread);
-      matchedWeight += wPerCode;
-      matchedCodesCount++;
+      if (matched === 0) continue;
+      out.push({ event_id: evId, score: sum / matchedWeight, matched });
     }
-
-    // Yeterli sayıda kodla (ör. en az %60) eşleşmediyse maçı o zaman ele
-    if (matchedCodesCount < minRequiredCodes) {
-      continue;
-    }
-
-    // Skorlamayı statik 'totalWeight' yerine, sadece eşleşen kodların toplam ağırlığıyla yapıyoruz.
-    // Bu sayede, eksik kodlar kalan ortalamayı sahte bir şekilde iyileştirmiyor veya bozmuyor.
-    const score = sum / matchedWeight;
-    
-    if (score < SIMILARITY_THRESHOLD) scored.push({ event_id: evId, score });
+    out.sort((a, b) => a.score - b.score);
+    return out;
   }
 
-  scored.sort((a, b) => a.score - b.score);
-  const limited = scored.slice(0, limit);
-  const k = Math.max(K_MIN, Math.min(K_DEFAULT, limited.length));
-  
+  // --- Aşama 1: sadece MS 1X2 (tam maç) — geniş havuzu hızlıca daralt ---
+  const stage1Codes = activeCodes.filter((c) => c.market === STAGE1_MARKET);
+  const stage1Ranked = scoreCandidates(
+    stage1Codes.length ? stage1Codes : activeCodes,
+    candidateEventIds,
+  );
+  const stage1Pool = stage1Ranked.slice(0, STAGE1_POOL).map((r) => r.event_id);
+
+  // --- Aşama 2: likit pazarlar (1X2 tüm scope + ÇŞ + KG + ana O/U + ana AH) ---
+  const stage2Codes = activeCodes.filter(isLiquidCode);
+  const stage2Source = stage1Pool.length ? stage1Pool : candidateEventIds;
+  const stage2Ranked = scoreCandidates(
+    stage2Codes.length ? stage2Codes : activeCodes,
+    stage2Source,
+  );
+  const stage2Pool = stage2Ranked.slice(0, STAGE2_POOL).map((r) => r.event_id);
+
+  // --- Aşama 3: TÜM aktif kodlar — sadece Aşama 2'den geçen küçük havuzda ---
+  const stage3Source = stage2Pool.length ? stage2Pool : stage2Source;
+  const finalRanked = scoreCandidates(activeCodes, stage3Source).slice(0, limit);
+
+  const k = Math.max(K_MIN, Math.min(K_DEFAULT, finalRanked.length));
+
   return {
-    matchedCount: limited.length,
-    samples: limited.slice(0, k),
+    matchedCount: finalRanked.length,
+    samples: finalRanked.slice(0, k).map((r) => ({ event_id: r.event_id, score: r.score })),
     usedCodes: activeCodes.map((c) => c.code),
   };
 }
