@@ -9,9 +9,15 @@
  * verisinden (memory/raw/*.parquet) doğrulandı; match_odds'un GERÇEKTEN
  * aynı formatı kullandığı (marketQuoteCriteria.ts'teki kalıplardan
  * çıkarım) henüz canlı sorguyla teyit edilmedi.
+ *
+ * NOT — DB BAĞLANTISI: db.ts'deki paylaşılan `sql` (Supavisor transaction
+ * pooler, 6543) yerine bilerek dbDirect.ts'deki `sqlDirect` (5432, direct/
+ * session) kullanılıyor. driftQuery/spreadQuery büyük VALUES-join sorguları
+ * olduğu için pooler'da 502 ile kesiliyordu; direct connection'da sorun
+ * yok. Railway'de DIRECT_DATABASE_URL env değişkeni set edilmiş olmalı.
  */
 
-import { sql } from "@/lib/db";
+import { sqlDirect as sql } from "@/lib/dbDirect";
 import { MATCH_ODDS_TABLE } from "./marketQuotes";
 import { SIMILARITY_CODES, type SimilarityCode } from "./similarityCodes";
 import weightsCfg from "./similarityWeights.json";
