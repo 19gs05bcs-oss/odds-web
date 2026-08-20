@@ -265,6 +265,7 @@ export function SmartAnalysisClient({
           body: JSON.stringify({
             eventId: selectedFixture.match_id,
             bookmaker: bmName,
+            bookmakerId: bmNum,
             odds: selectedFixture.odds,
             force,
           }),
