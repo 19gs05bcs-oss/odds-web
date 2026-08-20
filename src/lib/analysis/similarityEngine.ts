@@ -227,7 +227,7 @@ export async function findSimilarForBookmaker(opts: {
     m.set(codeKey(r.market, r.selection), r.spread_close);
   }
 
-  const ODDS_LEVEL_TOLERANCE = 0.2;
+  const ODDS_LEVEL_TOLERANCE = 0.05;
 
  
   function scoreCandidates(
