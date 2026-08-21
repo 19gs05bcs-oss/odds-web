@@ -44,6 +44,42 @@ function sideTr(s: string | null): string {
   return s || "—";
 }
 
+function LoadingBanner({
+  title,
+  subtitle,
+  long,
+}: {
+  title: string;
+  subtitle?: string;
+  long?: boolean;
+}) {
+  return (
+    <div
+      className={long ? `${styles.loadingBanner} ${styles.loadingBannerLong}` : styles.loadingBanner}
+      role="status"
+      aria-live="polite"
+    >
+      <span className={styles.spinner} aria-hidden="true" />
+      <div className={styles.loadingText}>
+        <p className={styles.loadingTitle}>
+          {title}
+          <span className={styles.loadingDots} aria-hidden="true">
+            <span>.</span>
+            <span>.</span>
+            <span>.</span>
+          </span>
+        </p>
+        {subtitle ? <p className={styles.loadingSub}>{subtitle}</p> : null}
+        {long ? (
+          <div className={styles.progressTrack}>
+            <div className={styles.progressBar} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function SmartAnalysisClient({
   bookmakers,
   fixtureDates,
@@ -378,7 +414,12 @@ export function SmartAnalysisClient({
       {archiveWarm.status === "loading" ? (
         <p className={styles.loading}>{archiveLabel}</p>
       ) : null}
-      {pending ? <p className={styles.loading}>Calculating analysis…</p> : null}
+      {pending ? (
+        <LoadingBanner
+          title="Calculating analysis"
+          subtitle="Comparing this match's odds against the historical archive."
+        />
+      ) : null}
 
       {!selectedFixture && !fixturesLoading ? (
         <p className={styles.empty}>Select a match from the bulletin.</p>
@@ -462,7 +503,11 @@ export function SmartAnalysisClient({
             ) : null}
 
             {simState.status === "loading" ? (
-              <p className={styles.loading}>Computing… this can take a few minutes, please wait.</p>
+              <LoadingBanner
+                title="Computing similarity"
+                subtitle="Scanning every market this bookmaker quotes — first run can take a few minutes, cached afterwards."
+                long
+              />
             ) : null}
 
             {simState.status === "error" ? (
