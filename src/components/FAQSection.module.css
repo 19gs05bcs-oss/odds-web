@@ -1,0 +1,37 @@
+.faq {
+  padding: 3rem 0 5rem;
+  max-width: 46rem;
+}
+
+.kicker {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--orange);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  margin: 0 0 1.75rem;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.item dt {
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.item dd {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
