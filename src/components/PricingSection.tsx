@@ -7,7 +7,7 @@ const PLANS = [
     id: "starter" as const,
     name: "Starter",
     price: 9,
-    yearly: 90,
+    period: "7 days",
     desc: "Solo use — get started with daily profile checks.",
     features: [
       "Live fixture bulletin",
@@ -20,7 +20,7 @@ const PLANS = [
     id: "pro" as const,
     name: "Pro",
     price: 19,
-    yearly: 190,
+    period: "14 days",
     desc: "Regular use — most popular for individual analysts.",
     featured: true,
     features: [
@@ -35,6 +35,7 @@ const PLANS = [
     id: "analyst" as const,
     name: "Analyst",
     price: 39,
+    period: "month",
     yearly: 390,
     desc: "Heavy daily use and deeper archive limits.",
     features: [
@@ -76,9 +77,13 @@ export function PricingSection() {
                   <span className={styles.currency}>$</span>
                   {plan.price}
                 </span>
-                <span className={styles.per}>/ month</span>
+                <span className={styles.per}>/ {plan.period}</span>
               </div>
-              <p className={styles.yearly}>or ${plan.yearly} / year</p>
+              {plan.yearly ? (
+                <p className={styles.yearly}>or ${plan.yearly} / year</p>
+              ) : (
+                <p className={styles.yearly}>renews every {plan.period}</p>
+              )}
               <ul className={styles.features}>
                 {plan.features.map((f) => (
                   <li key={f}>{f}</li>
