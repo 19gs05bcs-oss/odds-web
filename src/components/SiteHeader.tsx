@@ -6,7 +6,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import styles from "./SiteHeader.module.css";
 
 type Props = {
-  active?: "home" | "matches" | "analyze" | "seasons" | "smart";
+  active?: "home" | "matches" | "analyze" | "guide" | "smart";
 };
 
 export function SiteHeader({ active }: Props) {
@@ -51,10 +51,10 @@ export function SiteHeader({ active }: Props) {
             Analyze
           </HardLink>
           <HardLink
-            href="/seasons"
-            className={active === "seasons" ? styles.linkActive : styles.link}
+            href="/odds-guide"
+            className={active === "guide" ? styles.linkActive : styles.link}
           >
-            Seasons
+            Guide
           </HardLink>
           <HardLink
             href="/matches"

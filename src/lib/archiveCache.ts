@@ -187,6 +187,41 @@ export async function listFixtures(bulletinDate?: string): Promise<FixtureRow[]>
   });
 }
 
+const FIXTURE_FULL_HT =
+  "match_id,bulletin_date,day_offset,league,league_country,kickoff_at,kickoff_ts,home_name,away_name,home_id,away_id,home_score,away_score,home_ht_score,away_ht_score,match_url,odds,bookmakers,odds_count";
+const FIXTURE_FULL_BASE =
+  "match_id,bulletin_date,day_offset,league,league_country,kickoff_at,kickoff_ts,home_name,away_name,home_id,away_id,home_score,away_score,match_url,odds,bookmakers,odds_count";
+
+/**
+ * Tek bir fixture'ı (meta + odds + bookmakers) match_id ile doğrudan
+ * `fixture` tablosundan çeker — /matches/[id] detay sayfası için.
+ * Aynı match_id birden fazla bulletin_date'te görünebilir (gün öncesinden
+ * yayınlanmış olabilir); en güncel bulletin_date satırı alınır.
+ */
+export async function getFixtureById(matchId: string): Promise<FixtureRow | null> {
+  let useHt = true;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const cols = useHt ? FIXTURE_FULL_HT : FIXTURE_FULL_BASE;
+    try {
+      const query = `SELECT ${cols} FROM fixture WHERE match_id = $1 ORDER BY bulletin_date DESC LIMIT 1`;
+      const rows = await withTimeout(
+        sql.unsafe<FixtureRow[]>(query, [matchId]),
+        15000,
+        "fixture-by-id",
+      );
+      return rows[0] ?? null;
+    } catch (e) {
+      if (useHt && isMissingHtColumn(e)) {
+        useHt = false;
+        continue;
+      }
+      console.error("getFixtureById error:", e instanceof Error ? e.message : e);
+      return null;
+    }
+  }
+  return null;
+}
+
 async function fetchFixtureDatesUncached(limit = 14): Promise<string[]> {
   try {
     const query = "SELECT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 300";

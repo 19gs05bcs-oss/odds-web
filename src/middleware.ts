@@ -6,7 +6,7 @@ import {
   isAdminEmail,
 } from "@/lib/auth/subscription";
 
-const MEMBER_PAGES = ["/analyze", "/seasons", "/matches"];
+const MEMBER_PAGES = ["/analyze", "/matches"];
 const SMART_PAGES = ["/smart-analysis"];
 const MEMBER_API = ["/api/fixtures", "/api/analyze", "/api/archive-table"];
 const SMART_API = ["/api/smart-analysis"];
@@ -103,7 +103,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/analyze/:path*",
-    "/seasons/:path*",
     "/matches/:path*",
     "/smart-analysis/:path*",
     "/api/fixtures/:path*",

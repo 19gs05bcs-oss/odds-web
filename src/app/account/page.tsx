@@ -63,7 +63,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
 
         {upgradeSmart && !smartAccess ? (
           <p className={styles.bannerWarn}>
-            Smart Analysis requires <strong>Pro</strong> ($19 / 14 days) or higher. Starter includes
+            Smart Analysis requires <strong>Pro</strong> ($19/mo) or higher. Starter includes
             Analyze, Seasons, and Matches — not the Smart Analysis guide.
           </p>
         ) : null}
@@ -146,23 +146,23 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
               <HardLink href="/analyze" className={styles.secondaryLink}>
                 Analyze
               </HardLink>
-              <HardLink href="/seasons" className={styles.secondaryLink}>
-                Seasons
+              <HardLink href="/matches" className={styles.secondaryLink}>
+                Matches
               </HardLink>
             </div>
           ) : null}
 
           {active && !smartAccess ? (
             <div className={styles.plans}>
-              <SubscribeButton plan="pro" featured label="Pro — $19 / 14 days (Smart Analysis)" />
+              <SubscribeButton plan="pro" featured label="Pro — $19/mo (Smart Analysis)" />
               <SubscribeButton plan="analyst" label="Analyst — $39/mo" />
             </div>
           ) : null}
 
           {!active ? (
             <div className={styles.plans}>
-              <SubscribeButton plan="starter" label="Starter — $9 / 7 days" />
-              <SubscribeButton plan="pro" featured label="Pro — $19 / 14 days" />
+              <SubscribeButton plan="starter" label="Starter — $9/mo" />
+              <SubscribeButton plan="pro" featured label="Pro — $19/mo" />
               <SubscribeButton plan="analyst" label="Analyst — $39/mo" />
             </div>
           ) : null}

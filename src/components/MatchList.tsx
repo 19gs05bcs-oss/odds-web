@@ -1,46 +1,48 @@
 import Link from "next/link";
-import { formatKickoff, sourceLabel } from "@/lib/format";
-import type { OddsEvent } from "@/lib/types";
+import type { FixtureRow } from "@/lib/archiveCache";
+import { formatKickoff } from "@/lib/format";
 import styles from "./MatchList.module.css";
 
 type Props = {
-  events: OddsEvent[];
+  fixtures: FixtureRow[];
 };
 
-export function MatchList({ events }: Props) {
-  if (!events.length) {
+export function MatchList({ fixtures }: Props) {
+  if (!fixtures.length) {
     return (
       <p className={styles.empty}>
-        No open matches yet. They will appear here after the worker syncs.
+        No fixtures for this date yet. They will appear here after the worker syncs.
       </p>
     );
   }
 
   return (
     <div className={styles.list}>
-      {events.map((event, index) => {
-        const href = `/matches/${encodeURIComponent(event.id)}`;
-        const home = event.home_team || "Home";
-        const away = event.away_team || "Away";
+      {fixtures.map((f, index) => {
+        const href = `/matches/${encodeURIComponent(f.match_id)}`;
+        const home = f.home_name || "Home";
+        const away = f.away_name || "Away";
         return (
           <Link
-            key={event.id}
+            key={f.match_id}
             href={href}
             className={styles.row}
             style={{ animationDelay: `${Math.min(index, 12) * 0.04}s` }}
           >
             <div className={styles.meta}>
               <span className={styles.competition}>
-                {event.competition || event.sport || "Football"}
+                {f.league || f.league_country || "Football"}
               </span>
-              <span className={styles.kickoff}>{formatKickoff(event.kickoff_at)}</span>
+              <span className={styles.kickoff}>{formatKickoff(f.kickoff_at)}</span>
             </div>
             <div className={styles.teams}>
               {home}
               <span className={styles.vs}>–</span>
               {away}
             </div>
-            <span className={styles.badge}>{sourceLabel(event.source)}</span>
+            <span className={styles.badge}>
+              {f.odds_count ? `${f.odds_count} odds` : "No odds yet"}
+            </span>
           </Link>
         );
       })}
