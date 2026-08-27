@@ -14,6 +14,21 @@ const nextConfig = {
       "@duckdb/node-bindings",
     ],
   },
+  // www.oddsvig.com -> oddsvig.com (apex) kalıcı yönlendirme.
+  // ÖNEMLİ: Bu redirect sadece apex domain (oddsvig.com) Railway'de
+  // custom domain olarak eklenip DNS'i Railway'e işaret ettikten SONRA
+  // işe yarar. Şu an apex Natro'nun parking sayfasında olduğu için
+  // bu kural devreye girmiyor — apex DNS düzeltilmeden bu no-op'tur.
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.oddsvig.com" }],
+        destination: "https://oddsvig.com/:path*",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
