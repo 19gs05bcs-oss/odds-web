@@ -6,7 +6,13 @@ import { hasMemberAccess, hasSmartAnalysisAccess, isAdminEmail } from "@/lib/aut
 import { getProfile, getSessionUser } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 import styles from "./page.module.css";
+
+export const metadata: Metadata = {
+  title: "Account",
+  robots: { index: false, follow: false },
+};
 
 export const dynamic = "force-dynamic";
 

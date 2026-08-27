@@ -25,7 +25,7 @@ export function Hero() {
         <div className={styles.copy}>
           <p className={`${styles.kicker} fade-up`}>Odds intelligence</p>
           <h1 className={`${styles.title} fade-up`}>
-            Find matches that <span className={styles.accent}>move like yours</span>
+            Find matches with the <span className={styles.accent}>same odds shape</span>
           </h1>
           <p className={`${styles.lead} fade-up-delay`}>
             OddsVig compares today&apos;s bulletin against a multi-season archive. Choose a

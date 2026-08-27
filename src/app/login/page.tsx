@@ -1,7 +1,13 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { LoginForm } from "@/components/LoginForm";
 import { SiteHeader } from "@/components/SiteHeader";
 import styles from "./page.module.css";
+
+export const metadata: Metadata = {
+  title: "Sign in",
+  robots: { index: false, follow: false },
+};
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
