@@ -68,6 +68,18 @@ const FAQS = [
     q: "What does OddsVig's Smart Analysis actually do?",
     a: "It takes a fixture's current odds profile across multiple markets and bookmakers and searches historical matches for the closest statistical match, weighting each market by how much signal it typically carries. The output is a set of comparable past matches, not a prediction.",
   },
+  {
+    q: "How far back does OddsVig's historical odds data go?",
+    a: "The archive spans 330+ seasons of closing-price data across multiple leagues, rebuilt from season-by-season bookmaker records rather than a single rolling window.",
+  },
+  {
+    q: "Can I find matches with similar odds to a fixture I'm looking at?",
+    a: "Yes — that's what Smart Analysis is built for. It converts a fixture's current odds across markets and bookmakers into a closing-price fingerprint, then searches the historical archive for matches whose fingerprint falls within a configurable tolerance of that shape.",
+  },
+  {
+    q: "Is historical odds data the same as historical results data?",
+    a: "No. Results data is just the final score. Historical odds data is the bookmaker price at each point up to kickoff — opening, closing, and the movement in between — which is what makes pattern matching against a live fixture's odds shape possible in the first place.",
+  },
 ];
 
 export default function OddsGuidePage() {
@@ -101,6 +113,7 @@ export default function OddsGuidePage() {
 
         <nav className={styles.toc} aria-label="On this page">
           <a href="#movement">Line movement</a>
+          <a href="#historical-odds">Historical odds & pattern matching</a>
           <a href="#markets">Markets glossary</a>
           <a href="#faq">FAQ</a>
         </nav>
@@ -125,6 +138,30 @@ export default function OddsGuidePage() {
             This is exactly what OddsVig tracks: opening vs. closing prices across up to 20
             bookmakers and ten-plus markets per match, so the movement itself — not just the final
             number — is visible.
+          </p>
+        </section>
+
+        <section id="historical-odds" className={styles.section}>
+          <h2>What a historical odds archive is for</h2>
+          <p>
+            A <strong>historical odds archive</strong> is a record of how a market opened, moved,
+            and closed for matches that already happened — not just the final score, but the full
+            bookmaker board along the way. On its own it&apos;s a reference. Matched against
+            today&apos;s fixture, it becomes something more useful: a way to ask &quot;when has the
+            market looked like this before, and how did those games actually close and finish?&quot;
+          </p>
+          <p>
+            OddsVig&apos;s archive covers 330+ seasons of closing-price data across multiple
+            leagues. Instead of browsing that archive by team or date, Smart Analysis turns a
+            fixture&apos;s current odds into a closing-price <em>fingerprint</em> — the shape of
+            its prices across markets and bookmakers — and searches the archive for the historical
+            matches whose fingerprint is closest, within a configurable tolerance.
+          </p>
+          <p>
+            That&apos;s <strong>odds pattern matching</strong>: not a prediction, and not a
+            different way of computing implied probability. It&apos;s a way to see the closest
+            comparable matches for a given odds shape, so you can judge for yourself whether the
+            pattern holds up.
           </p>
         </section>
 
