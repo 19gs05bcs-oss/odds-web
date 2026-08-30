@@ -11,9 +11,10 @@ const K_DEFAULT = (weightsCfg as { k_default: number }).k_default;
 const K_MIN = (weightsCfg as { k_min: number }).k_min;
 
 const STAGE1_MARKET = "HOME_DRAW_AWAY:FULL_TIME";
-const STAGE1_POOL = 400;
-const STAGE2_POOL = 60;
-const BAND = 0.08;
+const STAGE1_POOL = 250;
+const STAGE2_POOL = 12;
+const BAND = 0.045;
+const LIQ_BAND = 0.06;
 
 const LIQUID_1X2_DC_BTTS_MARKETS = new Set([
   "HOME_DRAW_AWAY:FULL_TIME",
@@ -440,39 +441,77 @@ export async function findSimilarForBookmaker(opts: {
     const bttsY = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES");
     const bttsN = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:NO");
 
-    if (prof.family === "CLEAN_AWAY" || prof.family === "AWAY_SHUTOUT") {
-      if (!ou25 || !bttsN) continue;
-      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > 0.1) continue;
-      if (prof.family === "CLEAN_AWAY" && ou25.opening != null && !(ou25.odds > ou25.opening * 0.98)) continue;
-      if (bttsN.odds >= (L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES")?.odds ?? 99) && prof.family === "AWAY_SHUTOUT") {
-        /* keep: no should be fav */
-      }
-    } else if (prof.family === "HOME_BURST") {
-      if (!ou25) continue;
-      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > 0.1) continue;
-      if (ou35 && prof.ou35 && rel(ou35.odds, prof.ou35.odds) > 0.15) continue;
-    } else if (prof.family === "OPEN_GAME") {
-      if (!ou25 || !bttsY) continue;
-      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > 0.1) continue;
-      if (prof.bttsYes && rel(bttsY.odds, prof.bttsYes.odds) > 0.1) continue;
+    if (!ou25 || !bttsY) continue;
+    if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > LIQ_BAND) continue;
+    if (prof.ou35) {
+      if (!ou35 || rel(ou35.odds, prof.ou35.odds) > LIQ_BAND) continue;
+    }
+    if (prof.bttsYes && rel(bttsY.odds, prof.bttsYes.odds) > LIQ_BAND) continue;
+    if ((prof.family === "CLEAN_AWAY" || prof.family === "AWAY_SHUTOUT") && bttsN && prof.bttsNo) {
+      if (rel(bttsN.odds, prof.bttsNo.odds) > LIQ_BAND) continue;
     }
 
     const parts: number[] = [r.d1];
-    if (prof.ou25 && ou25) parts.push((1.2 * rel(ou25.odds, prof.ou25.odds)) ** 2);
-    if (prof.ou35 && ou35) parts.push((1.3 * rel(ou35.odds, prof.ou35.odds)) ** 2);
-    if (prof.bttsYes && bttsY) parts.push((1.2 * rel(bttsY.odds, prof.bttsYes.odds)) ** 2);
+    parts.push((1.3 * rel(ou25.odds, prof.ou25?.odds ?? ou25.odds)) ** 2);
+    if (prof.ou35 && ou35) parts.push((1.4 * rel(ou35.odds, prof.ou35.odds)) ** 2);
+    parts.push((1.4 * rel(bttsY.odds, prof.bttsYes?.odds ?? bttsY.odds)) ** 2);
     ranked.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
   }
 
   ranked.sort((x, y) => x.score - y.score);
-  const top = ranked.slice(0, Math.max(K_MIN, Math.min(limit, K_DEFAULT, STAGE2_POOL)));
+  const shortlist = ranked.slice(0, 40);
+  const ids = shortlist.map((s) => s.event_id);
+
+  let scored: { event_id: string; score: number; hs: number; as: number }[] = [];
+  if (ids.length) {
+    const evs = (await sql.unsafe(
+      `SELECT id, home_score, away_score FROM events
+       WHERE id = ANY($1::text[]) AND home_score IS NOT NULL AND away_score IS NOT NULL`,
+      [ids] as never[],
+    )) as { id: string; home_score: number; away_score: number }[];
+    const evMap = new Map(evs.map((e) => [e.id, e]));
+    for (const s of shortlist) {
+      const e = evMap.get(s.event_id);
+      if (!e) continue;
+      const hs = Number(e.home_score);
+      const as = Number(e.away_score);
+      const total = hs + as;
+      const btts = hs > 0 && as > 0;
+      if (prof.bttsYes && prof.bttsYes.odds <= 1.55 && !btts) continue;
+      if (prof.bttsNo && prof.bttsYes && prof.bttsNo.odds < prof.bttsYes.odds && btts) continue;
+      if (prof.ou35 && prof.ou35.odds <= 2.25 && total < 4) continue;
+      if (prof.ou25 && prof.ou25.odds >= 1.85 && total > 4) continue;
+      scored.push({ event_id: s.event_id, score: s.score, hs, as });
+    }
+  }
+
+  const freq = new Map<string, number>();
+  for (const s of scored) {
+    const k = `${s.hs}-${s.as}`;
+    freq.set(k, (freq.get(k) ?? 0) + 1);
+  }
+  const buckets = [...freq.entries()]
+    .map(([scoreline, n]) => ({ scoreline, n }))
+    .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
+
   const pred = predictScoreline(fixtureOdds);
+  if (buckets.length) {
+    pred.primary = buckets[0].scoreline;
+    pred.backup = buckets[1]?.scoreline ?? pred.backup;
+    pred.reason = `komsu frekans ${buckets.map((b) => `${b.scoreline}×${b.n}`).join(", ")}`;
+  }
+
+  const top = scored.slice(0, Math.max(K_MIN, Math.min(limit, STAGE2_POOL))).map((s) => ({
+    event_id: s.event_id,
+    score: s.score,
+  }));
 
   return {
-    matchedCount: ranked.length,
+    matchedCount: scored.length,
     samples: top,
-    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", "HTFT", "CS", `FAMILY:${prof.family}`],
+    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", "POSTERIOR", `FAMILY:${prof.family}`],
     family: pred.family,
+    buckets,
     prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
     durationMs: Date.now() - t0,
   };
