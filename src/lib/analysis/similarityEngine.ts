@@ -11,10 +11,9 @@ const K_DEFAULT = (weightsCfg as { k_default: number }).k_default;
 const K_MIN = (weightsCfg as { k_min: number }).k_min;
 
 const STAGE1_MARKET = "HOME_DRAW_AWAY:FULL_TIME";
-const STAGE1_POOL = 250;
-const STAGE2_POOL = 12;
-const BAND = 0.045;
-const LIQ_BAND = 0.06;
+const STAGE1_POOL = 400;
+const STAGE2_POOL = 60;
+const BAND = 0.08;
 
 const LIQUID_1X2_DC_BTTS_MARKETS = new Set([
   "HOME_DRAW_AWAY:FULL_TIME",
@@ -75,30 +74,14 @@ function findFixtureRowForCode(code: SimilarityCode, rows: FixtureOddsRow[]): Fi
   return null;
 }
 
-export type SimilarityFamily =
-  | "CLEAN_AWAY"
-  | "AWAY_SHUTOUT"
-  | "HOME_BURST"
-  | "OPEN_GAME"
-  | "OPEN_DRAW"
-  | "BASE";
-
-export type ScoreBucket = { scoreline: string; n: number };
-export type RegimeBuckets = {
-  open: ScoreBucket[];
-  shut: ScoreBucket[];
-  openN: number;
-  shutN: number;
-};
+export type SimilarityFamily = "CLEAN_AWAY" | "HOME_BURST" | "OPEN_GAME" | "BASE";
 
 export type SimilarityResult = {
   matchedCount: number;
   samples: { event_id: string; score: number }[];
   usedCodes: string[];
   family?: SimilarityFamily;
-  buckets?: ScoreBucket[];
-  regimes?: RegimeBuckets;
-  prediction?: { primary: string; backup: string; reason: string };
+  buckets?: { scoreline: string; n: number }[];
   durationMs?: number;
 };
 
@@ -149,9 +132,6 @@ function pickRow(rows: FixtureOddsRow[], market: string, selection: string): Fix
       null
     );
   }
-  if (market === "HALF_FULL_TIME:FULL_TIME" || market === "CORRECT_SCORE:FULL_TIME") {
-    return rows.find((r) => r.market === market && r.selection === selection) || null;
-  }
   return null;
 }
 
@@ -189,89 +169,12 @@ export function classifyFamily(fixtureOdds: FixtureOddsRow[]): {
     bttsNo.odds < bttsNo.opening;
   const bttsOn = bttsYes?.opening != null && bttsYes.odds < bttsYes.opening;
 
-  const bttsNoFav =
-    bttsNo != null && bttsYes != null && bttsNo.odds < bttsYes.odds && bttsYes.odds >= 1.9;
-  const pickem =
-    Hc != null && Ac != null && Math.abs(Hc - Ac) / Math.min(Hc, Ac) <= 0.12 && (d?.odds ?? 99) <= 3.55;
-
   let family: SimilarityFamily = "BASE";
-  if (side === "AWAY" && bttsNoFav) family = "AWAY_SHUTOUT";
-  else if (side === "AWAY" && goalsShut) family = "CLEAN_AWAY";
-  else if (side === "HOME" && fav <= 1.5 && (goalsOpen || (ou25 != null && ou25.odds <= 1.58))) family = "HOME_BURST";
-  else if (pickem && (bttsYes?.odds ?? 99) <= 1.8 && (ou35?.odds ?? 99) <= 3.3) family = "OPEN_DRAW";
-  else if ((goalsOpen || bttsOn) && (bttsYes?.odds ?? 99) <= 1.75) family = "OPEN_GAME";
+  if (side === "AWAY" && goalsShut) family = "CLEAN_AWAY";
+  else if (side === "HOME" && fav <= 1.5 && goalsOpen) family = "HOME_BURST";
+  else if (goalsOpen && bttsOn) family = "OPEN_GAME";
 
   return { family, h, d, a, ou25, ou35, bttsYes, bttsNo };
-}
-
-function csOdds(rows: FixtureOddsRow[], line: string): number | null {
-  const r =
-    pickRow(rows, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
-    rows.find((x) => x.market.includes("CORRECT_SCORE") && (x.selection === `score:${line}` || x.selection === line));
-  return r?.odds ?? null;
-}
-
-/** K1–K6 nokta atışı. fixtureOdds içinde CS / HTFT varsa K6 da çalışır. */
-export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
-  family: SimilarityFamily;
-  primary: string;
-  backup: string;
-  reason: string;
-} {
-  const p = classifyFamily(fixtureOdds);
-  const cs20 = csOdds(fixtureOdds, "2:0");
-  const cs21 = csOdds(fixtureOdds, "2:1");
-  const cs11 = csOdds(fixtureOdds, "1:1");
-  const cs22 = csOdds(fixtureOdds, "2:2");
-  const cs32 = csOdds(fixtureOdds, "3:2");
-  const ratio21 =
-    cs21 != null && cs20 != null && cs20 > 0 ? cs21 / cs20 : null;
-  const awayGoalPriced = ratio21 != null && ratio21 <= 1.2;
-
-  const htft11 = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:1/1");
-  const ahM15 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.5");
-
-  if (p.family === "AWAY_SHUTOUT") {
-    const ahA = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.5");
-    if (ahA && ahA.odds >= 2.1) return { family: p.family, primary: "0-1", backup: "0-2", reason: "AWAY_SHUTOUT + AH-1.5 uzun" };
-    return { family: p.family, primary: "0-2", backup: "0-1", reason: "AWAY_SHUTOUT" };
-  }
-  if (p.family === "CLEAN_AWAY") {
-    return { family: p.family, primary: "0-2", backup: "0-1", reason: "CLEAN_AWAY OU kapanır" };
-  }
-  if (p.family === "HOME_BURST") {
-    if (awayGoalPriced || (p.bttsYes && p.bttsYes.odds <= 1.75)) {
-      const tightAh = ahM15 != null && ahM15.odds <= 2.05;
-      if (p.ou35 && p.ou35.odds <= 1.9) return { family: p.family, primary: "4-2", backup: "5-1", reason: "HOME_BURST OU35 çok kısa" };
-      if (tightAh) return { family: p.family, primary: "4-2", backup: "5-2", reason: "HOME_BURST BTTS + -1.5" };
-      return { family: p.family, primary: "3-1", backup: "2-1", reason: "HOME_BURST BTTS, -1.5 sınır" };
-    }
-    if (p.ou25 && p.ou25.odds <= 1.55) return { family: p.family, primary: "3-0", backup: "2-0", reason: "HOME_BURST clean-sheet eğilim" };
-    return { family: p.family, primary: "2-0", backup: "3-0", reason: "HOME_BURST" };
-  }
-  if (p.family === "OPEN_DRAW") {
-    if (p.ou35 && p.ou35.odds <= 3.25 && (p.bttsYes?.odds ?? 99) <= 1.75) {
-      return { family: p.family, primary: "3-3", backup: "2-2", reason: "OPEN_DRAW + OU35 + BTTS" };
-    }
-    return { family: p.family, primary: "1-1", backup: "2-2", reason: "OPEN_DRAW" };
-  }
-  if (p.family === "OPEN_GAME") {
-    if (p.ou25 && p.ou25.odds <= 1.55 && (p.bttsYes?.odds ?? 99) <= 1.5) {
-      return { family: p.family, primary: "2-2", backup: "3-2", reason: "OPEN_GAME OU25/BTTS çok kısa; 1-1 totals ile çelişir" };
-    }
-    if (awayGoalPriced && p.ou35 && p.ou35.odds <= 2.55) {
-      return { family: p.family, primary: "2-1", backup: "3-2", reason: "OPEN_GAME CS(2-1)≈CS(2-0) + OU35" };
-    }
-    if (htft11 && (p.h?.odds ?? 99) <= 2.1) {
-      return { family: p.family, primary: "2-1", backup: "3-1", reason: "OPEN_GAME HT/FT 1/1" };
-    }
-    return { family: p.family, primary: "2-1", backup: "2-2", reason: "OPEN_GAME" };
-  }
-
-  if (cs11 != null && cs21 != null && cs11 <= cs21 && (p.ou25?.odds ?? 0) > 1.7) {
-    return { family: p.family, primary: "1-1", backup: "2-1", reason: "CS 1-1 en kısa" };
-  }
-  return { family: p.family, primary: "2-1", backup: "1-1", reason: "BASE" };
 }
 
 /** Eski UNION/tüm-kod tarama — sadece geriye dönük uyumluluk. Production path findSimilarForBookmaker. */
@@ -419,11 +322,6 @@ export async function findSimilarForBookmaker(opts: {
         OR (market = 'OVER_UNDER:FULL_TIME:3.5' AND selection IN ('OVER:3.5','UNDER:3.5'))
         OR (market = 'OVER_UNDER:FULL_TIME:4.5' AND selection IN ('OVER:4.5','UNDER:4.5'))
         OR (market = 'BOTH_TEAMS_TO_SCORE:FULL_TIME' AND selection IN ('btts:YES','btts:NO','YES','NO'))
-        OR (market = 'HALF_FULL_TIME:FULL_TIME' AND selection IN ('htft:1/1','htft:X/X','htft:2/2','1/1','X/X','2/2'))
-        OR (market = 'CORRECT_SCORE:FULL_TIME' AND selection IN (
-          'score:1:0','score:2:0','score:2:1','score:3:0','score:3:1','score:3:2',
-          'score:1:1','score:2:2','score:0:1','score:0:2','score:1:2'
-        ))
       )
     `,
     [bookmaker, candidateIds] as never[],
@@ -450,113 +348,36 @@ export async function findSimilarForBookmaker(opts: {
     const bttsY = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES");
     const bttsN = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:NO");
 
-    if (!ou25 || !bttsY) continue;
-    if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > LIQ_BAND) continue;
-    if (prof.ou35) {
-      if (!ou35 || rel(ou35.odds, prof.ou35.odds) > LIQ_BAND) continue;
-    }
-    if (prof.bttsYes && rel(bttsY.odds, prof.bttsYes.odds) > LIQ_BAND) continue;
-    if ((prof.family === "CLEAN_AWAY" || prof.family === "AWAY_SHUTOUT") && bttsN && prof.bttsNo) {
-      if (rel(bttsN.odds, prof.bttsNo.odds) > LIQ_BAND) continue;
+    if (prof.family === "CLEAN_AWAY") {
+      if (!ou25 || !bttsN) continue;
+      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > 0.1) continue;
+      if (ou25.opening != null && !(ou25.odds > ou25.opening * 0.98)) continue;
+      if (bttsN.opening != null && !(bttsN.odds < bttsN.opening * 1.02)) continue;
+    } else if (prof.family === "HOME_BURST") {
+      if (!ou25) continue;
+      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > 0.1) continue;
+      if (ou35 && prof.ou35 && rel(ou35.odds, prof.ou35.odds) > 0.15) continue;
+    } else if (prof.family === "OPEN_GAME") {
+      if (!ou25 || !bttsY) continue;
+      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > 0.1) continue;
+      if (prof.bttsYes && rel(bttsY.odds, prof.bttsYes.odds) > 0.1) continue;
     }
 
     const parts: number[] = [r.d1];
-    parts.push((1.3 * rel(ou25.odds, prof.ou25?.odds ?? ou25.odds)) ** 2);
-    if (prof.ou35 && ou35) parts.push((1.4 * rel(ou35.odds, prof.ou35.odds)) ** 2);
-    parts.push((1.4 * rel(bttsY.odds, prof.bttsYes?.odds ?? bttsY.odds)) ** 2);
+    if (prof.ou25 && ou25) parts.push((1.2 * rel(ou25.odds, prof.ou25.odds)) ** 2);
+    if (prof.ou35 && ou35) parts.push((1.3 * rel(ou35.odds, prof.ou35.odds)) ** 2);
+    if (prof.bttsYes && bttsY) parts.push((1.2 * rel(bttsY.odds, prof.bttsYes.odds)) ** 2);
     ranked.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
   }
 
   ranked.sort((x, y) => x.score - y.score);
-  const shortlist = ranked.slice(0, 40);
-  const ids = shortlist.map((s) => s.event_id);
-
-  let scored: { event_id: string; score: number; hs: number; as: number }[] = [];
-  if (ids.length) {
-    const evs = (await sql.unsafe(
-      `SELECT id, home_score, away_score FROM events
-       WHERE id = ANY($1::text[]) AND home_score IS NOT NULL AND away_score IS NOT NULL`,
-      [ids] as never[],
-    )) as { id: string; home_score: number; away_score: number }[];
-    const evMap = new Map(evs.map((e) => [e.id, e]));
-    for (const s of shortlist) {
-      const e = evMap.get(s.event_id);
-      if (!e) continue;
-      scored.push({
-        event_id: s.event_id,
-        score: s.score,
-        hs: Number(e.home_score),
-        as: Number(e.away_score),
-      });
-    }
-  }
-
-  function freqOf(rows: typeof scored): ScoreBucket[] {
-    const freq = new Map<string, number>();
-    for (const s of rows) {
-      const k = `${s.hs}-${s.as}`;
-      freq.set(k, (freq.get(k) ?? 0) + 1);
-    }
-    return [...freq.entries()]
-      .map(([scoreline, n]) => ({ scoreline, n }))
-      .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
-  }
-
-  const openRows = scored.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
-  const shutRows = scored.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
-  const regimes: RegimeBuckets = {
-    open: freqOf(openRows).slice(0, 6),
-    shut: freqOf(shutRows).slice(0, 6),
-    openN: openRows.length,
-    shutN: shutRows.length,
-  };
-  const buckets = freqOf(scored);
-
-  const pred = predictScoreline(fixtureOdds);
-  const split = regimes.openN + regimes.shutN;
-  const openShare = split ? regimes.openN / split : 0.5;
-  const shutShare = split ? regimes.shutN / split : 0.5;
-  const mixed = Math.abs(openShare - shutShare) < 0.22;
-
-  if (mixed) {
-    pred.primary = regimes.open[0]?.scoreline ?? pred.primary;
-    pred.backup = regimes.shut[0]?.scoreline ?? pred.backup;
-    pred.reason = `iki kova açık ${regimes.openN} (${regimes.open
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")}) / kilit ${regimes.shutN} (${regimes.shut
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")})`;
-  } else if (openShare >= shutShare && regimes.open[0]) {
-    pred.primary = regimes.open[0].scoreline;
-    pred.backup = regimes.open[1]?.scoreline ?? regimes.shut[0]?.scoreline ?? pred.backup;
-    pred.reason = `açık kova ${regimes.openN}/${split} ${regimes.open
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")}`;
-  } else if (regimes.shut[0]) {
-    pred.primary = regimes.shut[0].scoreline;
-    pred.backup = regimes.shut[1]?.scoreline ?? regimes.open[0]?.scoreline ?? pred.backup;
-    pred.reason = `kilit kova ${regimes.shutN}/${split} ${regimes.shut
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")}`;
-  }
-
-  const top = scored.slice(0, Math.max(K_MIN, Math.min(limit, STAGE2_POOL))).map((s) => ({
-    event_id: s.event_id,
-    score: s.score,
-  }));
+  const top = ranked.slice(0, Math.max(K_MIN, Math.min(limit, K_DEFAULT, STAGE2_POOL)));
 
   return {
-    matchedCount: scored.length,
+    matchedCount: ranked.length,
     samples: top,
-    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", "REGIME_A_B", `FAMILY:${prof.family}`],
-    family: pred.family,
-    buckets,
-    regimes,
-    prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
+    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", `FAMILY:${prof.family}`],
+    family: prof.family,
     durationMs: Date.now() - t0,
   };
 }
