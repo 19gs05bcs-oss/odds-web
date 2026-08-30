@@ -224,7 +224,7 @@ export async function getFixtureById(matchId: string): Promise<FixtureRow | null
 
 async function fetchFixtureDatesUncached(limit = 14): Promise<string[]> {
   try {
-    const query = "SELECT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 300";
+        const query = "SELECT DISTINCT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 300";
     const data = await withTimeout(
       sql.unsafe<{ bulletin_date: string }[]>(query),
       8000,
