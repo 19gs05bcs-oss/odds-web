@@ -83,12 +83,21 @@ export type SimilarityFamily =
   | "OPEN_DRAW"
   | "BASE";
 
+export type ScoreBucket = { scoreline: string; n: number };
+export type RegimeBuckets = {
+  open: ScoreBucket[];
+  shut: ScoreBucket[];
+  openN: number;
+  shutN: number;
+};
+
 export type SimilarityResult = {
   matchedCount: number;
   samples: { event_id: string; score: number }[];
   usedCodes: string[];
   family?: SimilarityFamily;
-  buckets?: { scoreline: string; n: number }[];
+  buckets?: ScoreBucket[];
+  regimes?: RegimeBuckets;
   prediction?: { primary: string; backup: string; reason: string };
   durationMs?: number;
 };
@@ -473,32 +482,66 @@ export async function findSimilarForBookmaker(opts: {
     for (const s of shortlist) {
       const e = evMap.get(s.event_id);
       if (!e) continue;
-      const hs = Number(e.home_score);
-      const as = Number(e.away_score);
-      const total = hs + as;
-      const btts = hs > 0 && as > 0;
-      if (prof.bttsYes && prof.bttsYes.odds <= 1.55 && !btts) continue;
-      if (prof.bttsNo && prof.bttsYes && prof.bttsNo.odds < prof.bttsYes.odds && btts) continue;
-      if (prof.ou35 && prof.ou35.odds <= 2.25 && total < 4) continue;
-      if (prof.ou25 && prof.ou25.odds >= 1.85 && total > 4) continue;
-      scored.push({ event_id: s.event_id, score: s.score, hs, as });
+      scored.push({
+        event_id: s.event_id,
+        score: s.score,
+        hs: Number(e.home_score),
+        as: Number(e.away_score),
+      });
     }
   }
 
-  const freq = new Map<string, number>();
-  for (const s of scored) {
-    const k = `${s.hs}-${s.as}`;
-    freq.set(k, (freq.get(k) ?? 0) + 1);
+  function freqOf(rows: typeof scored): ScoreBucket[] {
+    const freq = new Map<string, number>();
+    for (const s of rows) {
+      const k = `${s.hs}-${s.as}`;
+      freq.set(k, (freq.get(k) ?? 0) + 1);
+    }
+    return [...freq.entries()]
+      .map(([scoreline, n]) => ({ scoreline, n }))
+      .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
   }
-  const buckets = [...freq.entries()]
-    .map(([scoreline, n]) => ({ scoreline, n }))
-    .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
+
+  const openRows = scored.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
+  const shutRows = scored.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
+  const regimes: RegimeBuckets = {
+    open: freqOf(openRows).slice(0, 6),
+    shut: freqOf(shutRows).slice(0, 6),
+    openN: openRows.length,
+    shutN: shutRows.length,
+  };
+  const buckets = freqOf(scored);
 
   const pred = predictScoreline(fixtureOdds);
-  if (buckets.length) {
-    pred.primary = buckets[0].scoreline;
-    pred.backup = buckets[1]?.scoreline ?? pred.backup;
-    pred.reason = `komsu frekans ${buckets.map((b) => `${b.scoreline}×${b.n}`).join(", ")}`;
+  const split = regimes.openN + regimes.shutN;
+  const openShare = split ? regimes.openN / split : 0.5;
+  const shutShare = split ? regimes.shutN / split : 0.5;
+  const mixed = Math.abs(openShare - shutShare) < 0.22;
+
+  if (mixed) {
+    pred.primary = regimes.open[0]?.scoreline ?? pred.primary;
+    pred.backup = regimes.shut[0]?.scoreline ?? pred.backup;
+    pred.reason = `iki kova açık ${regimes.openN} (${regimes.open
+      .slice(0, 3)
+      .map((b) => `${b.scoreline}×${b.n}`)
+      .join(", ")}) / kilit ${regimes.shutN} (${regimes.shut
+      .slice(0, 3)
+      .map((b) => `${b.scoreline}×${b.n}`)
+      .join(", ")})`;
+  } else if (openShare >= shutShare && regimes.open[0]) {
+    pred.primary = regimes.open[0].scoreline;
+    pred.backup = regimes.open[1]?.scoreline ?? regimes.shut[0]?.scoreline ?? pred.backup;
+    pred.reason = `açık kova ${regimes.openN}/${split} ${regimes.open
+      .slice(0, 3)
+      .map((b) => `${b.scoreline}×${b.n}`)
+      .join(", ")}`;
+  } else if (regimes.shut[0]) {
+    pred.primary = regimes.shut[0].scoreline;
+    pred.backup = regimes.shut[1]?.scoreline ?? regimes.open[0]?.scoreline ?? pred.backup;
+    pred.reason = `kilit kova ${regimes.shutN}/${split} ${regimes.shut
+      .slice(0, 3)
+      .map((b) => `${b.scoreline}×${b.n}`)
+      .join(", ")}`;
   }
 
   const top = scored.slice(0, Math.max(K_MIN, Math.min(limit, STAGE2_POOL))).map((s) => ({
@@ -509,9 +552,10 @@ export async function findSimilarForBookmaker(opts: {
   return {
     matchedCount: scored.length,
     samples: top,
-    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", "POSTERIOR", `FAMILY:${prof.family}`],
+    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", "REGIME_A_B", `FAMILY:${prof.family}`],
     family: pred.family,
     buckets,
+    regimes,
     prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
     durationMs: Date.now() - t0,
   };
