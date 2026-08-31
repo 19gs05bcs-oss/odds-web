@@ -13,6 +13,10 @@ type SimilarityCardState = {
   cached?: boolean;
   computedAt?: string;
   durationMs?: number;
+  family?: string;
+  familyTitle?: string;
+  familyNote?: string;
+  prediction?: { primary: string; backup: string; reason: string } | null;
   error?: string;
 };
 import type { BookmakerOption } from "@/lib/types";
@@ -181,6 +185,10 @@ export function SmartAnalysisClient({
           usedCodes?: string[];
           durationMs?: number;
           tableRows?: (TableRow & { similarityScore?: number })[];
+          family?: string;
+          familyTitle?: string;
+          familyNote?: string;
+          prediction?: { primary: string; backup: string; reason: string } | null;
         };
         if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
         setSimState({
@@ -191,6 +199,10 @@ export function SmartAnalysisClient({
           cached: j.cached,
           computedAt: j.computedAt,
           durationMs: j.durationMs,
+          family: j.family,
+          familyTitle: j.familyTitle,
+          familyNote: j.familyNote,
+          prediction: j.prediction ?? null,
         });
       } catch (e) {
         setSimState({ status: "error", error: e instanceof Error ? e.message : String(e) });
@@ -313,6 +325,33 @@ export function SmartAnalysisClient({
                     <span className={styles.muted}> · computed {new Date(simState.computedAt).toLocaleString()}</span>
                   ) : null}
                 </p>
+                {simState.familyTitle ? (
+                  <div
+                    className={
+                      simState.family === "BASE"
+                        ? `${styles.familyNote} ${styles.familyNoteBase}`
+                        : styles.familyNote
+                    }
+                    role="status"
+                  >
+                    <p className={styles.familyTitle}>{simState.familyTitle}</p>
+                    <p className={styles.familyBody}>{simState.familyNote}</p>
+                    {simState.prediction?.primary ? (
+                      <p className={styles.familyCall}>
+                        Distance call <strong>{simState.prediction.primary}</strong>
+                        {simState.prediction.backup ? (
+                          <>
+                            {" "}
+                            · alt <strong>{simState.prediction.backup}</strong>
+                          </>
+                        ) : null}
+                        {simState.prediction.reason ? (
+                          <span className={styles.muted}> — {simState.prediction.reason}</span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 {simState.tableRows?.length ? (
                   <AnalyzeTable rows={simState.tableRows} mode="archive" compact />
                 ) : (

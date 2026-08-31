@@ -110,6 +110,36 @@
   margin-bottom: 0.85rem;
 }
 
+.familyNote {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  margin: 0 0 0.9rem;
+  background: color-mix(in srgb, var(--ink, #111) 4%, transparent);
+}
+
+.familyNoteBase {
+  border-color: color-mix(in srgb, #c9a227 55%, var(--line));
+}
+
+.familyTitle {
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin: 0 0 0.3rem;
+}
+
+.familyBody,
+.familyCall {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.familyCall {
+  margin-top: 0.4rem;
+}
+
 .filter {
   display: grid;
   gap: 0.25rem;
