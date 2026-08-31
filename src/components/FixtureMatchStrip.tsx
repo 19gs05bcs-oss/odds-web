@@ -77,8 +77,25 @@ export function FixtureMatchStrip({
   }, [list, query]);
 
   useEffect(() => {
+    // Arama metni değiştiğinde (yeni filtreleme) en üstteki sonucu vurgula.
     setHighlight(0);
-  }, [query, open]);
+  }, [query]);
+
+  useEffect(() => {
+    // Liste açılırken (yazı yazılmadan) seçili maç neredeyse orada vurgulu
+    // başlasın — en başa dönmesin.
+    if (!open) return;
+    const idx = list.findIndex((f) => f.match_id === selectedId);
+    setHighlight(idx >= 0 ? idx : 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${highlight}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [open, highlight]);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -165,17 +182,19 @@ export function FixtureMatchStrip({
         onKeyDown={onKeyDown}
       />
       {open && !loading && filtered.length ? (
-        <ul className={styles.dropdown} role="listbox">
+        <ul className={styles.dropdown} role="listbox" ref={listRef}>
           {filtered.map((f, i) => {
             const ready = hasBmOdds(f, bookmakerId);
+            const isSelected = f.match_id === selectedId;
             return (
               <li
                 key={f.match_id}
+                data-idx={i}
                 role="option"
-                aria-selected={f.match_id === selectedId}
+                aria-selected={isSelected}
                 className={`${styles.option} ${i === highlight ? styles.optionActive : ""} ${
-                  !ready && !oddsLoading ? styles.optionDisabled : ""
-                }`}
+                  isSelected ? styles.optionSelected : ""
+                } ${!ready && !oddsLoading ? styles.optionDisabled : ""}`}
                 onMouseEnter={() => setHighlight(i)}
                 onMouseDown={(e) => {
                   e.preventDefault();
