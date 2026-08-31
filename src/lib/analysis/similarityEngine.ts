@@ -152,6 +152,20 @@ function pickRow(rows: FixtureOddsRow[], market: string, selection: string): Fix
   if (market === "HALF_FULL_TIME:FULL_TIME" || market === "CORRECT_SCORE:FULL_TIME") {
     return rows.find((r) => r.market === market && r.selection === selection) || null;
   }
+  if (market === "DRAW_NO_BET:FULL_TIME") {
+    return (
+      rows.find((r) => r.market === market && r.selection === selection) ||
+      rows.find((r) => r.market.includes("DRAW_NO_BET") && r.selection === selection) ||
+      null
+    );
+  }
+  if (market === "HOME_DRAW_AWAY:SECOND_HALF" || market === "ASIAN_HANDICAP:FULL_TIME") {
+    return (
+      rows.find((r) => r.market === market && r.selection === selection) ||
+      rows.find((r) => r.market.startsWith(market.split(":")[0]) && r.selection === selection) ||
+      null
+    );
+  }
   return null;
 }
 
@@ -386,7 +400,23 @@ export async function findSimilarForBookmaker(opts: {
     a_open: number | null;
   }[];
 
+  const homeLen =
+    prof.h.opening != null && prof.h.odds >= prof.h.opening + 0.05;
+  const homeSh =
+    prof.h.opening != null && prof.h.odds <= prof.h.opening - 0.05;
+  const awayLen =
+    prof.a.opening != null && prof.a.odds >= prof.a.opening + 0.05;
+  const awaySh =
+    prof.a.opening != null && prof.a.odds <= prof.a.opening - 0.05;
+
   const stage1Scored = stage1
+    .filter((r) => {
+      if (homeLen && !(r.h_open != null && r.h >= r.h_open + 0.04)) return false;
+      if (homeSh && !(r.h_open != null && r.h <= r.h_open - 0.04)) return false;
+      if (awayLen && !(r.a_open != null && r.a >= r.a_open + 0.04)) return false;
+      if (awaySh && !(r.a_open != null && r.a <= r.a_open - 0.04)) return false;
+      return true;
+    })
     .map((r) => ({
       ...r,
       d1:
@@ -422,8 +452,13 @@ export async function findSimilarForBookmaker(opts: {
         OR (market = 'HALF_FULL_TIME:FULL_TIME' AND selection IN ('htft:1/1','htft:X/X','htft:2/2','1/1','X/X','2/2'))
         OR (market = 'CORRECT_SCORE:FULL_TIME' AND selection IN (
           'score:1:0','score:2:0','score:2:1','score:3:0','score:3:1','score:3:2',
-          'score:1:1','score:2:2','score:0:1','score:0:2','score:1:2'
+          'score:1:1','score:2:2','score:0:1','score:0:2','score:1:2','score:1:3','score:3:1'
         ))
+        OR (market = 'DRAW_NO_BET:FULL_TIME' AND selection IN ('H','A'))
+        OR (market = 'HOME_DRAW_AWAY:SECOND_HALF' AND selection IN ('H','D','A'))
+        OR (market = 'HOME_DRAW_AWAY:FIRST_HALF' AND selection IN ('H','D','A'))
+        OR (market = 'ASIAN_HANDICAP:FULL_TIME' AND selection IN ('A:-1.0','H:-1.0','A:0.0','H:0.0'))
+        OR (market = 'EUROPEAN_HANDICAP:FULL_TIME' AND selection IN ('A:-1.0','H:-1.0'))
       )
     `,
     [bookmaker, candidateIds] as never[],
@@ -450,6 +485,33 @@ export async function findSimilarForBookmaker(opts: {
     const bttsY = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES");
     const bttsN = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:NO");
 
+    const dnbA = L?.get("DRAW_NO_BET:FULL_TIME|A");
+    const dnbH = L?.get("DRAW_NO_BET:FULL_TIME|H");
+    const shA = L?.get("HOME_DRAW_AWAY:SECOND_HALF|A");
+    const shH = L?.get("HOME_DRAW_AWAY:SECOND_HALF|H");
+    const ahA1 = L?.get("ASIAN_HANDICAP:FULL_TIME|A:-1.0");
+    const ahH1 = L?.get("ASIAN_HANDICAP:FULL_TIME|H:-1.0");
+
+    const fxDnbA = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "A");
+    const fxDnbH = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "H");
+    const fxShA = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "A");
+    const fxShH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "H");
+    const fxAhA1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.0");
+    const fxAhH1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.0");
+
+    function steamDown(row: { odds: number; opening: number | null } | null | undefined, min = 0.12) {
+      return row?.opening != null && row.odds <= row.opening - min;
+    }
+    function steamUp(row: { odds: number; opening: number | null } | null | undefined, min = 0.12) {
+      return row?.opening != null && row.odds >= row.opening + min;
+    }
+    if (steamDown(fxDnbA, 0.15) && dnbA && !steamDown(dnbA, 0.12)) continue;
+    if (steamDown(fxDnbH, 0.15) && dnbH && !steamDown(dnbH, 0.12)) continue;
+    if (steamDown(fxShA, 0.15) && shA && !steamDown(shA, 0.1)) continue;
+    if (steamDown(fxShH, 0.15) && shH && !steamDown(shH, 0.1)) continue;
+    if (steamDown(fxAhA1, 0.25) && ahA1 && !steamDown(ahA1, 0.2)) continue;
+    if (steamDown(fxAhH1, 0.25) && ahH1 && !steamDown(ahH1, 0.2)) continue;
+
     if (!ou25 || !bttsY) continue;
     if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > LIQ_BAND) continue;
     if (prof.ou35) {
@@ -464,6 +526,9 @@ export async function findSimilarForBookmaker(opts: {
     parts.push((1.3 * rel(ou25.odds, prof.ou25?.odds ?? ou25.odds)) ** 2);
     if (prof.ou35 && ou35) parts.push((1.4 * rel(ou35.odds, prof.ou35.odds)) ** 2);
     parts.push((1.4 * rel(bttsY.odds, prof.bttsYes?.odds ?? bttsY.odds)) ** 2);
+    if (fxDnbA && dnbA) parts.push((1.2 * rel(dnbA.odds, fxDnbA.odds)) ** 2);
+    if (fxShA && shA) parts.push((1.15 * rel(shA.odds, fxShA.odds)) ** 2);
+    if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
     ranked.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
   }
 
@@ -552,7 +617,18 @@ export async function findSimilarForBookmaker(opts: {
   return {
     matchedCount: scored.length,
     samples: top,
-    usedCodes: ["1X2_FT", "OU25", "OU35", "BTTS", "REGIME_A_B", `FAMILY:${prof.family}`],
+    usedCodes: [
+      "1X2_FT",
+      "OU25",
+      "OU35",
+      "BTTS",
+      "DNB",
+      "2H_1X2",
+      "AH_-1",
+      "STEAM_SIGN",
+      "REGIME_A_B",
+      `FAMILY:${prof.family}`,
+    ],
     family: pred.family,
     buckets,
     regimes,
