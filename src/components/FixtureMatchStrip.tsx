@@ -166,7 +166,7 @@ export function FixtureMatchStrip({
       />
       {open && !loading && filtered.length ? (
         <ul className={styles.dropdown} role="listbox">
-          {filtered.slice(0, 50).map((f, i) => {
+          {filtered.map((f, i) => {
             const ready = hasBmOdds(f, bookmakerId);
             return (
               <li
