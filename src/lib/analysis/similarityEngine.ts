@@ -79,6 +79,7 @@ export type SimilarityFamily =
   | "CLEAN_AWAY"
   | "AWAY_SHUTOUT"
   | "HOME_BURST"
+  | "HOME_NUDGE"
   | "OPEN_GAME"
   | "OPEN_DRAW"
   | "BASE";
@@ -91,6 +92,26 @@ export type RegimeBuckets = {
   shutN: number;
 };
 
+export type BoardCall = {
+  stance: "LOCK" | "LEAN" | "SPLIT";
+  family: SimilarityFamily;
+  side: "HOME" | "AWAY" | "PICKEM";
+  sideSteam: "HOME" | "AWAY" | "NONE";
+  goalSteam: "OPEN" | "SHUT" | "FLAT";
+  bttsSteam: "ON" | "OFF" | "FLAT";
+  open: ScoreBucket[];
+  shut: ScoreBucket[];
+  openN: number;
+  shutN: number;
+  openShare: number;
+  call: string;
+  alt: string;
+  veto: string[];
+  reason: string;
+  csLadder: { score: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
+  htft: { sel: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
+};
+
 export type SimilarityResult = {
   matchedCount: number;
   samples: { event_id: string; score: number }[];
@@ -99,8 +120,143 @@ export type SimilarityResult = {
   buckets?: ScoreBucket[];
   regimes?: RegimeBuckets;
   prediction?: { primary: string; backup: string; reason: string };
+  board?: BoardCall;
   durationMs?: number;
 };
+
+function steamDir(row: FixtureOddsRow | null, min = 0.05): "DOWN" | "UP" | "FLAT" {
+  if (!row || row.opening == null) return "FLAT";
+  if (row.odds <= row.opening - min) return "DOWN";
+  if (row.odds >= row.opening + min) return "UP";
+  return "FLAT";
+}
+
+/** Tek skor iddiası yok. İki rejim + steam uyumu okunur. */
+export function readBoard(opts: {
+  fixtureOdds: FixtureOddsRow[];
+  regimes?: RegimeBuckets;
+}): BoardCall {
+  const p = classifyFamily(opts.fixtureOdds);
+  const pred = predictScoreline(opts.fixtureOdds);
+  const Hc = p.h?.odds ?? 99;
+  const Ac = p.a?.odds ?? 99;
+  const side: BoardCall["side"] =
+    Math.abs(Hc - Ac) / Math.min(Hc, Ac) <= 0.12 ? "PICKEM" : Hc <= Ac ? "HOME" : "AWAY";
+  const hDir = steamDir(p.h);
+  const aDir = steamDir(p.a);
+  const sideSteam: BoardCall["sideSteam"] =
+    hDir === "DOWN" && aDir !== "DOWN" ? "HOME" : aDir === "DOWN" && hDir !== "DOWN" ? "AWAY" : "NONE";
+  const ouDir = steamDir(p.ou25);
+  const goalSteam: BoardCall["goalSteam"] =
+    ouDir === "DOWN" ? "OPEN" : ouDir === "UP" ? "SHUT" : "FLAT";
+  const bDir = steamDir(p.bttsYes);
+  const bttsSteam: BoardCall["bttsSteam"] =
+    bDir === "DOWN" ? "ON" : steamDir(p.bttsNo) === "DOWN" ? "OFF" : "FLAT";
+
+  const open = opts.regimes?.open ?? [];
+  const shut = opts.regimes?.shut ?? [];
+  const openN = opts.regimes?.openN ?? 0;
+  const shutN = opts.regimes?.shutN ?? 0;
+  const tot = openN + shutN;
+  const openShare = tot ? openN / tot : 0.5;
+
+  const veto: string[] = [];
+  if (goalSteam === "SHUT") veto.push("4+ gol / 3-2 / 4-3 kilidi yok");
+  if (goalSteam === "FLAT" && (p.ou25?.odds ?? 0) >= 1.85) veto.push("patlama skoru yok");
+  if (bttsSteam === "OFF") veto.push("2-1 / 1-2 / 3-2 BTTS kilidi yok");
+  if (sideSteam === "AWAY") veto.push("3-1 / 2-0 ev kilidi yok");
+  if (sideSteam === "HOME") veto.push("0-1 / 1-3 dep kilidi yok");
+  if (side === "PICKEM") veto.push("tek taraf kilidi yok");
+
+  const conflict =
+    (sideSteam === "AWAY" && goalSteam === "SHUT") ||
+    (goalSteam === "FLAT" && Math.abs(openShare - 0.5) < 0.2) ||
+    (sideSteam === "NONE" && Math.abs(openShare - 0.5) < 0.22);
+
+  let stance: BoardCall["stance"] = "LEAN";
+  if (conflict || Math.abs(openShare - 0.5) < 0.18) stance = "SPLIT";
+  else if (openShare >= 0.62 || openShare <= 0.38) stance = "LOCK";
+
+  let call = pred.primary;
+  let alt = pred.backup;
+  if (stance === "SPLIT") {
+    call = open[0]?.scoreline ?? pred.primary;
+    alt = shut[0]?.scoreline ?? pred.backup;
+  } else if (openShare >= 0.55) {
+    call = open[0]?.scoreline ?? pred.primary;
+    alt = open[1]?.scoreline ?? shut[0]?.scoreline ?? pred.backup;
+  } else {
+    call = shut[0]?.scoreline ?? pred.primary;
+    alt = shut[1]?.scoreline ?? open[0]?.scoreline ?? pred.backup;
+  }
+
+  const reason = [
+    `aile ${p.family}`,
+    `taraf ${side} steam ${sideSteam}`,
+    `gol ${goalSteam} btts ${bttsSteam}`,
+    `açık ${openN} kilit ${shutN}`,
+    `duruş ${stance}`,
+  ].join(" · ");
+
+  const csLadder: BoardCall["csLadder"] = [];
+  for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
+    const row =
+      pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
+      opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`);
+    if (!row) continue;
+    csLadder.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
+  }
+  csLadder.sort((a, b) => a.odds - b.odds);
+
+  const htft: BoardCall["htft"] = [];
+  for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
+    const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
+    if (!row) continue;
+    htft.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
+  }
+
+  return {
+    stance,
+    family: p.family,
+    side,
+    sideSteam,
+    goalSteam,
+    bttsSteam,
+    open,
+    shut,
+    openN,
+    shutN,
+    openShare,
+    call,
+    alt,
+    veto,
+    reason,
+    csLadder: (() => {
+      const out: BoardCall["csLadder"] = [];
+      for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
+        const row =
+          pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
+          opts.fixtureOdds.find(
+            (x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`,
+          ) ||
+          null;
+        if (!row) continue;
+        out.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
+      }
+      out.sort((a, b) => a.odds - b.odds);
+      return out;
+    })(),
+    htft: (() => {
+      const out: BoardCall["htft"] = [];
+      for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
+        const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
+        if (!row) continue;
+        out.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
+      }
+      return out;
+    })(),
+  };
+}
 
 export type SimilarityBulkQueries = {
   driftQuery: { text: string; params: unknown[] };
@@ -214,6 +370,17 @@ export function classifyFamily(fixtureOdds: FixtureOddsRow[]): {
   else if (side === "HOME" && fav <= 1.5 && (goalsOpen || (ou25 != null && ou25.odds <= 1.58))) family = "HOME_BURST";
   else if (pickem && (bttsYes?.odds ?? 99) <= 1.8 && (ou35?.odds ?? 99) <= 3.3) family = "OPEN_DRAW";
   else if ((goalsOpen || bttsOn) && (bttsYes?.odds ?? 99) <= 1.75) family = "OPEN_GAME";
+  else if (
+    side === "HOME" &&
+    fav >= 1.85 &&
+    fav <= 2.4 &&
+    bttsOn &&
+    goalsOpen &&
+    (ou25?.odds ?? 0) >= 1.95 &&
+    (bttsYes?.odds ?? 99) <= 2.0
+  ) {
+    family = "HOME_NUDGE";
+  }
 
   return { family, h, d, a, ou25, ou35, bttsYes, bttsNo };
 }
@@ -262,6 +429,22 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
     }
     if (p.ou25 && p.ou25.odds <= 1.55) return { family: p.family, primary: "3-0", backup: "2-0", reason: "HOME_BURST clean-sheet eğilim" };
     return { family: p.family, primary: "2-0", backup: "3-0", reason: "HOME_BURST" };
+  }
+  if (p.family === "HOME_NUDGE") {
+    const cs10 = csOdds(fixtureOdds, "1:0");
+    const cs21row = pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:2:1");
+    const twoOneDown =
+      cs21row?.opening != null && cs21row.odds < cs21row.opening;
+    const oneNilUp =
+      cs10 != null &&
+      (() => {
+        const r = pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:1:0");
+        return r?.opening != null && r.odds > r.opening;
+      })();
+    if (twoOneDown || oneNilUp) {
+      return { family: p.family, primary: "2-1", backup: "1-1", reason: "HOME_NUDGE BTTS flip + CS 2-1 kısalır / 1-0 uzar" };
+    }
+    return { family: p.family, primary: "2-1", backup: "1-0", reason: "HOME_NUDGE ev ~2.15 + gol açılır" };
   }
   if (p.family === "OPEN_DRAW") {
     if (p.ou35 && p.ou35.odds <= 3.25 && (p.bttsYes?.odds ?? 99) <= 1.75) {
@@ -583,7 +766,16 @@ export async function findSimilarForBookmaker(opts: {
   const shutShare = split ? regimes.shutN / split : 0.5;
   const mixed = Math.abs(openShare - shutShare) < 0.22;
 
-  if (mixed) {
+  if (pred.family === "HOME_NUDGE") {
+    const open21 = regimes.open.find((b) => b.scoreline === "2-1");
+    if (open21) {
+      pred.primary = "2-1";
+      pred.backup = regimes.open.find((b) => b.scoreline !== "2-1")?.scoreline ?? "1-1";
+      pred.reason = `HOME_NUDGE kova 2-1×${open21.n}; açık ${regimes.openN} kilit ${regimes.shutN}`;
+    }
+  }
+
+  if (pred.family !== "HOME_NUDGE" && mixed) {
     pred.primary = regimes.open[0]?.scoreline ?? pred.primary;
     pred.backup = regimes.shut[0]?.scoreline ?? pred.backup;
     pred.reason = `iki kova açık ${regimes.openN} (${regimes.open
@@ -613,6 +805,10 @@ export async function findSimilarForBookmaker(opts: {
     event_id: s.event_id,
     score: s.score,
   }));
+  const board = readBoard({ fixtureOdds, regimes });
+  pred.primary = board.call;
+  pred.backup = board.alt;
+  pred.reason = board.reason;
 
   return {
     matchedCount: scored.length,
@@ -633,6 +829,7 @@ export async function findSimilarForBookmaker(opts: {
     buckets,
     regimes,
     prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
+    board,
     durationMs: Date.now() - t0,
   };
 }
