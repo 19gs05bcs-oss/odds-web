@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
-import { findSimilarForBookmaker, type FixtureOddsRow } from "@/lib/analysis/similarityEngine";
+import {
+  explainFamily,
+  findSimilarForBookmaker,
+  type FixtureOddsRow,
+  type SimilarityFamily,
+} from "@/lib/analysis/similarityEngine";
 import { fetchQuoteRowsByEventIds } from "@/lib/analysis/marketQuotes";
 import { eventsMetaAndQuotesToTableRows, PREFERRED_BM_NAME } from "@/lib/analysis/tableRows";
 import type { CompactOddsRow } from "@/lib/archiveCache";
@@ -69,6 +74,8 @@ export async function POST(req: Request) {
       if (cached.length) {
         const c = cached[0];
         const tableRows = await buildTableRows(c.samples, bookmaker);
+        const family = familyFromCodes(c.used_codes);
+        const copy = explainFamily(family);
         return NextResponse.json({
           ok: true,
           cached: true,
@@ -76,6 +83,9 @@ export async function POST(req: Request) {
           matchedCount: c.matched_count,
           usedCodes: c.used_codes,
           durationMs: c.duration_ms,
+          family,
+          familyTitle: copy.title,
+          familyNote: copy.note,
           tableRows,
         });
       }
@@ -150,6 +160,8 @@ export async function POST(req: Request) {
 
   const tableRows = await buildTableRows(result.samples, bookmaker);
 
+  const family = result.family ?? familyFromCodes(result.usedCodes);
+  const copy = explainFamily(family);
   return NextResponse.json({
     ok: true,
     cached: false,
@@ -157,8 +169,29 @@ export async function POST(req: Request) {
     matchedCount: result.matchedCount,
     usedCodes: result.usedCodes,
     durationMs,
+    family,
+    familyTitle: copy.title,
+    familyNote: copy.note,
+    prediction: result.prediction ?? null,
+    board: result.board ?? null,
     tableRows,
   });
+}
+
+function familyFromCodes(codes: string[] | string | null | undefined): SimilarityFamily {
+  const list = Array.isArray(codes) ? codes : typeof codes === "string" ? (() => { try { return JSON.parse(codes) as string[]; } catch { return [] as string[]; } })() : [];
+  const raw = list.find((c) => typeof c === "string" && c.startsWith("FAMILY:"));
+  const name = raw?.slice("FAMILY:".length) as SimilarityFamily | undefined;
+  const known: SimilarityFamily[] = [
+    "CLEAN_AWAY",
+    "AWAY_SHUTOUT",
+    "HOME_BURST",
+    "HOME_NUDGE",
+    "OPEN_GAME",
+    "OPEN_DRAW",
+    "BASE",
+  ];
+  return name && known.includes(name) ? name : "BASE";
 }
 
 async function buildTableRows(samples: { event_id: string; score: number }[], bookmaker: string) {
