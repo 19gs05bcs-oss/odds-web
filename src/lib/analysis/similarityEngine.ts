@@ -12,15 +12,9 @@ const K_MIN = (weightsCfg as { k_min: number }).k_min;
 
 const STAGE1_MARKET = "HOME_DRAW_AWAY:FULL_TIME";
 const STAGE1_POOL = 250;
-const STAGE2_POOL = 12; // artık sadece samples icin degil, regime havuzu icin de kullaniliyor
+const STAGE2_POOL = 12;
 const BAND = 0.045;
 const LIQ_BAND = 0.06;
-
-// CS/HTFT ince ayarı icin core hatlar - liquid sorgusunda zaten cekiliyor
-const CS_CORE_LINES = [
-  "1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1", "3:2", "2:2", "1:3",
-];
-const HTFT_SELS = ["htft:1/1", "htft:X/X", "htft:2/2"] as const;
 
 const LIQUID_1X2_DC_BTTS_MARKETS = new Set([
   "HOME_DRAW_AWAY:FULL_TIME",
@@ -247,29 +241,22 @@ export function readBoard(opts: {
     `duruş ${stance}`,
   ].join(" · ");
 
-  const csLadder: BoardCall["csLadder"] = (() => {
-    const out: BoardCall["csLadder"] = [];
-    for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
-      const row =
-        pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
-        opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`) ||
-        null;
-      if (!row) continue;
-      out.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
-    }
-    out.sort((a, b) => a.odds - b.odds);
-    return out;
-  })();
+  const csLadder: BoardCall["csLadder"] = [];
+  for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
+    const row =
+      pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
+      opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`);
+    if (!row) continue;
+    csLadder.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
+  }
+  csLadder.sort((a, b) => a.odds - b.odds);
 
-  const htft: BoardCall["htft"] = (() => {
-    const out: BoardCall["htft"] = [];
-    for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
-      const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
-      if (!row) continue;
-      out.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
-    }
-    return out;
-  })();
+  const htft: BoardCall["htft"] = [];
+  for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
+    const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
+    if (!row) continue;
+    htft.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
+  }
 
   return {
     stance,
@@ -287,8 +274,30 @@ export function readBoard(opts: {
     alt,
     veto,
     reason,
-    csLadder,
-    htft,
+    csLadder: (() => {
+      const out: BoardCall["csLadder"] = [];
+      for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
+        const row =
+          pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
+          opts.fixtureOdds.find(
+            (x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`,
+          ) ||
+          null;
+        if (!row) continue;
+        out.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
+      }
+      out.sort((a, b) => a.odds - b.odds);
+      return out;
+    })(),
+    htft: (() => {
+      const out: BoardCall["htft"] = [];
+      for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
+        const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
+        if (!row) continue;
+        out.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
+      }
+      return out;
+    })(),
   };
 }
 
@@ -692,16 +701,6 @@ export async function findSimilarForBookmaker(opts: {
     m.set(`${row.market}|${sel}`, { odds: row.odds, opening: row.opening });
   }
 
-  // --- YENİ: fixture'ın kendi CS core hatları + favori HTFT kombinasyonu ---
-  const fxCsRows = CS_CORE_LINES
-    .map((line) => ({ line, row: pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) }))
-    .filter((x): x is { line: string; row: FixtureOddsRow } => x.row != null);
-
-    const fxHtftRows = HTFT_SELS
-    .map((sel) => ({ sel, row: pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel as string) }))
-    .filter((x): x is { sel: (typeof HTFT_SELS)[number]; row: FixtureOddsRow } => x.row != null);
-  const favHtft = fxHtftRows.length ? fxHtftRows.sort((a, b) => a.row.odds - b.row.odds)[0] : null;
-
   type Ranked = { event_id: string; score: number };
   const ranked: Ranked[] = [];
 
@@ -761,26 +760,6 @@ export async function findSimilarForBookmaker(opts: {
     if (fxShA && shA) parts.push((1.15 * rel(shA.odds, fxShA.odds)) ** 2);
     if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
     if (fxHtH && htH) parts.push((1.2 * rel(htH.odds, fxHtH.odds)) ** 2);
-
-    // --- YENİ: CORRECT_SCORE ladder ortalama mesafesi ---
-    if (fxCsRows.length) {
-      const csDists: number[] = [];
-      for (const { line, row } of fxCsRows) {
-        const cand = L?.get(`CORRECT_SCORE:FULL_TIME|score:${line}`);
-        if (cand) csDists.push(rel(cand.odds, row.odds));
-      }
-      if (csDists.length >= 6) {
-        const csAvg = csDists.reduce((a, b) => a + b, 0) / csDists.length;
-        parts.push((0.9 * csAvg) ** 2);
-      }
-    }
-
-    // --- YENİ: fixture'ın favori HTFT kombinasyonu üzerinden mesafe ---
-    if (favHtft) {
-      const candHtft = L?.get(`HALF_FULL_TIME:FULL_TIME|${favHtft.sel}`);
-      if (candHtft) parts.push((1.2 * rel(candHtft.odds, favHtft.row.odds)) ** 2);
-    }
-
     ranked.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
   }
 
@@ -831,12 +810,6 @@ export async function findSimilarForBookmaker(opts: {
   });
   const usedScores = pruned.length ? pruned : scored;
 
-  // --- YENİ: regime (open/shut) oylamasını sadece en yakın STAGE2_POOL komşuya kısıtla ---
-  // `usedScores` zaten `score`'a göre sıralı geliyor (scored, shortlist sırasını korur, shortlist ranked'a göre sıralı).
-  // Böylece CS/HTFT ile iyileşen sıralama artık call/alt'a da yansır; 40 komşuluk düz oy çoğunluğu yerine
-  // en benzer 12 komşu oy kullanır.
-  const regimePool = usedScores.slice(0, STAGE2_POOL);
-
   function freqOf(rows: typeof scored): ScoreBucket[] {
     const freq = new Map<string, number>();
     for (const s of rows) {
@@ -848,8 +821,8 @@ export async function findSimilarForBookmaker(opts: {
       .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
   }
 
-  const openRows = regimePool.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
-  const shutRows = regimePool.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
+  const openRows = usedScores.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
+  const shutRows = usedScores.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
   const regimes: RegimeBuckets = {
     open: freqOf(openRows).slice(0, 6),
     shut: freqOf(shutRows).slice(0, 6),
@@ -863,7 +836,7 @@ export async function findSimilarForBookmaker(opts: {
   const openShare = split ? regimes.openN / split : 0.5;
   const shutShare = split ? regimes.shutN / split : 0.5;
 
-  const core = regimePool.filter((s) => s.hs + s.as < 5).slice(0, 6);
+  const core = usedScores.filter((s) => s.hs + s.as < 5).slice(0, 6);
   if (core.length) {
     const callLine = `${core[0].hs}-${core[0].as}`;
     const altRow = core.find((s) => `${s.hs}-${s.as}` !== callLine);
@@ -910,8 +883,6 @@ export async function findSimilarForBookmaker(opts: {
       "AH_-1",
       "STEAM_SIGN",
       "REGIME_A_B",
-      "CS_LADDER",
-      "HTFT_FAV",
       `FAMILY:${prof.family}`,
     ],
     family: pred.family,
