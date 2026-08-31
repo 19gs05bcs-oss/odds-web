@@ -141,7 +141,23 @@ export function FixtureMatchStrip({
         value={query}
         placeholder={loading ? "Loading…" : "Search team…"}
         disabled={loading || !list.length}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          // Odaklanınca arama kutusunu boşalt: seçili maçın uzun etiketi
+          // (saat · takım · lig) query olarak kalırsa filtre hiçbir şeyle
+          // eşleşmeyip liste boş görünüyordu — kapanınca zaten seçili maça
+          // geri dönüyor (bkz. yukarıdaki useEffect).
+          setQuery("");
+          setOpen(true);
+        }}
+        onClick={() => {
+          // Input zaten focus'luyken (bir maç seçtikten hemen sonra) tekrar
+          // tıklayınca native focus event tekrar tetiklenmiyor — bu yüzden
+          // click'te de aynı reset'i yapıyoruz.
+          if (!open) {
+            setQuery("");
+            setOpen(true);
+          }
+        }}
         onChange={(e) => {
           setQuery(e.target.value);
           setOpen(true);

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
-import { PREFERRED_BM } from "@/lib/analysis/tableRows";
+import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
 import type { TableRow } from "@/lib/analysis/tableRows";
 type SimilarityCardState = {
   status: "idle" | "loading" | "done" | "error";
@@ -81,6 +81,10 @@ export function SmartAnalysisClient({
   const selectedFixture = useMemo(
     () => fixtures.find((f) => f.match_id === selectedFixtureId) ?? null,
     [fixtures, selectedFixtureId],
+  );
+  const selectedRow = useMemo(
+    () => (selectedFixture?.odds?.length ? fixtureToTableRow(selectedFixture, bmNum) : null),
+    [selectedFixture, bmNum],
   );
 
   async function applyOddsPatches(
@@ -266,52 +270,61 @@ export function SmartAnalysisClient({
       ) : null}
 
       {selectedFixture ? (
-        <section className={styles.card}>
-          <h3>Similar matches (multi-market)</h3>
-          <p className={styles.cardLead}>
-            Weighted similarity across every market this bookmaker quotes for this match (1X2,
-            O/U, AH, BTTS, HT/FT, DC).
-          </p>
-
-          {simState.status === "idle" ? (
-            <p className={styles.empty}>Waiting for this match's odds to load…</p>
+        <>
+          {selectedRow ? (
+            <section className={styles.card}>
+              <h3>Selected match odds</h3>
+              <AnalyzeTable rows={[selectedRow]} mode="bulletin" compact />
+            </section>
           ) : null}
 
-          {simState.status === "loading" ? (
-            <LoadingBanner title="Loading match" subtitle="Please wait — computing similarity across all markets." long />
-          ) : null}
+          <section className={styles.card}>
+            <h3>Similar matches (multi-market)</h3>
+            <p className={styles.cardLead}>
+              Weighted similarity across every market this bookmaker quotes for this match (1X2,
+              O/U, AH, BTTS, HT/FT, DC).
+            </p>
 
-          {simState.status === "error" ? (
-            <>
-              <p className={styles.error}>{simState.error}</p>
-              <button type="button" className={styles.primaryButton} onClick={() => void runSimilarity(false)}>
-                Retry
-              </button>
-            </>
-          ) : null}
+            {simState.status === "idle" ? (
+              <p className={styles.empty}>Waiting for this match's odds to load…</p>
+            ) : null}
 
-          {simState.status === "done" ? (
-            <>
-              <p className={styles.cardLead}>
-                <strong>{simState.matchedCount}</strong> matched ·{" "}
-                {simState.usedCodes?.length ?? 0} active codes
-                {simState.durationMs != null ? ` · ${(simState.durationMs / 1000).toFixed(1)}s` : ""}
-                {simState.cached ? " · cached" : ""}
-                {simState.computedAt ? (
-                  <span className={styles.muted}> · computed {new Date(simState.computedAt).toLocaleString()}</span>
-                ) : null}
-              </p>
-              {simState.tableRows?.length ? (
-                <AnalyzeTable rows={simState.tableRows} mode="archive" compact />
-              ) : (
-                <p className={styles.empty}>No matches under the similarity threshold.</p>
-              )}
-              <button type="button" className={styles.secondaryButton} onClick={() => void runSimilarity(true)}>
-                Recompute
-              </button>
-            </>
-          ) : null}
-        </section>
+            {simState.status === "loading" ? (
+              <LoadingBanner title="Loading match" subtitle="Please wait — computing similarity across all markets." long />
+            ) : null}
+
+            {simState.status === "error" ? (
+              <>
+                <p className={styles.error}>{simState.error}</p>
+                <button type="button" className={styles.primaryButton} onClick={() => void runSimilarity(false)}>
+                  Retry
+                </button>
+              </>
+            ) : null}
+
+            {simState.status === "done" ? (
+              <>
+                <p className={styles.cardLead}>
+                  <strong>{simState.matchedCount}</strong> matched ·{" "}
+                  {simState.usedCodes?.length ?? 0} active codes
+                  {simState.durationMs != null ? ` · ${(simState.durationMs / 1000).toFixed(1)}s` : ""}
+                  {simState.cached ? " · cached" : ""}
+                  {simState.computedAt ? (
+                    <span className={styles.muted}> · computed {new Date(simState.computedAt).toLocaleString()}</span>
+                  ) : null}
+                </p>
+                {simState.tableRows?.length ? (
+                  <AnalyzeTable rows={simState.tableRows} mode="archive" compact />
+                ) : (
+                  <p className={styles.empty}>No matches under the similarity threshold.</p>
+                )}
+                <button type="button" className={styles.secondaryButton} onClick={() => void runSimilarity(true)}>
+                  Recompute
+                </button>
+              </>
+            ) : null}
+          </section>
+        </>
       ) : null}
     </div>
   );
