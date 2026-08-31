@@ -697,9 +697,9 @@ export async function findSimilarForBookmaker(opts: {
     .map((line) => ({ line, row: pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) }))
     .filter((x): x is { line: string; row: FixtureOddsRow } => x.row != null);
 
-  const fxHtftRows = HTFT_SELS
-    .map((sel) => ({ sel, row: pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel) }))
-    .filter((x): x is { sel: string; row: FixtureOddsRow } => x.row != null);
+    const fxHtftRows = HTFT_SELS
+    .map((sel) => ({ sel, row: pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel as string) }))
+    .filter((x): x is { sel: (typeof HTFT_SELS)[number]; row: FixtureOddsRow } => x.row != null);
   const favHtft = fxHtftRows.length ? fxHtftRows.sort((a, b) => a.row.odds - b.row.odds)[0] : null;
 
   type Ranked = { event_id: string; score: number };
