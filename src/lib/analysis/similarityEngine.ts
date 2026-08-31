@@ -112,6 +112,13 @@ export type BoardCall = {
   htft: { sel: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
 };
 
+export type MarketInsight = {
+  label: string;
+  n: number;
+  d: number;
+  pct: number;
+};
+
 export type SimilarityResult = {
   matchedCount: number;
   samples: { event_id: string; score: number }[];
@@ -121,6 +128,7 @@ export type SimilarityResult = {
   regimes?: RegimeBuckets;
   prediction?: { primary: string; backup: string; reason: string };
   board?: BoardCall;
+  insights?: MarketInsight[];
   durationMs?: number;
 };
 
@@ -668,6 +676,10 @@ export async function findSimilarForBookmaker(opts: {
     const bttsY = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES");
     const bttsN = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:NO");
 
+    const htH = L?.get("HOME_DRAW_AWAY:FIRST_HALF|H");
+    const fxHtH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "H");
+    if (fxHtH && htH && rel(htH.odds, fxHtH.odds) > 0.08) continue;
+
     const dnbA = L?.get("DRAW_NO_BET:FULL_TIME|A");
     const dnbH = L?.get("DRAW_NO_BET:FULL_TIME|H");
     const shA = L?.get("HOME_DRAW_AWAY:SECOND_HALF|A");
@@ -712,6 +724,7 @@ export async function findSimilarForBookmaker(opts: {
     if (fxDnbA && dnbA) parts.push((1.2 * rel(dnbA.odds, fxDnbA.odds)) ** 2);
     if (fxShA && shA) parts.push((1.15 * rel(shA.odds, fxShA.odds)) ** 2);
     if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
+    if (fxHtH && htH) parts.push((1.2 * rel(htH.odds, fxHtH.odds)) ** 2);
     ranked.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
   }
 
@@ -739,6 +752,29 @@ export async function findSimilarForBookmaker(opts: {
     }
   }
 
+  const ouClose = prof.ou25?.odds ?? null;
+  const ouOpen = prof.ou25?.opening ?? null;
+  const goalShut =
+    ouOpen != null && ouClose != null && ouClose > ouOpen + 0.04;
+  const goalOpen =
+    ouOpen != null && ouClose != null && ouClose < ouOpen - 0.04;
+  const bttsNoFav =
+    prof.bttsNo != null &&
+    prof.bttsYes != null &&
+    prof.bttsNo.odds <= prof.bttsYes.odds;
+  const pruned = scored.filter((s) => {
+    const tot = s.hs + s.as;
+    const low = tot <= 1 || `${s.hs}-${s.as}` === "1-0" || `${s.hs}-${s.as}` === "0-0";
+    const burst = tot >= 5;
+    if (burst) return false;
+    if (goalOpen && ouClose != null && ouClose <= 1.62) {
+      if (low) return false;
+    }
+    if (prof.family === "HOME_BURST" && low) return false;
+    return true;
+  });
+  const usedScores = pruned.length ? pruned : scored;
+
   function freqOf(rows: typeof scored): ScoreBucket[] {
     const freq = new Map<string, number>();
     for (const s of rows) {
@@ -750,8 +786,8 @@ export async function findSimilarForBookmaker(opts: {
       .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
   }
 
-  const openRows = scored.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
-  const shutRows = scored.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
+  const openRows = usedScores.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
+  const shutRows = usedScores.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
   const regimes: RegimeBuckets = {
     open: freqOf(openRows).slice(0, 6),
     shut: freqOf(shutRows).slice(0, 6),
@@ -764,47 +800,36 @@ export async function findSimilarForBookmaker(opts: {
   const split = regimes.openN + regimes.shutN;
   const openShare = split ? regimes.openN / split : 0.5;
   const shutShare = split ? regimes.shutN / split : 0.5;
-  const mixed = Math.abs(openShare - shutShare) < 0.22;
 
-  if (pred.family === "HOME_NUDGE") {
-    const open21 = regimes.open.find((b) => b.scoreline === "2-1");
-    if (open21) {
-      pred.primary = "2-1";
-      pred.backup = regimes.open.find((b) => b.scoreline !== "2-1")?.scoreline ?? "1-1";
-      pred.reason = `HOME_NUDGE kova 2-1×${open21.n}; açık ${regimes.openN} kilit ${regimes.shutN}`;
-    }
-  }
-
-  if (pred.family !== "HOME_NUDGE" && mixed) {
-    pred.primary = regimes.open[0]?.scoreline ?? pred.primary;
-    pred.backup = regimes.shut[0]?.scoreline ?? pred.backup;
-    pred.reason = `iki kova açık ${regimes.openN} (${regimes.open
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")}) / kilit ${regimes.shutN} (${regimes.shut
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")})`;
-  } else if (openShare >= shutShare && regimes.open[0]) {
-    pred.primary = regimes.open[0].scoreline;
-    pred.backup = regimes.open[1]?.scoreline ?? regimes.shut[0]?.scoreline ?? pred.backup;
-    pred.reason = `açık kova ${regimes.openN}/${split} ${regimes.open
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
-      .join(", ")}`;
-  } else if (regimes.shut[0]) {
-    pred.primary = regimes.shut[0].scoreline;
-    pred.backup = regimes.shut[1]?.scoreline ?? regimes.open[0]?.scoreline ?? pred.backup;
-    pred.reason = `kilit kova ${regimes.shutN}/${split} ${regimes.shut
-      .slice(0, 3)
-      .map((b) => `${b.scoreline}×${b.n}`)
+  const core = usedScores.filter((s) => s.hs + s.as < 5).slice(0, 6);
+  if (core.length) {
+    const callLine = `${core[0].hs}-${core[0].as}`;
+    const altRow = core.find((s) => `${s.hs}-${s.as}` !== callLine);
+    pred.primary = callLine;
+    pred.backup = altRow ? `${altRow.hs}-${altRow.as}` : pred.backup;
+    pred.reason = `ilk ${core.length} mesafe (5+ gol atıldı): ${core
+      .map((s) => `${s.hs}-${s.as}`)
       .join(", ")}`;
   }
 
-  const top = scored.slice(0, Math.max(K_MIN, Math.min(limit, STAGE2_POOL))).map((s) => ({
+  const top = usedScores.slice(0, Math.max(K_MIN, Math.min(limit, STAGE2_POOL))).map((s) => ({
     event_id: s.event_id,
     score: s.score,
   }));
+  const insights: MarketInsight[] = [];
+  if (scored.length) {
+    const d = scored.length;
+    const add = (label: string, n: number) => {
+      insights.push({ label, n, d, pct: Math.round((100 * n) / d) });
+    };
+    add("ev kazanır", scored.filter((s) => s.hs > s.as).length);
+    add("ev 2+ fark", scored.filter((s) => s.hs - s.as >= 2).length);
+    add("ev 3.5+ gol (ev golleri)", scored.filter((s) => s.hs >= 4).length);
+    add("maç 3.5 üst", scored.filter((s) => s.hs + s.as > 3.5).length);
+    add("BTTS", scored.filter((s) => s.hs > 0 && s.as > 0).length);
+    add("clean sheet ev", scored.filter((s) => s.as === 0 && s.hs > 0).length);
+  }
+
   const board = readBoard({ fixtureOdds, regimes });
   pred.primary = board.call;
   pred.backup = board.alt;
@@ -830,6 +855,7 @@ export async function findSimilarForBookmaker(opts: {
     regimes,
     prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
     board,
+    insights,
     durationMs: Date.now() - t0,
   };
 }
