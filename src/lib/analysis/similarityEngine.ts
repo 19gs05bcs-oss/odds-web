@@ -84,6 +84,41 @@ export type SimilarityFamily =
   | "OPEN_DRAW"
   | "BASE";
 
+export const FAMILY_EXPLAIN: Record<SimilarityFamily, { title: string; note: string }> = {
+  BASE: {
+    title: "BASE — no special family",
+    note: "This match did not meet any named family rule (home burst, clean away, open game, etc.). Neighbours are matched on the standard 1X2 + O/U 2.5 + BTTS band only. Treat the score call as a distance rank, not a locked script.",
+  },
+  HOME_BURST: {
+    title: "HOME_BURST — short home favourite, goals opening",
+    note: "Home price ≤ 1.50 and totals are short or shortening. High home-goal neighbours are preferred; 0-0 / 1-0 are dropped from the core list.",
+  },
+  HOME_NUDGE: {
+    title: "HOME_NUDGE — mild home favourite, BTTS turning on",
+    note: "Home around 1.85–2.40 with BTTS yes shortening and O/U opening but still not a blowout price. Typical core: 2-1 / 1-1.",
+  },
+  OPEN_GAME: {
+    title: "OPEN_GAME — both teams priced to score",
+    note: "BTTS yes ≤ 1.75 and goals are opening. Low-score 0-0 / 1-0 neighbours are dropped when O/U 2.5 is ≤ 1.62.",
+  },
+  OPEN_DRAW: {
+    title: "OPEN_DRAW — pick’em with short BTTS",
+    note: "Home and away prices are within 12% and the draw is short. High-scoring draws stay in play.",
+  },
+  CLEAN_AWAY: {
+    title: "CLEAN_AWAY — away favourite, totals shutting",
+    note: "Away is favoured and O/U + BTTS no are shortening toward a shutout. 5+ goal neighbours are dropped.",
+  },
+  AWAY_SHUTOUT: {
+    title: "AWAY_SHUTOUT — away favourite, BTTS no priced shorter",
+    note: "Away side plus BTTS no shorter than yes. Expect 0-1 / 0-2 style neighbours; 5+ goal games are dropped.",
+  },
+};
+
+export function explainFamily(family: SimilarityFamily | undefined) {
+  return FAMILY_EXPLAIN[family ?? "BASE"];
+}
+
 export type ScoreBucket = { scoreline: string; n: number };
 export type RegimeBuckets = {
   open: ScoreBucket[];
