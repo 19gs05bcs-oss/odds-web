@@ -200,6 +200,10 @@ async function buildTableRows(samples: { event_id: string; score: number }[], bo
   const quoteRows = await fetchQuoteRowsByEventIds(ids, bookmaker);
   const rowsById = eventsMetaAndQuotesToTableRows(quoteRows, bookmaker);
   const scoreById = new Map(samples.map((s) => [s.event_id, s.score]));
+  // Sunucu, samples sırasını (= benzerlik skoruna göre artan, en benzer önce)
+  // olduğu gibi döner. Tarih/benzerlik sıralaması client'ta (SmartAnalysisClient)
+  // toggle ile yapılıyor — ikisi arasında geçiş için ham similarityScore burada
+  // her satıra ekleniyor.
   return ids
     .map((id) => rowsById.get(id))
     .filter((r): r is NonNullable<typeof r> => Boolean(r))
