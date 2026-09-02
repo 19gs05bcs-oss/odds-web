@@ -401,16 +401,61 @@ function csOdds(rows: FixtureOddsRow[], line: string): number | null {
 }
 
 
-export function explainFamily(input: FixtureOddsRow[] | string) {
-  if (typeof input === "string") {
-    return { family: input, title: input };
-  }
-  const res = classifyFamily(input);
+const FAMILY_DESCRIPTIONS: Record<string, { title: string; note: string }> = {
+  CLEAN_AWAY: {
+    title: "Deplasman Temiz Galibiyet",
+    note: "Deplasman favori, alt baremler ve KG Yok yönünde piyasa baskısı.",
+  },
+  AWAY_SHUTOUT: {
+    title: "Deplasman Gol Yemez",
+    note: "Deplasman takımı kalesini kapatırken tek farklı veya kontrollü galibiyet arar.",
+  },
+  HOME_BURST: {
+    title: "Ev Sahibi Baskın / Patlama",
+    note: "Ev sahibi belirgin favori, gollü ve yüksek handikaplı galibiyet beklentisi.",
+  },
+  HOME_NUDGE: {
+    title: "Ev Sahibi İtme / Sıkışık Galibiyet",
+    note: "Oranlar dengeli veya ev lehine hafif açılış, 2-1 veya 1-0 odaklı profil.",
+  },
+  OPEN_GAME: {
+    title: "Açık ve Karşılıklı Gollü",
+    note: "Her iki takımın gol bulacağı yüksek tempolu senaryo.",
+  },
+  OPEN_DRAW: {
+    title: "Gollü Beraberlik",
+    note: "KG Var ve üst baremler açıkken taraf oranlarının kilitlendiği profil.",
+  },
+  BASE: {
+    title: "Standart Profil",
+    note: "Belirgin tek yönlü sapma içermeyen temel piyasa dengesi.",
+  },
+};
+
+export function explainFamily(input: FixtureOddsRow[] | string | null | undefined): {
+  family: string;
+  title: string;
+  note: string;
+} {
+  const familyKey =
+    typeof input === "string"
+      ? input
+      : Array.isArray(input)
+      ? classifyFamily(input).family
+      : "BASE";
+
+  const desc = FAMILY_DESCRIPTIONS[familyKey] ?? {
+    title: familyKey,
+    note: "Piyasa oranlarına göre eşleşen profil.",
+  };
+
   return {
-    ...res,
-    title: res.family, // route.ts'in beklediği title alanı
+    family: familyKey,
+    title: desc.title,
+    note: desc.note,
   };
 }
+
 
 
 
