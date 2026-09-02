@@ -66,11 +66,21 @@ function LoadingBanner({
   );
 }
 
+/** meta.yil/ay/gun/saat zaten sıfır-dolgulu (kickoffParts) — string birleştirip
+ *  karşılaştırmak doğru kronolojik sırayı verir. meta.tarih (gg.ay.yy) sadece
+ *  görüntü içindir, gün başta olduğu için string-sort ile kronolojik olmaz. */
+function dateKey(r: TableRow): string {
+  return `${r.meta.yil}${r.meta.ay}${r.meta.gun}${r.meta.saat}`;
+}
+
+type ArchiveSortMode = "date" | "similarity";
+
 export function SmartAnalysisClient({
   bookmakers,
   fixtureDates,
   initialBulletinDate,
 }: Props) {
+  const [archiveSort, setArchiveSort] = useState<ArchiveSortMode>("date");
   const [bulletinDate, setBulletinDate] = useState(initialBulletinDate);
   const [fixtures, setFixtures] = useState<FixtureRow[]>([]);
   const [fixturesLoading, setFixturesLoading] = useState(!!initialBulletinDate);
@@ -90,6 +100,16 @@ export function SmartAnalysisClient({
     () => (selectedFixture?.odds?.length ? fixtureToTableRow(selectedFixture, bmNum) : null),
     [selectedFixture, bmNum],
   );
+
+  // Sunucudan gelen sıra = benzerlik skoruna göre artan (en benzer önce; bkz.
+  // similarityEngine.ts ranked.sort). "date" seçilince tarihe göre (eski→yeni)
+  // yeniden sıralıyoruz; "similarity" seçilince sunucudan geldiği sırayı koruyoruz.
+  const sortedArchiveRows = useMemo(() => {
+    const rows = simState.tableRows;
+    if (!rows?.length) return rows;
+    if (archiveSort === "similarity") return rows;
+    return [...rows].sort((a, b) => dateKey(a).localeCompare(dateKey(b)));
+  }, [simState.tableRows, archiveSort]);
 
   async function applyOddsPatches(
     patches: Array<Pick<FixtureRow, "match_id" | "odds" | "bookmakers" | "odds_count">>,
@@ -353,7 +373,19 @@ export function SmartAnalysisClient({
                   </div>
                 ) : null}
                 {simState.tableRows?.length ? (
-                  <AnalyzeTable rows={simState.tableRows} mode="archive" compact />
+                  <>
+                    <div className={filterStyles.field} role="group" aria-label="Archive sort">
+                      <span>Sort</span>
+                      <select
+                        value={archiveSort}
+                        onChange={(e) => setArchiveSort(e.target.value as ArchiveSortMode)}
+                      >
+                        <option value="date">Date (oldest → newest)</option>
+                        <option value="similarity">Similarity (best match first)</option>
+                      </select>
+                    </div>
+                    <AnalyzeTable rows={sortedArchiveRows ?? []} mode="archive" compact />
+                  </>
                 ) : (
                   <p className={styles.empty}>No matches under the similarity threshold.</p>
                 )}
