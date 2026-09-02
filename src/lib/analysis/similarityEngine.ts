@@ -400,6 +400,13 @@ function csOdds(rows: FixtureOddsRow[], line: string): number | null {
   return r?.odds ?? null;
 }
 
+
+export function explainFamily(fixtureOdds: FixtureOddsRow[]) {
+  return classifyFamily(fixtureOdds);
+}
+
+
+
 /** K1–K6 nokta atışı. fixtureOdds içinde CS / HTFT varsa K6 da çalışır. */
 export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   family: SimilarityFamily;
