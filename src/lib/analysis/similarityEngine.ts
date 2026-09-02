@@ -84,6 +84,41 @@ export type SimilarityFamily =
   | "OPEN_DRAW"
   | "BASE";
 
+export const FAMILY_EXPLAIN: Record<SimilarityFamily, { title: string; note: string }> = {
+  BASE: {
+    title: "BASE — no special family",
+    note: "This match did not meet any named family rule (home burst, clean away, open game, etc.). Neighbours are matched on the standard 1X2 + O/U 2.5 + BTTS band only. Treat the score call as a distance rank, not a locked script.",
+  },
+  HOME_BURST: {
+    title: "HOME_BURST — short home favourite, goals opening",
+    note: "Home price ≤ 1.50 and totals are short or shortening. High home-goal neighbours are preferred; 0-0 / 1-0 are dropped from the core list.",
+  },
+  HOME_NUDGE: {
+    title: "HOME_NUDGE — mild home favourite, BTTS turning on",
+    note: "Home around 1.85–2.40 with BTTS yes shortening and O/U opening but still not a blowout price. Typical core: 2-1 / 1-1.",
+  },
+  OPEN_GAME: {
+    title: "OPEN_GAME — both teams priced to score",
+    note: "BTTS yes ≤ 1.75 and goals are opening. Low-score 0-0 / 1-0 neighbours are dropped when O/U 2.5 is ≤ 1.62.",
+  },
+  OPEN_DRAW: {
+    title: "OPEN_DRAW — pick’em with short BTTS",
+    note: "Home and away prices are within 12% and the draw is short. High-scoring draws stay in play.",
+  },
+  CLEAN_AWAY: {
+    title: "CLEAN_AWAY — away favourite, totals shutting",
+    note: "Away is favoured and O/U + BTTS no are shortening toward a shutout. 5+ goal neighbours are dropped.",
+  },
+  AWAY_SHUTOUT: {
+    title: "AWAY_SHUTOUT — away favourite, BTTS no priced shorter",
+    note: "Away side plus BTTS no shorter than yes. Expect 0-1 / 0-2 style neighbours; 5+ goal games are dropped.",
+  },
+};
+
+export function explainFamily(family: SimilarityFamily | undefined) {
+  return FAMILY_EXPLAIN[family ?? "BASE"];
+}
+
 export type ScoreBucket = { scoreline: string; n: number };
 export type RegimeBuckets = {
   open: ScoreBucket[];
@@ -400,65 +435,6 @@ function csOdds(rows: FixtureOddsRow[], line: string): number | null {
   return r?.odds ?? null;
 }
 
-
-const FAMILY_DESCRIPTIONS: Record<string, { title: string; note: string }> = {
-  CLEAN_AWAY: {
-    title: "Deplasman Temiz Galibiyet",
-    note: "Deplasman favori, alt baremler ve KG Yok yönünde piyasa baskısı.",
-  },
-  AWAY_SHUTOUT: {
-    title: "Deplasman Gol Yemez",
-    note: "Deplasman takımı kalesini kapatırken tek farklı veya kontrollü galibiyet arar.",
-  },
-  HOME_BURST: {
-    title: "Ev Sahibi Baskın / Patlama",
-    note: "Ev sahibi belirgin favori, gollü ve yüksek handikaplı galibiyet beklentisi.",
-  },
-  HOME_NUDGE: {
-    title: "Ev Sahibi İtme / Sıkışık Galibiyet",
-    note: "Oranlar dengeli veya ev lehine hafif açılış, 2-1 veya 1-0 odaklı profil.",
-  },
-  OPEN_GAME: {
-    title: "Açık ve Karşılıklı Gollü",
-    note: "Her iki takımın gol bulacağı yüksek tempolu senaryo.",
-  },
-  OPEN_DRAW: {
-    title: "Gollü Beraberlik",
-    note: "KG Var ve üst baremler açıkken taraf oranlarının kilitlendiği profil.",
-  },
-  BASE: {
-    title: "Standart Profil",
-    note: "Belirgin tek yönlü sapma içermeyen temel piyasa dengesi.",
-  },
-};
-
-export function explainFamily(input: FixtureOddsRow[] | string | null | undefined): {
-  family: string;
-  title: string;
-  note: string;
-} {
-  const familyKey =
-    typeof input === "string"
-      ? input
-      : Array.isArray(input)
-      ? classifyFamily(input).family
-      : "BASE";
-
-  const desc = FAMILY_DESCRIPTIONS[familyKey] ?? {
-    title: familyKey,
-    note: "Piyasa oranlarına göre eşleşen profil.",
-  };
-
-  return {
-    family: familyKey,
-    title: desc.title,
-    note: desc.note,
-  };
-}
-
-
-
-
 /** K1–K6 nokta atışı. fixtureOdds içinde CS / HTFT varsa K6 da çalışır. */
 export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   family: SimilarityFamily;
@@ -536,154 +512,6 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
     return { family: p.family, primary: "1-1", backup: "2-1", reason: "CS 1-1 en kısa" };
   }
   return { family: p.family, primary: "2-1", backup: "1-1", reason: "BASE" };
-}
-
-// ============================================================================
-// V2: Piyasa-skorlamalı tahmin motoru (aile kurallarına değil, tüm marketlerin
-// birleşik implied-probability'sine dayanır). predictScoreline (V1, kural
-// tabanlı) dokunulmadan duruyor — ikisi paralel çalıştırılıp karşılaştırılabilir.
-// ============================================================================
-
-export type ScoredCorrectScore = {
-  h: number;
-  a: number;
-  /** Sadece CORRECT_SCORE marketinin devig edilmiş implied prob'u */
-  csProb: number;
-  /** 1X2/OU2.5/OU3.5/BTTS'ten gelen çarpan (kova düzeyinde, skor içi sıralamayı bozmaz) */
-  crossMarketMult: number;
-  /** Son, normalize edilmiş olasılık (tüm adaylar toplamı 1) */
-  prob: number;
-};
-
-export type V2Weights = {
-  /** 1X2 yönünün (H/D/A) etkisi */
-  dir: number;
-  /** Over/Under 2.5'in etkisi */
-  ou25: number;
-  /** Over/Under 3.5'in etkisi */
-  ou35: number;
-  /** BTTS Yes/No'nun etkisi */
-  btts: number;
-  /** Kaç toplam gole kadar aday üretilsin (0-0 .. maxTotal) */
-  maxTotal: number;
-};
-
-// TODO(kalibrasyon): Bu ağırlıklar şu an sadece 2 örnek maçla (Benfica-Estoril,
-// Londrina-Juventude) elle seçildi. Arşiv (events/match_odds, ~90k maç) üzerinde
-// backtest yapılıp grid/gradient search ile kalibre edilmeli — production'a
-// almadan önce bunu yapmadan güvenme.
-export const V2_DEFAULT_WEIGHTS: V2Weights = {
-  dir: 0.6,
-  ou25: 0.5,
-  ou35: 0.3,
-  btts: 0.4,
-  maxTotal: 6,
-};
-
-/** İki taraflı bir marketin (over/under, home/draw/away, btts yes/no) oranlarını devig eder. */
-function devigPair(a: number | null | undefined, b: number | null | undefined): [number, number] {
-  const pa = a ? 1 / a : 0;
-  const pb = b ? 1 / b : 0;
-  const sum = pa + pb || 1;
-  return [pa / sum, pb / sum];
-}
-
-function devigTriple(
-  a: number | null | undefined,
-  b: number | null | undefined,
-  c: number | null | undefined
-): [number, number, number] {
-  const pa = a ? 1 / a : 0;
-  const pb = b ? 1 / b : 0;
-  const pc = c ? 1 / c : 0;
-  const sum = pa + pb + pc || 1;
-  return [pa / sum, pb / sum, pc / sum];
-}
-
-/**
- * Tüm doğru skor adaylarını (0-0..maxTotal) piyasanın birleşik görüşüne göre
- * skorlayıp olasılığa göre sıralar. CS market taban alınır (kova-içi sıralamayı
- * o belirler); 1X2/OU2.5/OU3.5/BTTS ise her kovaya (yön/toplam/btts durumu) eşit
- * uygulanan çarpanlardır — yani "3-0 mı 4-0 mü" CS'e, "az mı çok mu gol" OU'ya kalır.
- */
-export function scoreCorrectScoreDistribution(
-  fixtureOdds: FixtureOddsRow[],
-  weights: V2Weights = V2_DEFAULT_WEIGHTS
-): ScoredCorrectScore[] {
-  const h = pickRow(fixtureOdds, STAGE1_MARKET, "H");
-  const d = pickRow(fixtureOdds, STAGE1_MARKET, "D");
-  const a = pickRow(fixtureOdds, STAGE1_MARKET, "A");
-  const over25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:2.5", "OVER:2.5");
-  const under25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME", "UNDER:2.5");
-  const over35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:3.5", "OVER:3.5");
-  const under35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME", "UNDER:3.5");
-  const bttsYes = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:YES");
-  const bttsNo = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:NO");
-
-  const [pH, pD, pA] = devigTriple(h?.odds, d?.odds, a?.odds);
-  const [pOver25, pUnder25] = devigPair(over25?.odds, under25?.odds);
-  const [pOver35, pUnder35] = devigPair(over35?.odds, under35?.odds);
-  const [pBttsYes, pBttsNo] = devigPair(bttsYes?.odds, bttsNo?.odds);
-
-  const raw: { h: number; a: number; csOddsVal: number }[] = [];
-  for (let hs = 0; hs <= weights.maxTotal; hs++) {
-    for (let as = 0; as <= weights.maxTotal; as++) {
-      if (hs + as > weights.maxTotal) continue;
-      const cs = csOdds(fixtureOdds, `${hs}:${as}`);
-      if (cs == null) continue;
-      raw.push({ h: hs, a: as, csOddsVal: cs });
-    }
-  }
-  if (!raw.length) return [];
-
-  const csProbSum = raw.reduce((s, r) => s + 1 / r.csOddsVal, 0) || 1;
-
-  const scored: ScoredCorrectScore[] = raw.map(({ h: hs, a: as, csOddsVal }) => {
-    const csProb = 1 / csOddsVal / csProbSum;
-    const total = hs + as;
-    const dirFactor = hs > as ? pH : hs === as ? pD : pA;
-    const ou25Factor = total >= 3 ? pOver25 : pUnder25;
-    const ou35Factor = total >= 4 ? pOver35 : pUnder35;
-    const bttsFactor = hs > 0 && as > 0 ? pBttsYes : pBttsNo;
-    // *3 / *2: kovanın "nötr" payı (1/3, 1/2) 1.0'a gelsin diye — nötr bir
-    // sinyal çarpanı değiştirmesin, sadece piyasanın normalden sapması etkilesin.
-    const crossMarketMult =
-      Math.pow(dirFactor * 3, weights.dir) *
-      Math.pow(ou25Factor * 2, weights.ou25) *
-      Math.pow(ou35Factor * 2, weights.ou35) *
-      Math.pow(bttsFactor * 2, weights.btts);
-    return { h: hs, a: as, csProb, crossMarketMult, prob: csProb * crossMarketMult };
-  });
-
-  const probSum = scored.reduce((s, c) => s + c.prob, 0) || 1;
-  const normalized = scored.map((c) => ({ ...c, prob: c.prob / probSum }));
-  normalized.sort((x, y) => y.prob - x.prob);
-  return normalized;
-}
-
-/**
- * predictScoreline (V1) ile aynı dönüş şeklinde (family/primary/backup/reason),
- * ama primary/backup aile kuralları yerine scoreCorrectScoreDistribution'ın
- * en olası 2 skorundan geliyor. `family` sadece etiketleme/loglama için
- * classifyFamily'den taşınıyor, karar mekanizmasına girmiyor.
- */
-export function predictScorelineV2(
-  fixtureOdds: FixtureOddsRow[],
-  weights: V2Weights = V2_DEFAULT_WEIGHTS
-): { family: SimilarityFamily; primary: string; backup: string; reason: string; top: ScoredCorrectScore[] } {
-  const p = classifyFamily(fixtureOdds);
-  const dist = scoreCorrectScoreDistribution(fixtureOdds, weights);
-  if (dist.length < 2) {
-    return { family: p.family, primary: "2-1", backup: "1-1", reason: "V2: CS verisi yetersiz, fallback", top: dist };
-  }
-  const [top1, top2] = dist;
-  return {
-    family: p.family,
-    primary: `${top1.h}-${top1.a}`,
-    backup: `${top2.h}-${top2.a}`,
-    reason: `V2 piyasa-skorlama: ${top1.h}-${top1.a}(%${(top1.prob * 100).toFixed(1)}) / ${top2.h}-${top2.a}(%${(top2.prob * 100).toFixed(1)})`,
-    top: dist,
-  };
 }
 
 /** Eski UNION/tüm-kod tarama — sadece geriye dönük uyumluluk. Production path findSimilarForBookmaker. */
