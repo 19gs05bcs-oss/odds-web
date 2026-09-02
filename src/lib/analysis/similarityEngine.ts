@@ -401,10 +401,13 @@ function csOdds(rows: FixtureOddsRow[], line: string): number | null {
 }
 
 
-export function explainFamily(fixtureOdds: FixtureOddsRow[]) {
-  return classifyFamily(fixtureOdds);
+export function explainFamily(input: FixtureOddsRow[] | string) {
+  if (typeof input === "string") {
+    // Eğer buraya string (family adı) geliyorsa, doğrudan dönebilir veya uygun formata sokabilirsiniz
+    return { family: input };
+  }
+  return classifyFamily(input);
 }
-
 
 
 /** K1–K6 nokta atışı. fixtureOdds içinde CS / HTFT varsa K6 da çalışır. */
