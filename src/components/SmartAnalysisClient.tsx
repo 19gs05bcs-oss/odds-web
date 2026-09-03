@@ -86,12 +86,21 @@ export function SmartAnalysisClient({
   const [fixturesLoading, setFixturesLoading] = useState(!!initialBulletinDate);
   const [oddsLoading, setOddsLoading] = useState(false);
   const [selectedFixtureId, setSelectedFixtureId] = useState<string | null>(null);
-  const [referenceBm, setReferenceBm] = useState(String(PREFERRED_BM));
+  // Çoklu referans BM: kullanıcının tıklama sırası korunur, sıralı (ardı ardına)
+  // hesaplama ve gösterim bu sırayla yapılır.
+  const [referenceBms, setReferenceBms] = useState<string[]>([String(PREFERRED_BM)]);
   const [error, setError] = useState<string | undefined>();
-  const [simState, setSimState] = useState<SimilarityCardState>({ status: "idle" });
+  // Her referans BM için ayrı sonuç kartı — bm id -> durum.
+  const [simResults, setSimResults] = useState<Record<string, SimilarityCardState>>({});
 
-  const bmNum = Number(referenceBm) || PREFERRED_BM;
-  const bmName = bookmakers.find((b) => b.id === referenceBm)?.name || "";
+  const toggleBm = useCallback((id: string) => {
+    setReferenceBms((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }, []);
+
+  const primaryBm = referenceBms[0] ?? String(PREFERRED_BM);
+  const bmNum = Number(primaryBm) || PREFERRED_BM;
   const selectedFixture = useMemo(
     () => fixtures.find((f) => f.match_id === selectedFixtureId) ?? null,
     [fixtures, selectedFixtureId],
@@ -104,12 +113,14 @@ export function SmartAnalysisClient({
   // Sunucudan gelen sıra = benzerlik skoruna göre artan (en benzer önce; bkz.
   // similarityEngine.ts ranked.sort). "date" seçilince tarihe göre (eski→yeni)
   // yeniden sıralıyoruz; "similarity" seçilince sunucudan geldiği sırayı koruyoruz.
-  const sortedArchiveRows = useMemo(() => {
-    const rows = simState.tableRows;
-    if (!rows?.length) return rows;
-    if (archiveSort === "similarity") return rows;
-    return [...rows].sort((a, b) => dateKey(a).localeCompare(dateKey(b)));
-  }, [simState.tableRows, archiveSort]);
+  const sortRows = useCallback(
+    (rows: (TableRow & { similarityScore?: number })[] | undefined) => {
+      if (!rows?.length) return rows;
+      if (archiveSort === "similarity") return rows;
+      return [...rows].sort((a, b) => dateKey(a).localeCompare(dateKey(b)));
+    },
+    [archiveSort],
+  );
 
   async function applyOddsPatches(
     patches: Array<Pick<FixtureRow, "match_id" | "odds" | "bookmakers" | "odds_count">>,
@@ -179,10 +190,11 @@ export function SmartAnalysisClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bulletinDate]);
 
-  const runSimilarity = useCallback(
-    async (force = false) => {
-      if (!selectedFixture?.match_id || !selectedFixture.odds?.length || !bmName) return;
-      setSimState({ status: "loading" });
+  const runSimilarityForBm = useCallback(
+    async (bmId: string, force = false) => {
+      const bmNameStr = bookmakers.find((b) => b.id === bmId)?.name;
+      if (!selectedFixture?.match_id || !selectedFixture.odds?.length || !bmNameStr) return;
+      setSimResults((prev) => ({ ...prev, [bmId]: { status: "loading" } }));
       try {
         const res = await fetch("/api/smart-analysis/similarity", {
           method: "POST",
@@ -190,8 +202,8 @@ export function SmartAnalysisClient({
           credentials: "include",
           body: JSON.stringify({
             eventId: selectedFixture.match_id,
-            bookmaker: bmName,
-            bookmakerId: bmNum,
+            bookmaker: bmNameStr,
+            bookmakerId: Number(bmId) || PREFERRED_BM,
             odds: selectedFixture.odds,
             force,
           }),
@@ -211,37 +223,109 @@ export function SmartAnalysisClient({
           prediction?: { primary: string; backup: string; reason: string } | null;
         };
         if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
-        setSimState({
-          status: "done",
-          matchedCount: j.matchedCount,
-          usedCodes: j.usedCodes,
-          tableRows: j.tableRows,
-          cached: j.cached,
-          computedAt: j.computedAt,
-          durationMs: j.durationMs,
-          family: j.family,
-          familyTitle: j.familyTitle,
-          familyNote: j.familyNote,
-          prediction: j.prediction ?? null,
-        });
+        setSimResults((prev) => ({
+          ...prev,
+          [bmId]: {
+            status: "done",
+            matchedCount: j.matchedCount,
+            usedCodes: j.usedCodes,
+            tableRows: j.tableRows,
+            cached: j.cached,
+            computedAt: j.computedAt,
+            durationMs: j.durationMs,
+            family: j.family,
+            familyTitle: j.familyTitle,
+            familyNote: j.familyNote,
+            prediction: j.prediction ?? null,
+          },
+        }));
       } catch (e) {
-        setSimState({ status: "error", error: e instanceof Error ? e.message : String(e) });
+        setSimResults((prev) => ({
+          ...prev,
+          [bmId]: { status: "error", error: e instanceof Error ? e.message : String(e) },
+        }));
       }
     },
-    [selectedFixture?.match_id, bmName],
+    [selectedFixture?.match_id, selectedFixture?.odds, bookmakers],
   );
 
-  // Maç veya referans bookmaker değişince otomatik hesapla — engine.ts artık
-  // hızlı (~10sn), bu yüzden manuel butona gerek yok; sadece force/recompute
-  // için buton kalıyor.
+  // Maç veya seçili referans BM listesi değişince, seçilen bookmaker'ları
+  // TEK TEK, sırayla (ardı ardına) hesaplıyoruz: her biri kendi kartında
+  // "loading" gösterip bitince sıradakine geçiyoruz — hepsi aynı anda
+  // paralel patlamıyor, kullanıcı sonuçları bet365 → altına bir sonraki →
+  // şeklinde akarken izleyebiliyor.
+  const bmsKey = referenceBms.join(",");
   useEffect(() => {
-    if (!selectedFixture?.odds?.length || !bmName) {
-      setSimState({ status: "idle" });
+    if (!selectedFixture?.odds?.length || !referenceBms.length) {
+      setSimResults({});
       return;
     }
-    void runSimilarity(false);
+    let cancelled = false;
+    (async () => {
+      for (const bmId of referenceBms) {
+        if (cancelled) return;
+        const bmNameStr = bookmakers.find((b) => b.id === bmId)?.name;
+        if (!bmNameStr) continue;
+        setSimResults((prev) => ({ ...prev, [bmId]: { status: "loading" } }));
+        try {
+          const res = await fetch("/api/smart-analysis/similarity", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              eventId: selectedFixture.match_id,
+              bookmaker: bmNameStr,
+              bookmakerId: Number(bmId) || PREFERRED_BM,
+              odds: selectedFixture.odds,
+              force: false,
+            }),
+          });
+          const j = (await res.json()) as {
+            ok?: boolean;
+            error?: string;
+            cached?: boolean;
+            computedAt?: string;
+            matchedCount?: number;
+            usedCodes?: string[];
+            durationMs?: number;
+            tableRows?: (TableRow & { similarityScore?: number })[];
+            family?: string;
+            familyTitle?: string;
+            familyNote?: string;
+            prediction?: { primary: string; backup: string; reason: string } | null;
+          };
+          if (cancelled) return;
+          if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
+          setSimResults((prev) => ({
+            ...prev,
+            [bmId]: {
+              status: "done",
+              matchedCount: j.matchedCount,
+              usedCodes: j.usedCodes,
+              tableRows: j.tableRows,
+              cached: j.cached,
+              computedAt: j.computedAt,
+              durationMs: j.durationMs,
+              family: j.family,
+              familyTitle: j.familyTitle,
+              familyNote: j.familyNote,
+              prediction: j.prediction ?? null,
+            },
+          }));
+        } catch (e) {
+          if (cancelled) return;
+          setSimResults((prev) => ({
+            ...prev,
+            [bmId]: { status: "error", error: e instanceof Error ? e.message : String(e) },
+          }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFixtureId, referenceBm, selectedFixture?.odds?.length, bmName]);
+  }, [selectedFixtureId, bmsKey, selectedFixture?.odds?.length]);
 
   return (
     <div className={styles.wrap}>
@@ -272,17 +356,6 @@ export function SmartAnalysisClient({
               </select>
             </label>
 
-            <label className={filterStyles.field}>
-              <span>Reference BM</span>
-              <select value={referenceBm} onChange={(e) => setReferenceBm(e.target.value)}>
-                {bookmakers.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <FixtureMatchStrip
               fixtures={fixtures}
               selectedId={selectedFixtureId}
@@ -291,6 +364,28 @@ export function SmartAnalysisClient({
               oddsLoading={oddsLoading}
               onSelect={setSelectedFixtureId}
             />
+          </div>
+        </div>
+
+        <div className={filterStyles.filterSection}>
+          <p className={filterStyles.filterSectionTitle}>
+            Reference BMs ({referenceBms.length} selected)
+          </p>
+          <p className={filterStyles.hint}>
+            Select one or more bookmakers — each runs one after another and its result appears
+            in its own section below, in the order you picked them.
+          </p>
+          <div className={styles.tabs}>
+            {bookmakers.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                className={referenceBms.includes(b.id) ? styles.tabActive : styles.tab}
+                onClick={() => toggleBm(b.id)}
+              >
+                {b.name}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -310,91 +405,120 @@ export function SmartAnalysisClient({
             </section>
           ) : null}
 
-          <section className={styles.card}>
-            <h3>Similar matches (multi-market)</h3>
-            <p className={styles.cardLead}>
-              Weighted similarity across every market this bookmaker quotes for this match (1X2,
-              O/U, AH, BTTS, HT/FT, DC).
-            </p>
+          {referenceBms.length ? (
+            <div className={filterStyles.field} role="group" aria-label="Archive sort">
+              <span>Sort</span>
+              <select
+                value={archiveSort}
+                onChange={(e) => setArchiveSort(e.target.value as ArchiveSortMode)}
+              >
+                <option value="date">Date (oldest → newest)</option>
+                <option value="similarity">Similarity (best match first)</option>
+              </select>
+            </div>
+          ) : null}
 
-            {simState.status === "idle" ? (
-              <p className={styles.empty}>Waiting for this match's odds to load…</p>
-            ) : null}
+          {referenceBms.length === 0 ? (
+            <p className={styles.empty}>Pick at least one reference bookmaker above.</p>
+          ) : null}
 
-            {simState.status === "loading" ? (
-              <LoadingBanner title="Loading match" subtitle="Please wait — computing similarity across all markets." long />
-            ) : null}
-
-            {simState.status === "error" ? (
-              <>
-                <p className={styles.error}>{simState.error}</p>
-                <button type="button" className={styles.primaryButton} onClick={() => void runSimilarity(false)}>
-                  Retry
-                </button>
-              </>
-            ) : null}
-
-            {simState.status === "done" ? (
-              <>
+          {referenceBms.map((bmId) => {
+            const bmNameStr = bookmakers.find((b) => b.id === bmId)?.name || bmId;
+            const simState: SimilarityCardState = simResults[bmId] ?? { status: "idle" };
+            const rows = sortRows(simState.tableRows);
+            return (
+              <section key={bmId} className={styles.card}>
+                <h3>{bmNameStr} — similar matches (multi-market)</h3>
                 <p className={styles.cardLead}>
-                  <strong>{simState.matchedCount}</strong> matched ·{" "}
-                  {simState.usedCodes?.length ?? 0} active codes
-                  {simState.durationMs != null ? ` · ${(simState.durationMs / 1000).toFixed(1)}s` : ""}
-                  {simState.cached ? " · cached" : ""}
-                  {simState.computedAt ? (
-                    <span className={styles.muted}> · computed {new Date(simState.computedAt).toLocaleString()}</span>
-                  ) : null}
+                  Weighted similarity across every market {bmNameStr} quotes for this match (1X2,
+                  O/U, AH, BTTS, HT/FT, DC).
                 </p>
-                {simState.familyTitle ? (
-                  <div
-                    className={
-                      simState.family === "BASE"
-                        ? `${styles.familyNote} ${styles.familyNoteBase}`
-                        : styles.familyNote
-                    }
-                    role="status"
-                  >
-                    <p className={styles.familyTitle}>{simState.familyTitle}</p>
-                    <p className={styles.familyBody}>{simState.familyNote}</p>
-                    {simState.prediction?.primary ? (
-                      <p className={styles.familyCall}>
-                        Distance call <strong>{simState.prediction.primary}</strong>
-                        {simState.prediction.backup ? (
-                          <>
-                            {" "}
-                            · alt <strong>{simState.prediction.backup}</strong>
-                          </>
-                        ) : null}
-                        {simState.prediction.reason ? (
-                          <span className={styles.muted}> — {simState.prediction.reason}</span>
-                        ) : null}
-                      </p>
-                    ) : null}
-                  </div>
+
+                {simState.status === "idle" ? (
+                  <p className={styles.empty}>Waiting for this match's odds to load…</p>
                 ) : null}
-                {simState.tableRows?.length ? (
+
+                {simState.status === "loading" ? (
+                  <LoadingBanner
+                    title={`Loading ${bmNameStr}`}
+                    subtitle="Please wait — computing similarity across all markets."
+                    long
+                  />
+                ) : null}
+
+                {simState.status === "error" ? (
                   <>
-                    <div className={filterStyles.field} role="group" aria-label="Archive sort">
-                      <span>Sort</span>
-                      <select
-                        value={archiveSort}
-                        onChange={(e) => setArchiveSort(e.target.value as ArchiveSortMode)}
-                      >
-                        <option value="date">Date (oldest → newest)</option>
-                        <option value="similarity">Similarity (best match first)</option>
-                      </select>
-                    </div>
-                    <AnalyzeTable rows={sortedArchiveRows ?? []} mode="archive" compact />
+                    <p className={styles.error}>{simState.error}</p>
+                    <button
+                      type="button"
+                      className={styles.primaryButton}
+                      onClick={() => void runSimilarityForBm(bmId, false)}
+                    >
+                      Retry
+                    </button>
                   </>
-                ) : (
-                  <p className={styles.empty}>No matches under the similarity threshold.</p>
-                )}
-                <button type="button" className={styles.secondaryButton} onClick={() => void runSimilarity(true)}>
-                  Recompute
-                </button>
-              </>
-            ) : null}
-          </section>
+                ) : null}
+
+                {simState.status === "done" ? (
+                  <>
+                    <p className={styles.cardLead}>
+                      <strong>{simState.matchedCount}</strong> matched ·{" "}
+                      {simState.usedCodes?.length ?? 0} active codes
+                      {simState.durationMs != null
+                        ? ` · ${(simState.durationMs / 1000).toFixed(1)}s`
+                        : ""}
+                      {simState.cached ? " · cached" : ""}
+                      {simState.computedAt ? (
+                        <span className={styles.muted}>
+                          {" "}
+                          · computed {new Date(simState.computedAt).toLocaleString()}
+                        </span>
+                      ) : null}
+                    </p>
+                    {simState.familyTitle ? (
+                      <div
+                        className={
+                          simState.family === "BASE"
+                            ? `${styles.familyNote} ${styles.familyNoteBase}`
+                            : styles.familyNote
+                        }
+                        role="status"
+                      >
+                        <p className={styles.familyTitle}>{simState.familyTitle}</p>
+                        <p className={styles.familyBody}>{simState.familyNote}</p>
+                        {simState.prediction?.primary ? (
+                          <p className={styles.familyCall}>
+                            Distance call <strong>{simState.prediction.primary}</strong>
+                            {simState.prediction.backup ? (
+                              <>
+                                {" "}
+                                · alt <strong>{simState.prediction.backup}</strong>
+                              </>
+                            ) : null}
+                            {simState.prediction.reason ? (
+                              <span className={styles.muted}> — {simState.prediction.reason}</span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {rows?.length ? (
+                      <AnalyzeTable rows={rows} mode="archive" compact />
+                    ) : (
+                      <p className={styles.empty}>No matches under the similarity threshold.</p>
+                    )}
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      onClick={() => void runSimilarityForBm(bmId, true)}
+                    >
+                      Recompute
+                    </button>
+                  </>
+                ) : null}
+              </section>
+            );
+          })}
         </>
       ) : null}
     </div>
