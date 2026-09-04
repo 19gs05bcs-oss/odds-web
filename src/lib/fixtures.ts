@@ -257,6 +257,11 @@ async function fetchBookmakersUncached(): Promise<BookmakerOption[]> {
     const names = await loadBookmakerNames();
     return [...names.entries()]
       .map(([id, name]) => ({ id, name }))
+      // fixture.bookmakers map'inde ismi çözülemeyen id'ler loadBookmakerNames
+      // içinde isim yerine kendi sayısal id'siyle dolduruluyor (ör. "1005",
+      // "1183") — bunlar gerçek bir bookmaker adı değil, dropdown'ın en
+      // başında anlamsız sayılar olarak çıkıyordu. Filtreleyip atıyoruz.
+      .filter(({ name }) => !/^\d+$/.test(name))
       .sort((a, b) => a.name.localeCompare(b.name, "en"));
   } catch (err) {
     console.error("listBookmakers error:", err);
