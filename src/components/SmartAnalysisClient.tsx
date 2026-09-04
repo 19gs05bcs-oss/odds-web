@@ -105,10 +105,6 @@ export function SmartAnalysisClient({
     () => fixtures.find((f) => f.match_id === selectedFixtureId) ?? null,
     [fixtures, selectedFixtureId],
   );
-  const selectedRow = useMemo(
-    () => (selectedFixture?.odds?.length ? fixtureToTableRow(selectedFixture, bmNum) : null),
-    [selectedFixture, bmNum],
-  );
 
   // Sunucudan gelen sıra = benzerlik skoruna göre artan (en benzer önce; bkz.
   // similarityEngine.ts ranked.sort). "date" seçilince tarihe göre (eski→yeni)
@@ -398,13 +394,6 @@ export function SmartAnalysisClient({
 
       {selectedFixture ? (
         <>
-          {selectedRow ? (
-            <section className={styles.card}>
-              <h3>Selected match odds</h3>
-              <AnalyzeTable rows={[selectedRow]} mode="bulletin" compact />
-            </section>
-          ) : null}
-
           {referenceBms.length ? (
             <div className={filterStyles.field} role="group" aria-label="Archive sort">
               <span>Sort</span>
@@ -426,16 +415,27 @@ export function SmartAnalysisClient({
             const bmNameStr = bookmakers.find((b) => b.id === bmId)?.name || bmId;
             const simState: SimilarityCardState = simResults[bmId] ?? { status: "idle" };
             const rows = sortRows(simState.tableRows);
+            // Her BM kendi açtığı oranı gösterir — eskiden tek bir global
+            // satır (hep ilk seçili BM'in oranı, pratikte hep bet365) tüm
+            // kartların üstünde tekrarlanıyordu. Artık her kart kendi
+            // bookmakerId'siyle hesaplanmış satırını gösteriyor.
+            const bmRow = fixtureToTableRow(selectedFixture, Number(bmId) || PREFERRED_BM);
             return (
               <section key={bmId} className={styles.card}>
                 <h3>{bmNameStr} — similar matches (multi-market)</h3>
+                {bmRow ? (
+                  <div className={styles.bmOpenedOdds}>
+                    <p className={styles.cardLead}>{bmNameStr} — odds for this match</p>
+                    <AnalyzeTable rows={[bmRow]} mode="bulletin" compact />
+                  </div>
+                ) : null}
                 <p className={styles.cardLead}>
                   Weighted similarity across every market {bmNameStr} quotes for this match (1X2,
                   O/U, AH, BTTS, HT/FT, DC).
                 </p>
 
                 {simState.status === "idle" ? (
-                  <p className={styles.empty}>Waiting for this match's odds to load…</p>
+                  <p className={styles.empty}>Waiting for this match&rsquo;s odds to load…</p>
                 ) : null}
 
                 {simState.status === "loading" ? (

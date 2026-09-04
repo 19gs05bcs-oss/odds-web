@@ -110,6 +110,12 @@
   margin-bottom: 0.85rem;
 }
 
+.bmOpenedOdds {
+  margin-bottom: 1rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px dashed var(--line);
+}
+
 .familyNote {
   border: 1px solid var(--line);
   border-radius: 10px;
