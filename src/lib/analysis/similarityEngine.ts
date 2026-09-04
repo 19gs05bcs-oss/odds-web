@@ -181,6 +181,7 @@ export type SimilarityResult = {
   buckets?: ScoreBucket[];
   regimes?: RegimeBuckets;
   prediction?: { primary: string; backup: string; reason: string };
+  predictionV2?: { primary: string; backup: string; reason: string; top: ScoredCorrectScore[]; goalTotals: GoalTotalBucket[] };
   board?: BoardCall;
   insights?: MarketInsight[];
   durationMs?: number;
@@ -192,6 +193,26 @@ function steamDir(row: FixtureOddsRow | null, min = 0.05): "DOWN" | "UP" | "FLAT
   if (row.odds <= row.opening - min) return "DOWN";
   if (row.odds >= row.opening + min) return "UP";
   return "FLAT";
+}
+
+function directionOf(scoreline: string): "HOME" | "AWAY" | "DRAW" {
+  const [hs, as] = scoreline.split("-").map(Number);
+  if (hs > as) return "HOME";
+  if (hs < as) return "AWAY";
+  return "DRAW";
+}
+
+// YENİ: sideSteam (ev/deplasman yönünde para akışı) hesaplanıyor ama önceden hiç
+// kullanılmıyordu — veto listesine "ev/deplasman kilidi yok" diye yazılıyor ama
+// open[0]/shut[0] seçimi saf frekansa göre yapıldığı için bu sinyali görmezden
+// geliyordu (ör. sideSteam=AWAY olsa bile frekansı yüksek bir ev skoru seçilebiliyordu).
+// Bu fonksiyon, bucket'ı sideSteam yönüyle uyumlu skorlar öne gelecek şekilde
+// yeniden sıralar (frekans sırasını bozmadan, sadece grup içi öncelik ekler).
+function orderByDirection(bucket: ScoreBucket[], sideSteam: "HOME" | "AWAY" | "NONE"): ScoreBucket[] {
+  if (sideSteam === "NONE") return bucket;
+  const matches = bucket.filter((b) => directionOf(b.scoreline) === sideSteam);
+  const rest = bucket.filter((b) => directionOf(b.scoreline) !== sideSteam);
+  return [...matches, ...rest];
 }
 
 /** Tek skor iddiası yok. İki rejim + steam uyumu okunur. */
@@ -242,15 +263,17 @@ export function readBoard(opts: {
 
   let call = pred.primary;
   let alt = pred.backup;
+  const openOrdered = orderByDirection(open, sideSteam);
+  const shutOrdered = orderByDirection(shut, sideSteam);
   if (stance === "SPLIT") {
-    call = open[0]?.scoreline ?? pred.primary;
-    alt = shut[0]?.scoreline ?? pred.backup;
+    call = openOrdered[0]?.scoreline ?? pred.primary;
+    alt = shutOrdered[0]?.scoreline ?? pred.backup;
   } else if (openShare >= 0.55) {
-    call = open[0]?.scoreline ?? pred.primary;
-    alt = open[1]?.scoreline ?? shut[0]?.scoreline ?? pred.backup;
+    call = openOrdered[0]?.scoreline ?? pred.primary;
+    alt = openOrdered[1]?.scoreline ?? shutOrdered[0]?.scoreline ?? pred.backup;
   } else {
-    call = shut[0]?.scoreline ?? pred.primary;
-    alt = shut[1]?.scoreline ?? open[0]?.scoreline ?? pred.backup;
+    call = shutOrdered[0]?.scoreline ?? pred.primary;
+    alt = shutOrdered[1]?.scoreline ?? openOrdered[0]?.scoreline ?? pred.backup;
   }
 
   const reason = [
@@ -519,6 +542,212 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   return { family: p.family, primary: "2-1", backup: "1-1", reason: "BASE" };
 }
 
+// ============================================================================
+// V2: Piyasa-skorlamalı tahmin motoru (aile kurallarına değil, tüm marketlerin
+// birleşik implied-probability'sine dayanır). predictScoreline (V1, kural
+// tabanlı) dokunulmadan duruyor — ikisi paralel çalıştırılıp karşılaştırılabilir.
+//
+// ÖNEMLİ: sabit bir "maxTotal" sınırıyla adaylar üretmiyoruz — bookmaker
+// FULL_TIME CORRECT_SCORE marketinde fiilen neyi fiyatlamışsa (bazılarında
+// 9-1/8-2/7-3'e kadar var, bazılarında sadece 4-4'e kadar) onu tarıyoruz. Yani
+// 7 gollü bir skor piyasada fiyatlanmışsa aday listesine giriyor, fiyatlanmamışsa
+// zaten piyasa da o ihtimale bir görüş bildirmemiş demektir.
+// ============================================================================
+
+export type ScoredCorrectScore = {
+  h: number;
+  a: number;
+  /** Sadece CORRECT_SCORE marketinin devig edilmiş implied prob'u */
+  csProb: number;
+  /** 1X2/OU2.5/OU3.5/BTTS'ten gelen çarpan (kova düzeyinde, skor içi sıralamayı bozmaz) */
+  crossMarketMult: number;
+  /** Son, normalize edilmiş olasılık (tüm adaylar toplamı 1) */
+  prob: number;
+};
+
+export type GoalTotalBucket = { total: number; prob: number };
+
+export type V2Weights = {
+  /** 1X2 yönünün (H/D/A) etkisi */
+  dir: number;
+  /** Over/Under 2.5'in etkisi */
+  ou25: number;
+  /** Over/Under 3.5'in etkisi */
+  ou35: number;
+  /** BTTS Yes/No'nun etkisi */
+  btts: number;
+  /** Sağlama amaçlı üst sınır — piyasa hatası/garip novelty bahisleri elemek için.
+      Gerçek aday üretimini kısıtlamaz, sadece aşırı uçları (ör. 15+ gol) filtreler. */
+  sanityMaxTotal: number;
+};
+
+// TODO(kalibrasyon): Bu ağırlıklar şu an sadece birkaç örnek maçla elle seçildi.
+// Arşiv (events/match_odds, ~90k maç) üzerinde backtest yapılıp grid/gradient
+// search ile kalibre edilmeli — production'a almadan önce bunu yapmadan güvenme.
+// calibrate_v2.py script'i bu amaçla hazırlandı.
+export const V2_DEFAULT_WEIGHTS: V2Weights = {
+  dir: 0.6,
+  ou25: 0.5,
+  ou35: 0.3,
+  btts: 0.4,
+  sanityMaxTotal: 12,
+};
+
+/** İki taraflı bir marketin (over/under, home/draw/away, btts yes/no) oranlarını devig eder. */
+function devigPair(a: number | null | undefined, b: number | null | undefined): [number, number] {
+  const pa = a ? 1 / a : 0;
+  const pb = b ? 1 / b : 0;
+  const sum = pa + pb || 1;
+  return [pa / sum, pb / sum];
+}
+
+function devigTriple(
+  a: number | null | undefined,
+  b: number | null | undefined,
+  c: number | null | undefined
+): [number, number, number] {
+  const pa = a ? 1 / a : 0;
+  const pb = b ? 1 / b : 0;
+  const pc = c ? 1 / c : 0;
+  const sum = pa + pb + pc || 1;
+  return [pa / sum, pb / sum, pc / sum];
+}
+
+/** fixtureOdds içindeki tüm FULL_TIME CORRECT_SCORE satırlarını (h,a,odds) olarak çıkarır. */
+function extractAllCorrectScores(
+  fixtureOdds: FixtureOddsRow[],
+  sanityMaxTotal: number
+): { h: number; a: number; odds: number }[] {
+  const out: { h: number; a: number; odds: number }[] = [];
+  for (const row of fixtureOdds) {
+    if (row.market !== "CORRECT_SCORE:FULL_TIME") continue;
+    if (!row.selection.startsWith("score:")) continue;
+    const parts = row.selection.split(":"); // ["score", "H", "A"]
+    if (parts.length !== 3) continue;
+    const h = Number(parts[1]);
+    const a = Number(parts[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(a) || h < 0 || a < 0) continue;
+    if (h + a > sanityMaxTotal) continue;
+    if (!Number.isFinite(row.odds) || row.odds <= 1) continue;
+    out.push({ h, a, odds: row.odds });
+  }
+  return out;
+}
+
+/**
+ * Tüm doğru skor adaylarını (bookmaker'ın fiilen fiyatladığı her h-a) piyasanın
+ * birleşik görüşüne göre skorlayıp olasılığa göre sıralar. CS market taban
+ * alınır (kova-içi sıralamayı o belirler); 1X2/OU2.5/OU3.5/BTTS ise her kovaya
+ * (yön/toplam/btts durumu) eşit uygulanan çarpanlardır — yani "3-0 mı 4-0 mü"
+ * CS'e, "az mı çok mu gol" OU'ya kalır. 7+ gollü kombinasyonlar dahil, piyasa
+ * fiyatlamışsa hiçbir üst sınırla kesilmez.
+ */
+export function scoreCorrectScoreDistribution(
+  fixtureOdds: FixtureOddsRow[],
+  weights: V2Weights = V2_DEFAULT_WEIGHTS
+): ScoredCorrectScore[] {
+  const h = pickRow(fixtureOdds, STAGE1_MARKET, "H");
+  const d = pickRow(fixtureOdds, STAGE1_MARKET, "D");
+  const a = pickRow(fixtureOdds, STAGE1_MARKET, "A");
+  const over25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:2.5", "OVER:2.5");
+  const under25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME", "UNDER:2.5");
+  const over35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:3.5", "OVER:3.5");
+  const under35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME", "UNDER:3.5");
+  const bttsYes = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:YES");
+  const bttsNo = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:NO");
+
+  const [pH, pD, pA] = devigTriple(h?.odds, d?.odds, a?.odds);
+  const [pOver25, pUnder25] = devigPair(over25?.odds, under25?.odds);
+  const [pOver35, pUnder35] = devigPair(over35?.odds, under35?.odds);
+  const [pBttsYes, pBttsNo] = devigPair(bttsYes?.odds, bttsNo?.odds);
+
+  const raw = extractAllCorrectScores(fixtureOdds, weights.sanityMaxTotal);
+  if (!raw.length) return [];
+
+  const csProbSum = raw.reduce((s, r) => s + 1 / r.odds, 0) || 1;
+
+  const scored2: ScoredCorrectScore[] = raw.map(({ h: hs, a: as, odds }) => {
+    const csProb = 1 / odds / csProbSum;
+    const total = hs + as;
+    const dirFactor = hs > as ? pH : hs === as ? pD : pA;
+    const ou25Factor = total >= 3 ? pOver25 : pUnder25;
+    const ou35Factor = total >= 4 ? pOver35 : pUnder35;
+    const bttsFactor = hs > 0 && as > 0 ? pBttsYes : pBttsNo;
+    // *3 / *2: kovanın "nötr" payı (1/3, 1/2) 1.0'a gelsin diye — nötr bir
+    // sinyal çarpanı değiştirmesin, sadece piyasanın normalden sapması etkilesin.
+    const crossMarketMult =
+      Math.pow(dirFactor * 3, weights.dir) *
+      Math.pow(ou25Factor * 2, weights.ou25) *
+      Math.pow(ou35Factor * 2, weights.ou35) *
+      Math.pow(bttsFactor * 2, weights.btts);
+    return { h: hs, a: as, csProb, crossMarketMult, prob: csProb * crossMarketMult };
+  });
+
+  const probSum = scored2.reduce((s, c) => s + c.prob, 0) || 1;
+  const normalized = scored2.map((c) => ({ ...c, prob: c.prob / probSum }));
+  normalized.sort((x, y) => y.prob - x.prob);
+  return normalized;
+}
+
+/**
+ * scoreCorrectScoreDistribution çıktısını toplam gol sayısına göre gruplar
+ * (0, 1, 2, ... N gol). "7 gollü bir maça da, 0-0/1-0'a da yakın olabilmeli"
+ * ihtiyacı için: bu, maçın olası toplam gol profilini (düşük mü yüksek mi
+ * skorlu olacağı) tek bakışta gösterir.
+ */
+export function goalTotalDistribution(fixtureOdds: FixtureOddsRow[], weights?: V2Weights): GoalTotalBucket[] {
+  const dist = scoreCorrectScoreDistribution(fixtureOdds, weights);
+  const byTotal = new Map<number, number>();
+  for (const c of dist) {
+    const t = c.h + c.a;
+    byTotal.set(t, (byTotal.get(t) ?? 0) + c.prob);
+  }
+  return Array.from(byTotal.entries())
+    .map(([total, prob]) => ({ total, prob }))
+    .sort((x, y) => x.total - y.total);
+}
+
+/**
+ * predictScoreline (V1) ile aynı dönüş şeklinde (family/primary/backup/reason),
+ * ama primary/backup aile kuralları yerine scoreCorrectScoreDistribution'ın
+ * en olası 2 skorundan geliyor. `family` sadece etiketleme/loglama için
+ * classifyFamily'den taşınıyor, karar mekanizmasına girmiyor.
+ */
+export function predictScorelineV2(
+  fixtureOdds: FixtureOddsRow[],
+  weights: V2Weights = V2_DEFAULT_WEIGHTS
+): {
+  family: SimilarityFamily;
+  primary: string;
+  backup: string;
+  reason: string;
+  top: ScoredCorrectScore[];
+  goalTotals: GoalTotalBucket[];
+} {
+  const p = classifyFamily(fixtureOdds);
+  const dist = scoreCorrectScoreDistribution(fixtureOdds, weights);
+  const goalTotals = goalTotalDistribution(fixtureOdds, weights);
+  if (dist.length < 2) {
+    return {
+      family: p.family,
+      primary: "2-1",
+      backup: "1-1",
+      reason: "V2: CS verisi yetersiz, fallback",
+      top: dist,
+      goalTotals,
+    };
+  }
+  const [top1, top2] = dist;
+  return {
+    family: p.family,
+    primary: `${top1.h}-${top1.a}`,
+    backup: `${top2.h}-${top2.a}`,
+    reason: `V2 piyasa-skorlama: ${top1.h}-${top1.a}(%${(top1.prob * 100).toFixed(1)}) / ${top2.h}-${top2.a}(%${(top2.prob * 100).toFixed(1)})`,
+    top: dist,
+    goalTotals,
+  };
+}
+
 /** Eski UNION/tüm-kod tarama — sadece geriye dönük uyumluluk. Production path findSimilarForBookmaker. */
 export function buildSimilarityQueries(opts: {
   bookmaker: string;
@@ -695,12 +924,11 @@ export async function findSimilarForBookmaker(opts: {
       AND (
         (market = 'OVER_UNDER:FULL_TIME:2.5' AND selection IN ('OVER:2.5','UNDER:2.5'))
         OR (market = 'OVER_UNDER:FULL_TIME:3.5' AND selection IN ('OVER:3.5','UNDER:3.5'))
-        OR (market = 'OVER_UNDER:FULL_TIME:4.5' AND selection IN ('OVER:4.5','UNDER:4.5'))
         OR (market = 'BOTH_TEAMS_TO_SCORE:FULL_TIME' AND selection IN ('btts:YES','btts:NO','YES','NO'))
         OR (market = 'HALF_FULL_TIME:FULL_TIME' AND selection IN ('htft:1/1','htft:X/X','htft:2/2','htft:1/2','htft:2/1','1/1','X/X','2/2','1/2','2/1'))
         OR (market = 'CORRECT_SCORE:FULL_TIME' AND selection IN (
           'score:1:0','score:2:0','score:2:1','score:3:0','score:3:1','score:3:2',
-          'score:1:1','score:2:2','score:0:1','score:0:2','score:1:2','score:1:3','score:3:1'
+          'score:1:1','score:2:2','score:0:0','score:0:1','score:0:2','score:1:2','score:1:3'
         ))
         OR (market = 'DRAW_NO_BET:FULL_TIME' AND selection IN ('H','A'))
         OR (market = 'HOME_DRAW_AWAY:SECOND_HALF' AND selection IN ('H','D','A'))
@@ -909,7 +1137,14 @@ export async function findSimilarForBookmaker(opts: {
     const tot = s.hs + s.as;
     const low = tot <= 1 || `${s.hs}-${s.as}` === "1-0" || `${s.hs}-${s.as}` === "0-0";
     const burst = tot >= 5;
-    if (burst) return false;
+    // YENİ: burst artık koşulsuz elenmiyor — sadece fixture'ın kendi OU sinyali
+    // gerçekten düşük gollü bir maça işaret ediyorsa (goalShut + uzun over oranı)
+    // 5+ gollü tarihsel komşular havuzdan çıkarılıyor. Aksi halde (fixture yüksek
+    // gollü bir profil gösteriyorsa) burst'ler havuzda kalmaya devam eder — "7 gollü
+    // maça da yakın olmalı" ihtiyacı tam olarak bu simetriyi gerektiriyor.
+    if (goalShut && ouClose != null && ouClose >= 2.2) {
+      if (burst) return false;
+    }
     if (goalOpen && ouClose != null && ouClose <= 1.62) {
       if (low) return false;
     }
@@ -1006,6 +1241,7 @@ export async function findSimilarForBookmaker(opts: {
     buckets,
     regimes,
     prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
+    predictionV2: predictScorelineV2(fixtureOdds),
     board,
     insights,
     durationMs: Date.now() - t0,
