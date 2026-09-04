@@ -12,52 +12,9 @@ const K_MIN = (weightsCfg as { k_min: number }).k_min;
 
 const STAGE1_MARKET = "HOME_DRAW_AWAY:FULL_TIME";
 const STAGE1_POOL = 250;
-const STAGE2_POOL = 12; // artık sadece samples icin degil, regime havuzu icin de kullaniliyor
+const STAGE2_POOL = 12;
 const BAND = 0.045;
-
-// --- YENİ: LIQ_BAND artık sabit değil, adaptif. Aday sayısı azsa gevşer, çoksa sıkılaşır. ---
-const LIQ_BAND_DEFAULT = 0.06;
-const LIQ_BAND_STEPS = [0.04, 0.05, 0.06, 0.08, 0.10, 0.12, 0.15];
-const LIQ_MIN_SAMPLE = 8; // bu adaydan azsa bir sonraki (daha geniş) adıma geç
-const LIQ_MAX_SAMPLE = 60; // bu adaydan çoksa bir önceki (daha sıkı) adıma geç
-
-// --- YENİ: steamDown/steamUp artık mutlak puan değil, yüzdesel eşik kullanıyor.
-// Eskiden odds<=opening-0.12 gibi mutlak eşikler, düşük oranlarda (ör. DNB 1.3) orantısız
-// katı, yüksek oranlarda (ör. DNB 8.0) orantısız gevşek davranıyordu.
-const STEAM_TRIGGER_PCT = 0.08; // fixture'da "steam var mı" tetikleme yüzdesi (eski ~0.15 karşılığı)
-const STEAM_MATCH_PCT = 0.06; // adayda "yeterince steam var mı" yüzdesi (eski ~0.12 karşılığı)
-const STEAM_TRIGGER_PCT_AH = 0.12; // Asian Handicap için biraz daha toleranslı (eski ~0.25)
-const STEAM_MATCH_PCT_AH = 0.10; // (eski ~0.20)
-
-// --- YENİ: CS 3:3 "gizli gol radarı" — 41K maçlık backtest (cs33_backtest.csv) sonucu eklendi.
-// CS 3:3 oranı açılıştan ≥%10 kısalırsa: 5+ gol %12.0 -> %15.5, Over 2.5 %48.4 -> %53.8 (n=13713 vs n=11755 yatay).
-// Not: 3-3 skorunun kendisi gelme ihtimali neredeyse sabit kalıyor (~%1.0 -> %1.2); sinyal skor değil, gol enflasyonu içindir.
-const CS33_STEAM_PCT = 0.10;
-
-// --- YENİ: CS 0:0 "kısır maç radarı" — aynı backtest ailesinden (0:0 hareketi tablosu).
-// CS 0:0 oranı açılıştan ≥%10 kısalırsa: 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3.
-// Ters yönde (0:0 ≥%10 uzarsa) tam tersi: 0-0 ihtimali düşük, Over/gol beklentisi artıyor — bu yönü ayrıca işaretlemiyoruz,
-// sadece kısalma yönü aksiyona bağlanıyor (Under 2.5 / BTTS NO).
-const CS00_STEAM_PCT = 0.10;
-
-// --- YENİ: Favori oranı drift (uzama) sinyali — 1X2 favori hareketi tablosundan.
-// Favori oranı açılıştan ≥%10 uzarsa (piyasa favoriden soğuyorsa): 0-0 %8.3, Under 2.5 %52.9'a çıkıyor.
-// Favori kısaldığında ise tam tersi (0-0 en düşük %6.5) — o yön ayrı bir "Over" sinyali olarak kodlanmadı, şimdilik
-// sadece istenen "favori uzarsa Under listesine al" kuralı uygulanıyor.
-const FAV_DRIFT_PCT = 0.10;
-
-// --- YENİ: HT/FT X/X (Berabere/Berabere) drift sinyali — favori MS1/MS2 filtresi.
-// X/X oranı açılıştan ≥%10 uzarsa (piyasa berabere ihtimalinden soğuyorsa):
-// beraberlik ihtimali %27 -> %19.6'ya düşüyor, favorinin kazanma ihtimali %47 -> %65.5'e çıkıyor.
-// Ayrıca aynı ailede: X/X uzarken 1/1 kısaldığında favori %62.9 kazanıyor ama sadece %10.8'i 2-1 bitiyor
-// (yani bu kombinasyon "temiz/dominant" galibiyet sinyalidir, 2-1/1-2 avı için KULLANILMAMALI).
-const XX_DRIFT_PCT = 0.10;
-
-// CS/HTFT ince ayarı icin core hatlar - liquid sorgusunda zaten cekiliyor
-const CS_CORE_LINES = [
-  "1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1", "3:2", "2:2", "1:3",
-];
-const HTFT_SELS = ["htft:1/1", "htft:X/X", "htft:2/2"] as const;
+const LIQ_BAND = 0.06;
 
 const LIQUID_1X2_DC_BTTS_MARKETS = new Set([
   "HOME_DRAW_AWAY:FULL_TIME",
@@ -188,39 +145,6 @@ export type BoardCall = {
   reason: string;
   csLadder: { score: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
   htft: { sel: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
-  // YENİ: kural-tabanlı uyarılar (şu an sadece CS 3:3 sinyali). UI'da rozet/banner olarak gösterilebilir.
-  alerts: string[];
-  cs33Signal: {
-    active: boolean; // >= CS33_STEAM_PCT kısaldı mı
-    pct: number | null; // kısalma yüzdesi (pozitif = kısaldı), veri yoksa null
-    odds: number | null;
-    opening: number | null;
-    note: string;
-  } | null;
-  cs00Signal: {
-    active: boolean; // >= CS00_STEAM_PCT kısaldı mı
-    pct: number | null; // kısalma yüzdesi (pozitif = kısaldı)
-    odds: number | null;
-    opening: number | null;
-    note: string;
-  } | null;
-  favDriftSignal: {
-    active: boolean; // favori >= FAV_DRIFT_PCT uzadı mı
-    side: "HOME" | "AWAY" | null;
-    pct: number | null; // uzama yüzdesi (pozitif = uzadı)
-    odds: number | null;
-    opening: number | null;
-    note: string;
-  } | null;
-  // YENİ: HT/FT X/X (Berabere/Berabere) drift sinyali — bkz. XX_DRIFT_PCT tanımı.
-  xxDriftSignal: {
-    active: boolean; // X/X >= XX_DRIFT_PCT uzadı mı
-    pct: number | null; // uzama yüzdesi (pozitif = uzadı)
-    odds: number | null;
-    opening: number | null;
-    oneOneSteam: "DOWN" | "UP" | "FLAT"; // 1/1 aynı anda ne yapıyor (kombinasyon teşhisi için)
-    note: string;
-  } | null;
 };
 
 export type MarketInsight = {
@@ -238,11 +162,9 @@ export type SimilarityResult = {
   buckets?: ScoreBucket[];
   regimes?: RegimeBuckets;
   prediction?: { primary: string; backup: string; reason: string };
-  predictionV2?: { primary: string; backup: string; reason: string; top: ScoredCorrectScore[]; goalTotals: GoalTotalBucket[] };
   board?: BoardCall;
   insights?: MarketInsight[];
   durationMs?: number;
-  usedLiqBand?: number; // YENİ: adaptif aramanın sonunda kullanılan LIQ_BAND değeri (şeffaflık için)
 };
 
 function steamDir(row: FixtureOddsRow | null, min = 0.05): "DOWN" | "UP" | "FLAT" {
@@ -250,32 +172,6 @@ function steamDir(row: FixtureOddsRow | null, min = 0.05): "DOWN" | "UP" | "FLAT
   if (row.odds <= row.opening - min) return "DOWN";
   if (row.odds >= row.opening + min) return "UP";
   return "FLAT";
-}
-
-// Pozitif = kısaldı (odds < opening), negatif = uzadı. null = opening bilgisi yok.
-function steamPct(row: FixtureOddsRow | null): number | null {
-  if (!row || row.opening == null || row.opening <= 0) return null;
-  return (row.opening - row.odds) / row.opening;
-}
-
-function directionOf(scoreline: string): "HOME" | "AWAY" | "DRAW" {
-  const [hs, as] = scoreline.split("-").map(Number);
-  if (hs > as) return "HOME";
-  if (hs < as) return "AWAY";
-  return "DRAW";
-}
-
-// YENİ: sideSteam (ev/deplasman yönünde para akışı) hesaplanıyor ama önceden hiç
-// kullanılmıyordu — veto listesine "ev/deplasman kilidi yok" diye yazılıyor ama
-// open[0]/shut[0] seçimi saf frekansa göre yapıldığı için bu sinyali görmezden
-// geliyordu (ör. sideSteam=AWAY olsa bile frekansı yüksek bir ev skoru seçilebiliyordu).
-// Bu fonksiyon, bucket'ı sideSteam yönüyle uyumlu skorlar öne gelecek şekilde
-// yeniden sıralar (frekans sırasını bozmadan, sadece grup içi öncelik ekler).
-function orderByDirection(bucket: ScoreBucket[], sideSteam: "HOME" | "AWAY" | "NONE"): ScoreBucket[] {
-  if (sideSteam === "NONE") return bucket;
-  const matches = bucket.filter((b) => directionOf(b.scoreline) === sideSteam);
-  const rest = bucket.filter((b) => directionOf(b.scoreline) !== sideSteam);
-  return [...matches, ...rest];
 }
 
 /** Tek skor iddiası yok. İki rejim + steam uyumu okunur. */
@@ -315,123 +211,6 @@ export function readBoard(opts: {
   if (sideSteam === "HOME") veto.push("0-1 / 1-3 dep kilidi yok");
   if (side === "PICKEM") veto.push("tek taraf kilidi yok");
 
-  // --- YENİ: CS 3:3 gol enflasyonu sinyali (bkz. CS33_STEAM_PCT tanımı) ---
-  // GÜNCELLEME: artık tek başına CS hareketiyle ateşlenmiyor. CORRECT_SCORE pazarı
-  // isLiquidCode() tarafından "liquid" sayılmıyor (bkz. dosya başı) — tek bir kitapçının
-  // CS hattındaki %10 kısalma, ana pazarlardan mekanik türeme veya düşük likidite
-  // gürültüsü olabilir. Bu yüzden CS33 sinyali artık OU2.5 (likit pazar) AYNI YÖNDE
-  // (goalSteam === "OPEN", yani Over favorileniyor) teyit etmedikçe aktif olmuyor —
-  // "çift onaylı" bir eşik. Not: bu daha sıkı eşiğin kendi izole isabet oranı ayrıca
-  // backtest edilmedi; aşağıdaki %'ler ham (OU teyitsiz) CS33_STEAM_PCT grubuna aittir,
-  // gerçek (OU-teyitli) alt-küme muhtemelen daha yüksek isabetli ama teyit edilmemiştir.
-  const cs33Row =
-    pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:3:3") ||
-    opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:3:3") ||
-    null;
-  const cs33Pct = steamPct(cs33Row);
-  const cs33RawTrigger = cs33Pct != null && cs33Pct >= CS33_STEAM_PCT;
-  const cs33Confirmed = goalSteam === "OPEN";
-  const cs33Active = cs33RawTrigger && cs33Confirmed;
-  const cs33Signal: BoardCall["cs33Signal"] = cs33Row
-    ? {
-        active: cs33Active,
-        pct: cs33Pct,
-        odds: cs33Row.odds,
-        opening: cs33Row.opening,
-        note: cs33Active
-          ? `CS 3:3 oranı açılıştan %${(cs33Pct! * 100).toFixed(1)} kısaldı VE OU2.5 (likit pazar) aynı yönde (Over favori) teyit ediyor — ham backtestte (n=13713, OU teyidi aranmadan) bu grupta 5+ gol %15.5 (baz %12.0) ve Over 2.5 %53.8 (baz %48.4) çıkıyor. Çift onay isabeti ayrıca ölçülmedi, muhtemelen daha yüksek. 3-3'ün kendisi gelme ihtimali ~sabit (%1.2); sinyal "gollü kaos" için, doğrudan skor için değil.`
-          : cs33RawTrigger
-            ? "CS 3:3 kısaldı ama OU2.5 aynı yönde teyit etmiyor — tek başına düşük likiditeli CS hareketine güvenilmiyor, uyarı bastırıldı."
-            : "CS 3:3 hareketi eşik altında (uyarı yok).",
-      }
-    : null;
-
-  // --- YENİ: CS 0:0 kısır maç sinyali (bkz. CS00_STEAM_PCT tanımı) ---
-  // Aynı gerekçeyle (CS pazarı non-liquid) OU2.5 aynı yönde (goalSteam === "SHUT",
-  // yani Under favorileniyor) teyit etmedikçe aktif olmuyor.
-  const cs00Row =
-    pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:0:0") ||
-    opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:0:0") ||
-    null;
-  const cs00Pct = steamPct(cs00Row);
-  const cs00RawTrigger = cs00Pct != null && cs00Pct >= CS00_STEAM_PCT;
-  const cs00Confirmed = goalSteam === "SHUT";
-  const cs00Active = cs00RawTrigger && cs00Confirmed;
-  const cs00Signal: BoardCall["cs00Signal"] = cs00Row
-    ? {
-        active: cs00Active,
-        pct: cs00Pct,
-        odds: cs00Row.odds,
-        opening: cs00Row.opening,
-        note: cs00Active
-          ? `CS 0:0 oranı açılıştan %${(cs00Pct! * 100).toFixed(1)} kısaldı VE OU2.5 (likit pazar) aynı yönde (Under favori) teyit ediyor — ham backtestte (OU teyidi aranmadan) 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3'e çıkıyor. Çift onay isabeti ayrıca ölçülmedi, muhtemelen daha yüksek. Bu maçlarda %51.5 ihtimalle BTTS NO gerçekleşiyor; Over 2.5 / BTTS YES önerilmemeli.`
-          : cs00RawTrigger
-            ? "CS 0:0 kısaldı ama OU2.5 aynı yönde teyit etmiyor — tek başına düşük likiditeli CS hareketine güvenilmiyor, uyarı bastırıldı."
-            : "CS 0:0 hareketi eşik altında (uyarı yok).",
-      }
-    : null;
-
-  // --- YENİ: favori oranı drift (uzama) sinyali (bkz. FAV_DRIFT_PCT tanımı) ---
-  const favSide: "HOME" | "AWAY" | null = p.h != null || p.a != null ? (Hc <= Ac ? "HOME" : "AWAY") : null;
-  const favRow = favSide === "HOME" ? p.h : favSide === "AWAY" ? p.a : null;
-  const favPct = steamPct(favRow); // pozitif = favori kısaldı
-  const favDriftPct = favPct != null ? -favPct : null; // pozitif = favori uzadı (drift)
-  const favDriftActive = favDriftPct != null && favDriftPct >= FAV_DRIFT_PCT;
-  const favDriftSignal: BoardCall["favDriftSignal"] = favRow
-    ? {
-        active: favDriftActive,
-        side: favSide,
-        pct: favDriftPct,
-        odds: favRow.odds,
-        opening: favRow.opening,
-        note: favDriftActive
-          ? `Favori (${favSide}) oranı açılıştan %${(favDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta 0-0 ihtimali %8.3, Under 2.5 %52.9'a çıkıyor. Sürpriz gol düellosu değil, favorinin kilit açamadığı bir "alt/kısır" senaryosu daha olası.`
-          : "Favori oranı hareketi eşik altında (uyarı yok).",
-      }
-    : null;
-
-  // --- YENİ: HT/FT X/X (Berabere/Berabere) drift sinyali (bkz. XX_DRIFT_PCT tanımı) ---
-  const xxRow = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:X/X");
-  const xxPct = steamPct(xxRow); // pozitif = kısaldı
-  const xxDriftPct = xxPct != null ? -xxPct : null; // pozitif = uzadı (drift)
-  const xxDriftActive = xxDriftPct != null && xxDriftPct >= XX_DRIFT_PCT;
-  const oneOneRowForXx = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:1/1");
-  const oneOneSteamForXx = steamDir(oneOneRowForXx, 0.04);
-  const xxDriftSignal: BoardCall["xxDriftSignal"] = xxRow
-    ? {
-        active: xxDriftActive,
-        pct: xxDriftPct,
-        odds: xxRow.odds,
-        opening: xxRow.opening,
-        oneOneSteam: oneOneSteamForXx,
-        note: xxDriftActive
-          ? `X/X (Berabere/Berabere) oranı açılıştan %${(xxDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta beraberlik ihtimali %27 -> %19.6'ya düşüyor, favorinin kazanma ihtimali %47 -> %65.5'e çıkıyor. Tek başına ~%65 isabetli MS (favori) sinyali.${
-              oneOneSteamForXx === "DOWN"
-                ? " Aynı anda 1/1 de kısalıyor — bu kombinasyonda favori %62.9 kazanıyor ama sadece %10.8'i 2-1/1-2 bitiyor: 'temiz/dominant' galibiyet sinyali, 2-1 avı için kullanılmamalı."
-                : ""
-            }`
-          : "X/X hareketi eşik altında (uyarı yok).",
-      }
-    : null;
-
-  const alerts: string[] = [];
-  if (cs33Active) {
-    alerts.push("CS 3:3 shortening + OU2.5 confirmed → Over 2.5 / BTTS probability increases");
-  }
-  if (cs00Active) {
-    alerts.push("CS 0:0 shortening + OU2.5 confirmed → Under 2.5 / BTTS NO probability increases");
-  }
-  if (favDriftActive) {
-    alerts.push(`Favourite (${favSide}) odds drifting → low-scoring/Under match probability increases`);
-  }
-  if (xxDriftActive) {
-    alerts.push(
-      `X/X drifting → favourite win probability rises to ~65.5%${
-        oneOneSteamForXx === "DOWN" ? " (1/1 also shortening → dominant win, not a 2-1 scenario)" : ""
-      }`,
-    );
-  }
-
   const conflict =
     (sideSteam === "AWAY" && goalSteam === "SHUT") ||
     (goalSteam === "FLAT" && Math.abs(openShare - 0.5) < 0.2) ||
@@ -443,17 +222,15 @@ export function readBoard(opts: {
 
   let call = pred.primary;
   let alt = pred.backup;
-  const openOrdered = orderByDirection(open, sideSteam);
-  const shutOrdered = orderByDirection(shut, sideSteam);
   if (stance === "SPLIT") {
-    call = openOrdered[0]?.scoreline ?? pred.primary;
-    alt = shutOrdered[0]?.scoreline ?? pred.backup;
+    call = open[0]?.scoreline ?? pred.primary;
+    alt = shut[0]?.scoreline ?? pred.backup;
   } else if (openShare >= 0.55) {
-    call = openOrdered[0]?.scoreline ?? pred.primary;
-    alt = openOrdered[1]?.scoreline ?? shutOrdered[0]?.scoreline ?? pred.backup;
+    call = open[0]?.scoreline ?? pred.primary;
+    alt = open[1]?.scoreline ?? shut[0]?.scoreline ?? pred.backup;
   } else {
-    call = shutOrdered[0]?.scoreline ?? pred.primary;
-    alt = shutOrdered[1]?.scoreline ?? openOrdered[0]?.scoreline ?? pred.backup;
+    call = shut[0]?.scoreline ?? pred.primary;
+    alt = shut[1]?.scoreline ?? open[0]?.scoreline ?? pred.backup;
   }
 
   const reason = [
@@ -464,29 +241,22 @@ export function readBoard(opts: {
     `duruş ${stance}`,
   ].join(" · ");
 
-  const csLadder: BoardCall["csLadder"] = (() => {
-    const out: BoardCall["csLadder"] = [];
-    for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
-      const row =
-        pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
-        opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`) ||
-        null;
-      if (!row) continue;
-      out.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
-    }
-    out.sort((a, b) => a.odds - b.odds);
-    return out;
-  })();
+  const csLadder: BoardCall["csLadder"] = [];
+  for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
+    const row =
+      pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
+      opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`);
+    if (!row) continue;
+    csLadder.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
+  }
+  csLadder.sort((a, b) => a.odds - b.odds);
 
-  const htft: BoardCall["htft"] = (() => {
-    const out: BoardCall["htft"] = [];
-    for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
-      const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
-      if (!row) continue;
-      out.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
-    }
-    return out;
-  })();
+  const htft: BoardCall["htft"] = [];
+  for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
+    const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
+    if (!row) continue;
+    htft.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
+  }
 
   return {
     stance,
@@ -504,13 +274,30 @@ export function readBoard(opts: {
     alt,
     veto,
     reason,
-    csLadder,
-    htft,
-    alerts,
-    cs33Signal,
-    cs00Signal,
-    favDriftSignal,
-    xxDriftSignal,
+    csLadder: (() => {
+      const out: BoardCall["csLadder"] = [];
+      for (const line of ["1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1"]) {
+        const row =
+          pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) ||
+          opts.fixtureOdds.find(
+            (x) => x.market.includes("CORRECT_SCORE") && x.selection === `score:${line}`,
+          ) ||
+          null;
+        if (!row) continue;
+        out.push({ score: line.replace(":", "-"), odds: row.odds, steam: steamDir(row, 0.04) });
+      }
+      out.sort((a, b) => a.odds - b.odds);
+      return out;
+    })(),
+    htft: (() => {
+      const out: BoardCall["htft"] = [];
+      for (const sel of ["htft:1/1", "htft:X/1", "htft:2/2", "htft:X/X"]) {
+        const row = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel);
+        if (!row) continue;
+        out.push({ sel, odds: row.odds, steam: steamDir(row, 0.04) });
+      }
+      return out;
+    })(),
   };
 }
 
@@ -727,212 +514,6 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   return { family: p.family, primary: "2-1", backup: "1-1", reason: "BASE" };
 }
 
-// ============================================================================
-// V2: Piyasa-skorlamalı tahmin motoru (aile kurallarına değil, tüm marketlerin
-// birleşik implied-probability'sine dayanır). predictScoreline (V1, kural
-// tabanlı) dokunulmadan duruyor — ikisi paralel çalıştırılıp karşılaştırılabilir.
-//
-// ÖNEMLİ: sabit bir "maxTotal" sınırıyla adaylar üretmiyoruz — bookmaker
-// FULL_TIME CORRECT_SCORE marketinde fiilen neyi fiyatlamışsa (bazılarında
-// 9-1/8-2/7-3'e kadar var, bazılarında sadece 4-4'e kadar) onu tarıyoruz. Yani
-// 7 gollü bir skor piyasada fiyatlanmışsa aday listesine giriyor, fiyatlanmamışsa
-// zaten piyasa da o ihtimale bir görüş bildirmemiş demektir.
-// ============================================================================
-
-export type ScoredCorrectScore = {
-  h: number;
-  a: number;
-  /** Sadece CORRECT_SCORE marketinin devig edilmiş implied prob'u */
-  csProb: number;
-  /** 1X2/OU2.5/OU3.5/BTTS'ten gelen çarpan (kova düzeyinde, skor içi sıralamayı bozmaz) */
-  crossMarketMult: number;
-  /** Son, normalize edilmiş olasılık (tüm adaylar toplamı 1) */
-  prob: number;
-};
-
-export type GoalTotalBucket = { total: number; prob: number };
-
-export type V2Weights = {
-  /** 1X2 yönünün (H/D/A) etkisi */
-  dir: number;
-  /** Over/Under 2.5'in etkisi */
-  ou25: number;
-  /** Over/Under 3.5'in etkisi */
-  ou35: number;
-  /** BTTS Yes/No'nun etkisi */
-  btts: number;
-  /** Sağlama amaçlı üst sınır — piyasa hatası/garip novelty bahisleri elemek için.
-      Gerçek aday üretimini kısıtlamaz, sadece aşırı uçları (ör. 15+ gol) filtreler. */
-  sanityMaxTotal: number;
-};
-
-// TODO(kalibrasyon): Bu ağırlıklar şu an sadece birkaç örnek maçla elle seçildi.
-// Arşiv (events/match_odds, ~90k maç) üzerinde backtest yapılıp grid/gradient
-// search ile kalibre edilmeli — production'a almadan önce bunu yapmadan güvenme.
-// calibrate_v2.py script'i bu amaçla hazırlandı.
-export const V2_DEFAULT_WEIGHTS: V2Weights = {
-  dir: 0.6,
-  ou25: 0.5,
-  ou35: 0.3,
-  btts: 0.4,
-  sanityMaxTotal: 12,
-};
-
-/** İki taraflı bir marketin (over/under, home/draw/away, btts yes/no) oranlarını devig eder. */
-function devigPair(a: number | null | undefined, b: number | null | undefined): [number, number] {
-  const pa = a ? 1 / a : 0;
-  const pb = b ? 1 / b : 0;
-  const sum = pa + pb || 1;
-  return [pa / sum, pb / sum];
-}
-
-function devigTriple(
-  a: number | null | undefined,
-  b: number | null | undefined,
-  c: number | null | undefined
-): [number, number, number] {
-  const pa = a ? 1 / a : 0;
-  const pb = b ? 1 / b : 0;
-  const pc = c ? 1 / c : 0;
-  const sum = pa + pb + pc || 1;
-  return [pa / sum, pb / sum, pc / sum];
-}
-
-/** fixtureOdds içindeki tüm FULL_TIME CORRECT_SCORE satırlarını (h,a,odds) olarak çıkarır. */
-function extractAllCorrectScores(
-  fixtureOdds: FixtureOddsRow[],
-  sanityMaxTotal: number
-): { h: number; a: number; odds: number }[] {
-  const out: { h: number; a: number; odds: number }[] = [];
-  for (const row of fixtureOdds) {
-    if (row.market !== "CORRECT_SCORE:FULL_TIME") continue;
-    if (!row.selection.startsWith("score:")) continue;
-    const parts = row.selection.split(":"); // ["score", "H", "A"]
-    if (parts.length !== 3) continue;
-    const h = Number(parts[1]);
-    const a = Number(parts[2]);
-    if (!Number.isFinite(h) || !Number.isFinite(a) || h < 0 || a < 0) continue;
-    if (h + a > sanityMaxTotal) continue;
-    if (!Number.isFinite(row.odds) || row.odds <= 1) continue;
-    out.push({ h, a, odds: row.odds });
-  }
-  return out;
-}
-
-/**
- * Tüm doğru skor adaylarını (bookmaker'ın fiilen fiyatladığı her h-a) piyasanın
- * birleşik görüşüne göre skorlayıp olasılığa göre sıralar. CS market taban
- * alınır (kova-içi sıralamayı o belirler); 1X2/OU2.5/OU3.5/BTTS ise her kovaya
- * (yön/toplam/btts durumu) eşit uygulanan çarpanlardır — yani "3-0 mı 4-0 mü"
- * CS'e, "az mı çok mu gol" OU'ya kalır. 7+ gollü kombinasyonlar dahil, piyasa
- * fiyatlamışsa hiçbir üst sınırla kesilmez.
- */
-export function scoreCorrectScoreDistribution(
-  fixtureOdds: FixtureOddsRow[],
-  weights: V2Weights = V2_DEFAULT_WEIGHTS
-): ScoredCorrectScore[] {
-  const h = pickRow(fixtureOdds, STAGE1_MARKET, "H");
-  const d = pickRow(fixtureOdds, STAGE1_MARKET, "D");
-  const a = pickRow(fixtureOdds, STAGE1_MARKET, "A");
-  const over25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:2.5", "OVER:2.5");
-  const under25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME", "UNDER:2.5");
-  const over35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:3.5", "OVER:3.5");
-  const under35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME", "UNDER:3.5");
-  const bttsYes = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:YES");
-  const bttsNo = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:NO");
-
-  const [pH, pD, pA] = devigTriple(h?.odds, d?.odds, a?.odds);
-  const [pOver25, pUnder25] = devigPair(over25?.odds, under25?.odds);
-  const [pOver35, pUnder35] = devigPair(over35?.odds, under35?.odds);
-  const [pBttsYes, pBttsNo] = devigPair(bttsYes?.odds, bttsNo?.odds);
-
-  const raw = extractAllCorrectScores(fixtureOdds, weights.sanityMaxTotal);
-  if (!raw.length) return [];
-
-  const csProbSum = raw.reduce((s, r) => s + 1 / r.odds, 0) || 1;
-
-  const scored2: ScoredCorrectScore[] = raw.map(({ h: hs, a: as, odds }) => {
-    const csProb = 1 / odds / csProbSum;
-    const total = hs + as;
-    const dirFactor = hs > as ? pH : hs === as ? pD : pA;
-    const ou25Factor = total >= 3 ? pOver25 : pUnder25;
-    const ou35Factor = total >= 4 ? pOver35 : pUnder35;
-    const bttsFactor = hs > 0 && as > 0 ? pBttsYes : pBttsNo;
-    // *3 / *2: kovanın "nötr" payı (1/3, 1/2) 1.0'a gelsin diye — nötr bir
-    // sinyal çarpanı değiştirmesin, sadece piyasanın normalden sapması etkilesin.
-    const crossMarketMult =
-      Math.pow(dirFactor * 3, weights.dir) *
-      Math.pow(ou25Factor * 2, weights.ou25) *
-      Math.pow(ou35Factor * 2, weights.ou35) *
-      Math.pow(bttsFactor * 2, weights.btts);
-    return { h: hs, a: as, csProb, crossMarketMult, prob: csProb * crossMarketMult };
-  });
-
-  const probSum = scored2.reduce((s, c) => s + c.prob, 0) || 1;
-  const normalized = scored2.map((c) => ({ ...c, prob: c.prob / probSum }));
-  normalized.sort((x, y) => y.prob - x.prob);
-  return normalized;
-}
-
-/**
- * scoreCorrectScoreDistribution çıktısını toplam gol sayısına göre gruplar
- * (0, 1, 2, ... N gol). "7 gollü bir maça da, 0-0/1-0'a da yakın olabilmeli"
- * ihtiyacı için: bu, maçın olası toplam gol profilini (düşük mü yüksek mi
- * skorlu olacağı) tek bakışta gösterir.
- */
-export function goalTotalDistribution(fixtureOdds: FixtureOddsRow[], weights?: V2Weights): GoalTotalBucket[] {
-  const dist = scoreCorrectScoreDistribution(fixtureOdds, weights);
-  const byTotal = new Map<number, number>();
-  for (const c of dist) {
-    const t = c.h + c.a;
-    byTotal.set(t, (byTotal.get(t) ?? 0) + c.prob);
-  }
-  return Array.from(byTotal.entries())
-    .map(([total, prob]) => ({ total, prob }))
-    .sort((x, y) => x.total - y.total);
-}
-
-/**
- * predictScoreline (V1) ile aynı dönüş şeklinde (family/primary/backup/reason),
- * ama primary/backup aile kuralları yerine scoreCorrectScoreDistribution'ın
- * en olası 2 skorundan geliyor. `family` sadece etiketleme/loglama için
- * classifyFamily'den taşınıyor, karar mekanizmasına girmiyor.
- */
-export function predictScorelineV2(
-  fixtureOdds: FixtureOddsRow[],
-  weights: V2Weights = V2_DEFAULT_WEIGHTS
-): {
-  family: SimilarityFamily;
-  primary: string;
-  backup: string;
-  reason: string;
-  top: ScoredCorrectScore[];
-  goalTotals: GoalTotalBucket[];
-} {
-  const p = classifyFamily(fixtureOdds);
-  const dist = scoreCorrectScoreDistribution(fixtureOdds, weights);
-  const goalTotals = goalTotalDistribution(fixtureOdds, weights);
-  if (dist.length < 2) {
-    return {
-      family: p.family,
-      primary: "2-1",
-      backup: "1-1",
-      reason: "V2: CS verisi yetersiz, fallback",
-      top: dist,
-      goalTotals,
-    };
-  }
-  const [top1, top2] = dist;
-  return {
-    family: p.family,
-    primary: `${top1.h}-${top1.a}`,
-    backup: `${top2.h}-${top2.a}`,
-    reason: `V2 piyasa-skorlama: ${top1.h}-${top1.a}(%${(top1.prob * 100).toFixed(1)}) / ${top2.h}-${top2.a}(%${(top2.prob * 100).toFixed(1)})`,
-    top: dist,
-    goalTotals,
-  };
-}
-
 /** Eski UNION/tüm-kod tarama — sadece geriye dönük uyumluluk. Production path findSimilarForBookmaker. */
 export function buildSimilarityQueries(opts: {
   bookmaker: string;
@@ -994,23 +575,6 @@ export function buildSimilarityQueries(opts: {
 function rel(a: number, b: number): number {
   if (!b) return 1;
   return Math.abs(a - b) / b;
-}
-
-// Yüzdesel steam yönü tespiti — steamDown/steamUp'ın yerini alıyor.
-// pct: opening'e göre yüzde kaç düşmüş/artmış olmalı (0.08 = %8).
-function steamDownPct(
-  row: { odds: number; opening: number | null } | FixtureOddsRow | null | undefined,
-  pct: number,
-): boolean {
-  if (!row || row.opening == null || row.opening <= 0) return false;
-  return (row.opening - row.odds) / row.opening >= pct;
-}
-function steamUpPct(
-  row: { odds: number; opening: number | null } | FixtureOddsRow | null | undefined,
-  pct: number,
-): boolean {
-  if (!row || row.opening == null || row.opening <= 0) return false;
-  return (row.odds - row.opening) / row.opening >= pct;
 }
 
 export async function findSimilarForBookmaker(opts: {
@@ -1109,11 +673,12 @@ export async function findSimilarForBookmaker(opts: {
       AND (
         (market = 'OVER_UNDER:FULL_TIME:2.5' AND selection IN ('OVER:2.5','UNDER:2.5'))
         OR (market = 'OVER_UNDER:FULL_TIME:3.5' AND selection IN ('OVER:3.5','UNDER:3.5'))
+        OR (market = 'OVER_UNDER:FULL_TIME:4.5' AND selection IN ('OVER:4.5','UNDER:4.5'))
         OR (market = 'BOTH_TEAMS_TO_SCORE:FULL_TIME' AND selection IN ('btts:YES','btts:NO','YES','NO'))
-        OR (market = 'HALF_FULL_TIME:FULL_TIME' AND selection IN ('htft:1/1','htft:X/X','htft:2/2','htft:1/2','htft:2/1','1/1','X/X','2/2','1/2','2/1'))
+        OR (market = 'HALF_FULL_TIME:FULL_TIME' AND selection IN ('htft:1/1','htft:X/X','htft:2/2','1/1','X/X','2/2'))
         OR (market = 'CORRECT_SCORE:FULL_TIME' AND selection IN (
           'score:1:0','score:2:0','score:2:1','score:3:0','score:3:1','score:3:2',
-          'score:1:1','score:2:2','score:0:0','score:0:1','score:0:2','score:1:2','score:1:3'
+          'score:1:1','score:2:2','score:0:1','score:0:2','score:1:2','score:1:3','score:3:1'
         ))
         OR (market = 'DRAW_NO_BET:FULL_TIME' AND selection IN ('H','A'))
         OR (market = 'HOME_DRAW_AWAY:SECOND_HALF' AND selection IN ('H','D','A'))
@@ -1136,155 +701,69 @@ export async function findSimilarForBookmaker(opts: {
     m.set(`${row.market}|${sel}`, { odds: row.odds, opening: row.opening });
   }
 
-  // --- YENİ: fixture'ın kendi CS core hatları + favori HTFT kombinasyonu ---
-  const fxCsRows = CS_CORE_LINES
-    .map((line) => ({ line, row: pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) }))
-    .filter((x): x is { line: string; row: FixtureOddsRow } => x.row != null);
-
-  type HtftRow = { sel: (typeof HTFT_SELS)[number]; row: FixtureOddsRow };
-  const fxHtftRows: HtftRow[] = HTFT_SELS
-    .map((sel) => ({ sel, row: pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", sel) }))
-    .filter((x): x is HtftRow => x.row != null);
-  const favHtft: HtftRow | null = fxHtftRows.length
-    ? fxHtftRows.slice().sort((a, b) => a.row.odds - b.row.odds)[0]
-    : null;
-
-  const fxHtH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "H");
-  const fxDnbA = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "A");
-  const fxDnbH = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "H");
-  const fxShA = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "A");
-  const fxShH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "H");
-  const fxAhA1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.0");
-  const fxAhH1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.0");
-  // YENİ: berabere-eksenli sinyaller — Flamengo-Mirassol testinde HT-D/2H-D/HTFT-X/X/CS
-  // kombinasyonunun tek başına 1X2'den daha isabetli komşu getirdiği görüldü. Sert veto değil,
-  // yumuşak ağırlıklı mesafe olarak ekleniyor (havuzu sıfıra düşürme riski olmasın diye).
-  const fxHtD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "D");
-  const fxShD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "D");
-  const fxHtftXX = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:X/X");
-  // YENİ: dönüş senaryoları — bir yarıda önde olup diğerinde kaybeden/kazanan maçlar (1/2, 2/1)
-  // için ayrı bir eksen. U3LxCw77 (HT 0-1, FT 2-1 — deplasman önde başlayıp ev sahibi çevirdi) testi
-  // bu marketlerin comeback/dönüş dinamiğini yakalayabildiğini gösterdi.
-  const fxHtft12 = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:1/2");
-  const fxHtft21 = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:2/1");
-
   type Ranked = { event_id: string; score: number };
+  const ranked: Ranked[] = [];
 
-  // Ranking hesaplamasını bir fonksiyona çıkardık ki adaptif band aramasında
-  // tekrar tekrar (farklı liqBand değerleriyle) çağırabilelim.
-  function computeRanked(liqBand: number): Ranked[] {
-    const out: Ranked[] = [];
-    for (const r of stage1Scored) {
-      const L = liqByEvent.get(r.event_id);
-      const ou25 = L?.get("OVER_UNDER:FULL_TIME:2.5|OVER:2.5");
-      const ou35 = L?.get("OVER_UNDER:FULL_TIME:3.5|OVER:3.5");
-      const bttsY = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES");
-      const bttsN = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:NO");
-      const htH = L?.get("HOME_DRAW_AWAY:FIRST_HALF|H");
-      if (fxHtH && htH && rel(htH.odds, fxHtH.odds) > 0.08) continue;
+  for (const r of stage1Scored) {
+    const L = liqByEvent.get(r.event_id);
+    const ou25 = L?.get("OVER_UNDER:FULL_TIME:2.5|OVER:2.5");
+    const ou35 = L?.get("OVER_UNDER:FULL_TIME:3.5|OVER:3.5");
+    const bttsY = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:YES");
+    const bttsN = L?.get("BOTH_TEAMS_TO_SCORE:FULL_TIME|btts:NO");
 
-      const dnbA = L?.get("DRAW_NO_BET:FULL_TIME|A");
-      const dnbH = L?.get("DRAW_NO_BET:FULL_TIME|H");
-      const shA = L?.get("HOME_DRAW_AWAY:SECOND_HALF|A");
-      const shH = L?.get("HOME_DRAW_AWAY:SECOND_HALF|H");
-      const ahA1 = L?.get("ASIAN_HANDICAP:FULL_TIME|A:-1.0");
-      const ahH1 = L?.get("ASIAN_HANDICAP:FULL_TIME|H:-1.0");
+    const htH = L?.get("HOME_DRAW_AWAY:FIRST_HALF|H");
+    const fxHtH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "H");
+    if (fxHtH && htH && rel(htH.odds, fxHtH.odds) > 0.08) continue;
 
-      // YENİ: mutlak puan eşiği yerine yüzdesel steam kontrolü — düşük oranlarda (DNB ~1.3)
-      // ve yüksek oranlarda (DNB ~8.0) tutarlı davranır.
-      if (steamDownPct(fxDnbA, STEAM_TRIGGER_PCT) && dnbA && !steamDownPct(dnbA, STEAM_MATCH_PCT)) continue;
-      if (steamDownPct(fxDnbH, STEAM_TRIGGER_PCT) && dnbH && !steamDownPct(dnbH, STEAM_MATCH_PCT)) continue;
-      if (steamDownPct(fxShA, STEAM_TRIGGER_PCT) && shA && !steamDownPct(shA, STEAM_MATCH_PCT)) continue;
-      if (steamDownPct(fxShH, STEAM_TRIGGER_PCT) && shH && !steamDownPct(shH, STEAM_MATCH_PCT)) continue;
-      if (steamDownPct(fxAhA1, STEAM_TRIGGER_PCT_AH) && ahA1 && !steamDownPct(ahA1, STEAM_MATCH_PCT_AH)) continue;
-      if (steamDownPct(fxAhH1, STEAM_TRIGGER_PCT_AH) && ahH1 && !steamDownPct(ahH1, STEAM_MATCH_PCT_AH)) continue;
+    const dnbA = L?.get("DRAW_NO_BET:FULL_TIME|A");
+    const dnbH = L?.get("DRAW_NO_BET:FULL_TIME|H");
+    const shA = L?.get("HOME_DRAW_AWAY:SECOND_HALF|A");
+    const shH = L?.get("HOME_DRAW_AWAY:SECOND_HALF|H");
+    const ahA1 = L?.get("ASIAN_HANDICAP:FULL_TIME|A:-1.0");
+    const ahH1 = L?.get("ASIAN_HANDICAP:FULL_TIME|H:-1.0");
 
-      if (!ou25 || !bttsY) continue;
-      if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > liqBand) continue;
-      if (prof.ou35) {
-        if (!ou35 || rel(ou35.odds, prof.ou35.odds) > liqBand) continue;
-      }
-      if (prof.bttsYes && rel(bttsY.odds, prof.bttsYes.odds) > liqBand) continue;
-      if ((prof.family === "CLEAN_AWAY" || prof.family === "AWAY_SHUTOUT") && bttsN && prof.bttsNo) {
-        if (rel(bttsN.odds, prof.bttsNo.odds) > liqBand) continue;
-      }
+    const fxDnbA = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "A");
+    const fxDnbH = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "H");
+    const fxShA = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "A");
+    const fxShH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "H");
+    const fxAhA1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.0");
+    const fxAhH1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.0");
 
-      const parts: number[] = [r.d1];
-      parts.push((1.3 * rel(ou25.odds, prof.ou25?.odds ?? ou25.odds)) ** 2);
-      if (prof.ou35 && ou35) parts.push((1.4 * rel(ou35.odds, prof.ou35.odds)) ** 2);
-      parts.push((1.4 * rel(bttsY.odds, prof.bttsYes?.odds ?? bttsY.odds)) ** 2);
-      if (fxDnbA && dnbA) parts.push((1.2 * rel(dnbA.odds, fxDnbA.odds)) ** 2);
-      if (fxShA && shA) parts.push((1.15 * rel(shA.odds, fxShA.odds)) ** 2);
-      if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
-      if (fxHtH && htH) parts.push((1.2 * rel(htH.odds, fxHtH.odds)) ** 2);
-
-      // YENİ: HT-D / 2H-D / HTFT-X/X — berabere-ekseni mesafesi
-      const htD = L?.get("HOME_DRAW_AWAY:FIRST_HALF|D");
-      if (fxHtD && htD) parts.push((1.1 * rel(htD.odds, fxHtD.odds)) ** 2);
-      const shD = L?.get("HOME_DRAW_AWAY:SECOND_HALF|D");
-      if (fxShD && shD) parts.push((1.1 * rel(shD.odds, fxShD.odds)) ** 2);
-      const htftXX = L?.get("HALF_FULL_TIME:FULL_TIME|htft:X/X");
-      if (fxHtftXX && htftXX) parts.push((1.15 * rel(htftXX.odds, fxHtftXX.odds)) ** 2);
-      const htft12 = L?.get("HALF_FULL_TIME:FULL_TIME|htft:1/2");
-      if (fxHtft12 && htft12) parts.push((1.2 * rel(htft12.odds, fxHtft12.odds)) ** 2);
-      const htft21 = L?.get("HALF_FULL_TIME:FULL_TIME|htft:2/1");
-      if (fxHtft21 && htft21) parts.push((1.2 * rel(htft21.odds, fxHtft21.odds)) ** 2);
-
-      // CORRECT_SCORE ladder ortalama mesafesi
-      if (fxCsRows.length) {
-        const csDists: number[] = [];
-        for (const { line, row } of fxCsRows) {
-          const cand = L?.get(`CORRECT_SCORE:FULL_TIME|score:${line}`);
-          if (cand) csDists.push(rel(cand.odds, row.odds));
-        }
-        if (csDists.length >= 6) {
-          const csAvg = csDists.reduce((a, b) => a + b, 0) / csDists.length;
-          parts.push((0.9 * csAvg) ** 2);
-        }
-      }
-
-      // fixture'ın favori HTFT kombinasyonu üzerinden mesafe
-      if (favHtft) {
-        const candHtft = L?.get(`HALF_FULL_TIME:FULL_TIME|${favHtft.sel}`);
-        if (candHtft) parts.push((1.2 * rel(candHtft.odds, favHtft.row.odds)) ** 2);
-      }
-
-      out.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
+    function steamDown(row: { odds: number; opening: number | null } | null | undefined, min = 0.12) {
+      return row?.opening != null && row.odds <= row.opening - min;
     }
-    out.sort((x, y) => x.score - y.score);
-    return out;
+    function steamUp(row: { odds: number; opening: number | null } | null | undefined, min = 0.12) {
+      return row?.opening != null && row.odds >= row.opening + min;
+    }
+    if (steamDown(fxDnbA, 0.15) && dnbA && !steamDown(dnbA, 0.12)) continue;
+    if (steamDown(fxDnbH, 0.15) && dnbH && !steamDown(dnbH, 0.12)) continue;
+    if (steamDown(fxShA, 0.15) && shA && !steamDown(shA, 0.1)) continue;
+    if (steamDown(fxShH, 0.15) && shH && !steamDown(shH, 0.1)) continue;
+    if (steamDown(fxAhA1, 0.25) && ahA1 && !steamDown(ahA1, 0.2)) continue;
+    if (steamDown(fxAhH1, 0.25) && ahH1 && !steamDown(ahH1, 0.2)) continue;
+
+    if (!ou25 || !bttsY) continue;
+    if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > LIQ_BAND) continue;
+    if (prof.ou35) {
+      if (!ou35 || rel(ou35.odds, prof.ou35.odds) > LIQ_BAND) continue;
+    }
+    if (prof.bttsYes && rel(bttsY.odds, prof.bttsYes.odds) > LIQ_BAND) continue;
+    if ((prof.family === "CLEAN_AWAY" || prof.family === "AWAY_SHUTOUT") && bttsN && prof.bttsNo) {
+      if (rel(bttsN.odds, prof.bttsNo.odds) > LIQ_BAND) continue;
+    }
+
+    const parts: number[] = [r.d1];
+    parts.push((1.3 * rel(ou25.odds, prof.ou25?.odds ?? ou25.odds)) ** 2);
+    if (prof.ou35 && ou35) parts.push((1.4 * rel(ou35.odds, prof.ou35.odds)) ** 2);
+    parts.push((1.4 * rel(bttsY.odds, prof.bttsYes?.odds ?? bttsY.odds)) ** 2);
+    if (fxDnbA && dnbA) parts.push((1.2 * rel(dnbA.odds, fxDnbA.odds)) ** 2);
+    if (fxShA && shA) parts.push((1.15 * rel(shA.odds, fxShA.odds)) ** 2);
+    if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
+    if (fxHtH && htH) parts.push((1.2 * rel(htH.odds, fxHtH.odds)) ** 2);
+    ranked.push({ event_id: r.event_id, score: Math.sqrt(parts.reduce((s, x) => s + x, 0)) });
   }
 
-  // --- YENİ: adaptif band araması. Varsayılan bandtan başlar; aday sayısı hedefin
-  // dışındaysa merdivende bir sonraki (uygun yöndeki) adıma geçer. "Akıllıca" davranışı:
-  // çok az aday -> bandı gevşet (daha fazla tarihsel maç kabul et)
-  // çok fazla aday -> bandı sıkılaştır (daha spesifik/benzer maçlara odaklan)
-  const defaultIdx = LIQ_BAND_STEPS.indexOf(LIQ_BAND_DEFAULT);
-  let bandIdx = defaultIdx;
-  let ranked = computeRanked(LIQ_BAND_STEPS[bandIdx]);
-  let usedLiqBand = LIQ_BAND_STEPS[bandIdx];
-
-  if (ranked.length < LIQ_MIN_SAMPLE) {
-    // yukarı doğru (daha geniş bantlara) tara, yeterli örnekleme ulaşınca dur
-    for (let i = bandIdx + 1; i < LIQ_BAND_STEPS.length; i++) {
-      const attempt = computeRanked(LIQ_BAND_STEPS[i]);
-      bandIdx = i;
-      ranked = attempt;
-      usedLiqBand = LIQ_BAND_STEPS[i];
-      if (attempt.length >= LIQ_MIN_SAMPLE) break;
-    }
-  } else if (ranked.length > LIQ_MAX_SAMPLE) {
-    // aşağı doğru (daha dar bantlara) tara, hedef aralığa girene kadar
-    for (let i = bandIdx - 1; i >= 0; i--) {
-      const attempt = computeRanked(LIQ_BAND_STEPS[i]);
-      if (attempt.length < LIQ_MIN_SAMPLE) break; // çok daraltma, örneklem tekrar azalıyor
-      bandIdx = i;
-      ranked = attempt;
-      usedLiqBand = LIQ_BAND_STEPS[i];
-      if (attempt.length <= LIQ_MAX_SAMPLE) break;
-    }
-  }
-
+  ranked.sort((x, y) => x.score - y.score);
   const shortlist = ranked.slice(0, 40);
   const ids = shortlist.map((s) => s.event_id);
 
@@ -1322,14 +801,7 @@ export async function findSimilarForBookmaker(opts: {
     const tot = s.hs + s.as;
     const low = tot <= 1 || `${s.hs}-${s.as}` === "1-0" || `${s.hs}-${s.as}` === "0-0";
     const burst = tot >= 5;
-    // YENİ: burst artık koşulsuz elenmiyor — sadece fixture'ın kendi OU sinyali
-    // gerçekten düşük gollü bir maça işaret ediyorsa (goalShut + uzun over oranı)
-    // 5+ gollü tarihsel komşular havuzdan çıkarılıyor. Aksi halde (fixture yüksek
-    // gollü bir profil gösteriyorsa) burst'ler havuzda kalmaya devam eder — "7 gollü
-    // maça da yakın olmalı" ihtiyacı tam olarak bu simetriyi gerektiriyor.
-    if (goalShut && ouClose != null && ouClose >= 2.2) {
-      if (burst) return false;
-    }
+    if (burst) return false;
     if (goalOpen && ouClose != null && ouClose <= 1.62) {
       if (low) return false;
     }
@@ -1337,12 +809,6 @@ export async function findSimilarForBookmaker(opts: {
     return true;
   });
   const usedScores = pruned.length ? pruned : scored;
-
-  // --- YENİ: regime (open/shut) oylamasını sadece en yakın STAGE2_POOL komşuya kısıtla ---
-  // `usedScores` zaten `score`'a göre sıralı geliyor (scored, shortlist sırasını korur, shortlist ranked'a göre sıralı).
-  // Böylece CS/HTFT ile iyileşen sıralama artık call/alt'a da yansır; 40 komşuluk düz oy çoğunluğu yerine
-  // en benzer 12 komşu oy kullanır.
-  const regimePool = usedScores.slice(0, STAGE2_POOL);
 
   function freqOf(rows: typeof scored): ScoreBucket[] {
     const freq = new Map<string, number>();
@@ -1355,8 +821,8 @@ export async function findSimilarForBookmaker(opts: {
       .sort((a, b) => b.n - a.n || a.scoreline.localeCompare(b.scoreline));
   }
 
-  const openRows = regimePool.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
-  const shutRows = regimePool.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
+  const openRows = usedScores.filter((s) => s.hs > 0 && s.as > 0 && s.hs + s.as >= 3);
+  const shutRows = usedScores.filter((s) => s.hs === 0 || s.as === 0 || s.hs + s.as <= 2);
   const regimes: RegimeBuckets = {
     open: freqOf(openRows).slice(0, 6),
     shut: freqOf(shutRows).slice(0, 6),
@@ -1370,7 +836,7 @@ export async function findSimilarForBookmaker(opts: {
   const openShare = split ? regimes.openN / split : 0.5;
   const shutShare = split ? regimes.shutN / split : 0.5;
 
-  const core = regimePool.filter((s) => s.hs + s.as < 5).slice(0, 6);
+  const core = usedScores.filter((s) => s.hs + s.as < 5).slice(0, 6);
   if (core.length) {
     const callLine = `${core[0].hs}-${core[0].as}`;
     const altRow = core.find((s) => `${s.hs}-${s.as}` !== callLine);
@@ -1417,20 +883,14 @@ export async function findSimilarForBookmaker(opts: {
       "AH_-1",
       "STEAM_SIGN",
       "REGIME_A_B",
-      "CS_LADDER",
-      "HTFT_FAV",
-      "XX_DRIFT",
       `FAMILY:${prof.family}`,
-      `LIQ_BAND:${usedLiqBand}`,
     ],
     family: pred.family,
     buckets,
     regimes,
     prediction: { primary: pred.primary, backup: pred.backup, reason: pred.reason },
-    predictionV2: predictScorelineV2(fixtureOdds),
     board,
     insights,
     durationMs: Date.now() - t0,
-    usedLiqBand,
   };
 }
