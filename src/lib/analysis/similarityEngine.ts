@@ -29,6 +29,23 @@ const STEAM_MATCH_PCT = 0.06; // adayda "yeterince steam var mı" yüzdesi (eski
 const STEAM_TRIGGER_PCT_AH = 0.12; // Asian Handicap için biraz daha toleranslı (eski ~0.25)
 const STEAM_MATCH_PCT_AH = 0.10; // (eski ~0.20)
 
+// --- YENİ: CS 3:3 "gizli gol radarı" — 41K maçlık backtest (cs33_backtest.csv) sonucu eklendi.
+// CS 3:3 oranı açılıştan ≥%10 kısalırsa: 5+ gol %12.0 -> %15.5, Over 2.5 %48.4 -> %53.8 (n=13713 vs n=11755 yatay).
+// Not: 3-3 skorunun kendisi gelme ihtimali neredeyse sabit kalıyor (~%1.0 -> %1.2); sinyal skor değil, gol enflasyonu içindir.
+const CS33_STEAM_PCT = 0.10;
+
+// --- YENİ: CS 0:0 "kısır maç radarı" — aynı backtest ailesinden (0:0 hareketi tablosu).
+// CS 0:0 oranı açılıştan ≥%10 kısalırsa: 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3.
+// Ters yönde (0:0 ≥%10 uzarsa) tam tersi: 0-0 ihtimali düşük, Over/gol beklentisi artıyor — bu yönü ayrıca işaretlemiyoruz,
+// sadece kısalma yönü aksiyona bağlanıyor (Under 2.5 / BTTS NO).
+const CS00_STEAM_PCT = 0.10;
+
+// --- YENİ: Favori oranı drift (uzama) sinyali — 1X2 favori hareketi tablosundan.
+// Favori oranı açılıştan ≥%10 uzarsa (piyasa favoriden soğuyorsa): 0-0 %8.3, Under 2.5 %52.9'a çıkıyor.
+// Favori kısaldığında ise tam tersi (0-0 en düşük %6.5) — o yön ayrı bir "Over" sinyali olarak kodlanmadı, şimdilik
+// sadece istenen "favori uzarsa Under listesine al" kuralı uygulanıyor.
+const FAV_DRIFT_PCT = 0.10;
+
 // CS/HTFT ince ayarı icin core hatlar - liquid sorgusunda zaten cekiliyor
 const CS_CORE_LINES = [
   "1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1", "3:2", "2:2", "1:3",
@@ -164,6 +181,30 @@ export type BoardCall = {
   reason: string;
   csLadder: { score: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
   htft: { sel: string; odds: number; steam: "DOWN" | "UP" | "FLAT" }[];
+  // YENİ: kural-tabanlı uyarılar (şu an sadece CS 3:3 sinyali). UI'da rozet/banner olarak gösterilebilir.
+  alerts: string[];
+  cs33Signal: {
+    active: boolean; // >= CS33_STEAM_PCT kısaldı mı
+    pct: number | null; // kısalma yüzdesi (pozitif = kısaldı), veri yoksa null
+    odds: number | null;
+    opening: number | null;
+    note: string;
+  } | null;
+  cs00Signal: {
+    active: boolean; // >= CS00_STEAM_PCT kısaldı mı
+    pct: number | null; // kısalma yüzdesi (pozitif = kısaldı)
+    odds: number | null;
+    opening: number | null;
+    note: string;
+  } | null;
+  favDriftSignal: {
+    active: boolean; // favori >= FAV_DRIFT_PCT uzadı mı
+    side: "HOME" | "AWAY" | null;
+    pct: number | null; // uzama yüzdesi (pozitif = uzadı)
+    odds: number | null;
+    opening: number | null;
+    note: string;
+  } | null;
 };
 
 export type MarketInsight = {
@@ -193,6 +234,12 @@ function steamDir(row: FixtureOddsRow | null, min = 0.05): "DOWN" | "UP" | "FLAT
   if (row.odds <= row.opening - min) return "DOWN";
   if (row.odds >= row.opening + min) return "UP";
   return "FLAT";
+}
+
+// Pozitif = kısaldı (odds < opening), negatif = uzadı. null = opening bilgisi yok.
+function steamPct(row: FixtureOddsRow | null): number | null {
+  if (!row || row.opening == null || row.opening <= 0) return null;
+  return (row.opening - row.odds) / row.opening;
 }
 
 function directionOf(scoreline: string): "HOME" | "AWAY" | "DRAW" {
@@ -251,6 +298,74 @@ export function readBoard(opts: {
   if (sideSteam === "AWAY") veto.push("3-1 / 2-0 ev kilidi yok");
   if (sideSteam === "HOME") veto.push("0-1 / 1-3 dep kilidi yok");
   if (side === "PICKEM") veto.push("tek taraf kilidi yok");
+
+  // --- YENİ: CS 3:3 gol enflasyonu sinyali (bkz. CS33_STEAM_PCT tanımı) ---
+  const cs33Row =
+    pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:3:3") ||
+    opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:3:3") ||
+    null;
+  const cs33Pct = steamPct(cs33Row);
+  const cs33Active = cs33Pct != null && cs33Pct >= CS33_STEAM_PCT;
+  const cs33Signal: BoardCall["cs33Signal"] = cs33Row
+    ? {
+        active: cs33Active,
+        pct: cs33Pct,
+        odds: cs33Row.odds,
+        opening: cs33Row.opening,
+        note: cs33Active
+          ? `CS 3:3 oranı açılıştan %${(cs33Pct! * 100).toFixed(1)} kısaldı — backtestte (n=13713) bu grupta 5+ gol %15.5 (baz %12.0) ve Over 2.5 %53.8 (baz %48.4) çıkıyor. 3-3'ün kendisi gelme ihtimali ~sabit (%1.2); sinyal "gollü kaos" için, doğrudan skor için değil.`
+          : "CS 3:3 hareketi eşik altında (uyarı yok).",
+      }
+    : null;
+
+  // --- YENİ: CS 0:0 kısır maç sinyali (bkz. CS00_STEAM_PCT tanımı) ---
+  const cs00Row =
+    pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:0:0") ||
+    opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:0:0") ||
+    null;
+  const cs00Pct = steamPct(cs00Row);
+  const cs00Active = cs00Pct != null && cs00Pct >= CS00_STEAM_PCT;
+  const cs00Signal: BoardCall["cs00Signal"] = cs00Row
+    ? {
+        active: cs00Active,
+        pct: cs00Pct,
+        odds: cs00Row.odds,
+        opening: cs00Row.opening,
+        note: cs00Active
+          ? `CS 0:0 oranı açılıştan %${(cs00Pct! * 100).toFixed(1)} kısaldı — backtestte 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3'e çıkıyor. Bu maçlarda %51.5 ihtimalle BTTS NO gerçekleşiyor; Over 2.5 / BTTS YES önerilmemeli.`
+          : "CS 0:0 hareketi eşik altında (uyarı yok).",
+      }
+    : null;
+
+  // --- YENİ: favori oranı drift (uzama) sinyali (bkz. FAV_DRIFT_PCT tanımı) ---
+  const favSide: "HOME" | "AWAY" | null = p.h != null || p.a != null ? (Hc <= Ac ? "HOME" : "AWAY") : null;
+  const favRow = favSide === "HOME" ? p.h : favSide === "AWAY" ? p.a : null;
+  const favPct = steamPct(favRow); // pozitif = favori kısaldı
+  const favDriftPct = favPct != null ? -favPct : null; // pozitif = favori uzadı (drift)
+  const favDriftActive = favDriftPct != null && favDriftPct >= FAV_DRIFT_PCT;
+  const favDriftSignal: BoardCall["favDriftSignal"] = favRow
+    ? {
+        active: favDriftActive,
+        side: favSide,
+        pct: favDriftPct,
+        odds: favRow.odds,
+        opening: favRow.opening,
+        note: favDriftActive
+          ? `Favori (${favSide}) oranı açılıştan %${(favDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta 0-0 ihtimali %8.3, Under 2.5 %52.9'a çıkıyor. Sürpriz gol düellosu değil, favorinin kilit açamadığı bir "alt/kısır" senaryosu daha olası.`
+          : "Favori oranı hareketi eşik altında (uyarı yok).",
+      }
+    : null;
+
+  const alerts: string[] = [];
+  if (cs33Active) {
+    alerts.push("CS 3:3 kısalma sinyali → Over 2.5 / BTTS olasılığı artıyor (bkz. cs33Signal)");
+  }
+  if (cs00Active) {
+    alerts.push("CS 0:0 kısalma sinyali → Under 2.5 / BTTS NO olasılığı artıyor (bkz. cs00Signal)");
+  }
+  if (favDriftActive) {
+    alerts.push(`Favori (${favSide}) oranı uzuyor → kısır/Under maç ihtimali artıyor (bkz. favDriftSignal)`);
+  }
 
   const conflict =
     (sideSteam === "AWAY" && goalSteam === "SHUT") ||
@@ -326,6 +441,10 @@ export function readBoard(opts: {
     reason,
     csLadder,
     htft,
+    alerts,
+    cs33Signal,
+    cs00Signal,
+    favDriftSignal,
   };
 }
 
