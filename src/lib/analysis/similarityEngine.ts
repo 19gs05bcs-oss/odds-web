@@ -53,6 +53,17 @@ const FAV_DRIFT_PCT = 0.10;
 // (yani bu kombinasyon "temiz/dominant" galibiyet sinyalidir, 2-1/1-2 avı için KULLANILMAMALI).
 const XX_DRIFT_PCT = 0.10;
 
+// --- YENİ: "Erken Gol Radarı" (HT Over 1.5) sinyali için eşikler ---
+// 1) Fren: HT/FT X/X bu kadar veya fazla kısalırsa (piyasa maçın kilitleneceğini
+//    fiyatlıyorsa) sinyal tamamen iptal edilir — backtestte ters yönde -%4.2 etki var.
+// 2) Tetik: MS 3.5 Üst (en güçlü tekil tetikleyici, +%5.7) veya İY 1.5 Üst oranı
+//    açılıştan bu oran kadar kısalmalı.
+// 3) Keskin nişancı: İY Doğru Skor 2-1 (+%4.1) veya 2-0 herhangi bir kısalma trendi
+//    göstermeli — bunlar MS CS 2-1'in aksine (nötr, +%0.1) gerçek bir tetikleyici.
+const HT_RADAR_XX_BRAKE_PCT = 0.01;
+const HT_RADAR_OU_TRIGGER_PCT = 0.05;
+const HT_RADAR_CS_SNIPER_PCT = 0.02;
+
 // CS/HTFT ince ayarı icin core hatlar - liquid sorgusunda zaten cekiliyor
 const CS_CORE_LINES = [
   "1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1", "3:2", "2:2", "1:3",
@@ -219,6 +230,15 @@ export type BoardCall = {
     odds: number | null;
     opening: number | null;
     oneOneSteam: "DOWN" | "UP" | "FLAT"; // 1/1 aynı anda ne yapıyor (kombinasyon teşhisi için)
+    note: string;
+  } | null;
+  // YENİ: "Erken Gol Radarı" (HT Over 1.5) — üç şartlı bileşik sinyal, bkz. HT_RADAR_* tanımları.
+  htGoalRadarSignal: {
+    active: boolean; // her 3 şart da sağlandı mı
+    brakeOn: boolean; // true ise X/X kısalıyor demektir, sinyal frenlenir
+    ouTrigger: "FT_3.5" | "HT_1.5" | "BOTH" | null; // hangi Üst pazarı tetikledi
+    ouPct: number | null; // tetikleyen pazarın kısalma yüzdesi (en güçlü olanı)
+    csSniper: "2-1" | "2-0" | "BOTH" | null; // hangi İY skoru kısalma trendi gösterdi
     note: string;
   } | null;
 };
@@ -414,6 +434,45 @@ export function readBoard(opts: {
       }
     : null;
 
+  // --- YENİ: "Erken Gol Radarı" (HT Over 1.5) bileşik sinyali (bkz. HT_RADAR_* tanımları) ---
+  // Şart 1 (Fren): X/X kısalmış olmamalı. xxPct (yukarıda) pozitifse X/X kısalıyor demektir.
+  const htRadarBrakeOn = xxPct != null && xxPct >= HT_RADAR_XX_BRAKE_PCT;
+  // Şart 2 (Tetik): FT 3.5 Üst (en güçlü tekil sinyal) veya İY 1.5 Üst >= %5 kısalmış olmalı.
+  const ft35Pct = steamPct(p.ou35);
+  const ht15Row = pickRow(opts.fixtureOdds, "OVER_UNDER:HALF_TIME:1.5", "OVER:1.5");
+  const ht15Pct = steamPct(ht15Row);
+  const ft35Triggered = ft35Pct != null && ft35Pct >= HT_RADAR_OU_TRIGGER_PCT;
+  const ht15Triggered = ht15Pct != null && ht15Pct >= HT_RADAR_OU_TRIGGER_PCT;
+  const ouTrigger: "FT_3.5" | "HT_1.5" | "BOTH" | null =
+    ft35Triggered && ht15Triggered ? "BOTH" : ft35Triggered ? "FT_3.5" : ht15Triggered ? "HT_1.5" : null;
+  const ouPct = ouTrigger === "BOTH" ? Math.max(ft35Pct!, ht15Pct!) : ouTrigger === "FT_3.5" ? ft35Pct : ouTrigger === "HT_1.5" ? ht15Pct : null;
+  // Şart 3 (Keskin nişancı): İY CS 2-1 veya 2-0 herhangi bir kısalma trendi göstermeli
+  // (MS CS 2-1'in aksine, İY CS 2-1 gerçek bir tetikleyicidir — bkz. not).
+  const htCs21Row = pickRow(opts.fixtureOdds, "CORRECT_SCORE:HALF_TIME", "score:2:1");
+  const htCs20Row = pickRow(opts.fixtureOdds, "CORRECT_SCORE:HALF_TIME", "score:2:0");
+  const htCs21Pct = steamPct(htCs21Row);
+  const htCs20Pct = steamPct(htCs20Row);
+  const htCs21Sniper = htCs21Pct != null && htCs21Pct >= HT_RADAR_CS_SNIPER_PCT;
+  const htCs20Sniper = htCs20Pct != null && htCs20Pct >= HT_RADAR_CS_SNIPER_PCT;
+  const csSniper: "2-1" | "2-0" | "BOTH" | null =
+    htCs21Sniper && htCs20Sniper ? "BOTH" : htCs21Sniper ? "2-1" : htCs20Sniper ? "2-0" : null;
+  const htGoalRadarActive = !htRadarBrakeOn && ouTrigger != null && csSniper != null;
+  const htGoalRadarSignal: BoardCall["htGoalRadarSignal"] =
+    ouTrigger != null || csSniper != null || htRadarBrakeOn
+      ? {
+          active: htGoalRadarActive,
+          brakeOn: htRadarBrakeOn,
+          ouTrigger,
+          ouPct,
+          csSniper,
+          note: htRadarBrakeOn
+            ? "Fren devrede: X/X (İY Berabere/MS Berabere) kısalıyor — piyasa maçın kilitleneceğini fiyatlıyor, İY gol sinyali bastırıldı."
+            : htGoalRadarActive
+              ? `Erken Gol Radarı AKTİF: ${ouTrigger === "BOTH" ? "MS 3.5 Üst ve İY 1.5 Üst" : ouTrigger === "FT_3.5" ? "MS 3.5 Üst" : "İY 1.5 Üst"} %${(ouPct! * 100).toFixed(1)} kısaldı VE İY Doğru Skor ${csSniper === "BOTH" ? "2-1 ve 2-0" : csSniper} kısalma trendinde — backtestte İY CS 2-1 tek başına +%4.1 ile en güçlü tetikleyicilerden (MS CS 2-1 ise nötr, +%0.1). Bu üç şart bir arada en yüksek ihtimalli 'İlk Yarı 2+ Gol' adayı.`
+              : "Erken Gol Radarı şartları eksik (tetik veya keskin nişancı sinyali yok).",
+        }
+      : null;
+
   const alerts: string[] = [];
   if (cs33Active) {
     alerts.push("CS 3:3 shortening + OU2.5 confirmed → Over 2.5 / BTTS probability increases");
@@ -430,6 +489,9 @@ export function readBoard(opts: {
         oneOneSteamForXx === "DOWN" ? " (1/1 also shortening → dominant win, not a 2-1 scenario)" : ""
       }`,
     );
+  }
+  if (htGoalRadarActive) {
+    alerts.push("Early goal radar: 1H correct score + totals both confirming → high probability of a 1H goal (2+ 1H goals)");
   }
 
   const conflict =
@@ -511,6 +573,7 @@ export function readBoard(opts: {
     cs00Signal,
     favDriftSignal,
     xxDriftSignal,
+    htGoalRadarSignal,
   };
 }
 
@@ -546,6 +609,14 @@ function pickRow(rows: FixtureOddsRow[], market: string, selection: string): Fix
     return (
       rows.find((r) => r.market === "OVER_UNDER:FULL_TIME" && r.selection === "OVER:3.5") ||
       rows.find((r) => r.market.startsWith("OVER_UNDER") && r.selection === "OVER:3.5") ||
+      null
+    );
+  }
+  // YENİ: İY 1.5 Üst (Erken Gol Radarı sinyali için) — FT 2.5/3.5 ile aynı fallback deseni.
+  if (market === "OVER_UNDER:HALF_TIME:1.5") {
+    return (
+      rows.find((r) => r.market === "OVER_UNDER:HALF_TIME" && r.selection === "OVER:1.5") ||
+      rows.find((r) => r.market.startsWith("OVER_UNDER") && r.market.includes("HALF_TIME") && r.selection === "OVER:1.5") ||
       null
     );
   }
@@ -1420,6 +1491,7 @@ export async function findSimilarForBookmaker(opts: {
       "CS_LADDER",
       "HTFT_FAV",
       "XX_DRIFT",
+      "HT_GOAL_RADAR",
       `FAMILY:${prof.family}`,
       `LIQ_BAND:${usedLiqBand}`,
     ],
