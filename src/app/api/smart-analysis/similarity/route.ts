@@ -3,6 +3,7 @@ import { sql } from "@/lib/db";
 import {
   explainFamily,
   findSimilarForBookmaker,
+  readBoard,
   type FixtureOddsRow,
   type SimilarityFamily,
 } from "@/lib/analysis/similarityEngine";
@@ -64,6 +65,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "eventId is required." }, { status: 400 });
   }
 
+  // YENİ: fixtureOdds inşası artık cache kontrolünden ÖNCE yapılıyor. Sebebi: cache-hit
+  // durumunda tam benzerlik araması (regimes) tekrar koşulmuyor ama CS 3:3 / CS 0:0 / favori
+  // drift sinyalleri (readBoard) sadece bu maçın kendi oranlarına bakıyor — regime'e ihtiyaç
+  // duymuyor. Böylece cache'ten dönen sonuçlarda da uyarılar kayıp gitmiyor.
+  const fixtureOdds: FixtureOddsRow[] = Array.isArray(body.odds)
+    ? body.odds
+        .filter((row) => row[5] != null)
+        .filter((row) => body.bookmakerId == null || row[0] === body.bookmakerId)
+        .map((row) => ({
+          market: `${row[1]}:${row[2]}`,
+          selection: row[3],
+          odds: row[5] as number,
+          opening: row[4],
+        }))
+    : [];
+
   if (!body.force) {
     try {
       const cached = (await sql.unsafe(
@@ -86,6 +103,7 @@ export async function POST(req: Request) {
           family,
           familyTitle: copy.title,
           familyNote: copy.note,
+          board: fixtureOdds.length ? readBoard({ fixtureOdds }) : null,
           tableRows,
         });
       }
@@ -97,22 +115,12 @@ export async function POST(req: Request) {
     }
   }
 
-  if (!Array.isArray(body.odds) || !body.odds.length) {
+  if (!fixtureOdds.length) {
     return NextResponse.json(
       { ok: false, error: "odds is required (selected fixture's own odds, from the bulletin)." },
       { status: 400 },
     );
   }
-
-  const fixtureOdds: FixtureOddsRow[] = body.odds
-    .filter((row) => row[5] != null)
-    .filter((row) => body.bookmakerId == null || row[0] === body.bookmakerId)
-    .map((row) => ({
-      market: `${row[1]}:${row[2]}`,
-      selection: row[3],
-      odds: row[5] as number,
-      opening: row[4],
-    }));
 
   if (body.bookmakerId == null) {
     console.error(

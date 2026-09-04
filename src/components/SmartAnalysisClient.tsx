@@ -5,6 +5,7 @@ import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
 import type { TableRow } from "@/lib/analysis/tableRows";
+import type { BoardCall } from "@/lib/analysis/similarityEngine";
 type SimilarityCardState = {
   status: "idle" | "loading" | "done" | "error";
   matchedCount?: number;
@@ -17,6 +18,10 @@ type SimilarityCardState = {
   familyTitle?: string;
   familyNote?: string;
   prediction?: { primary: string; backup: string; reason: string } | null;
+  // YENİ: CS 3:3 / CS 0:0 / favori drift gibi kural-tabanlı uyarılar bu maçın kendi
+  // oranlarından hesaplanıyor (bkz. similarityEngine.ts readBoard). Cache'ten dönen
+  // sonuçlarda da doluyor çünkü bu sinyaller regime aramasına ihtiyaç duymuyor.
+  board?: BoardCall | null;
   error?: string;
 };
 import type { BookmakerOption } from "@/lib/types";
@@ -217,6 +222,7 @@ export function SmartAnalysisClient({
           familyTitle?: string;
           familyNote?: string;
           prediction?: { primary: string; backup: string; reason: string } | null;
+          board?: BoardCall | null;
         };
         if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
         setSimResults((prev) => ({
@@ -233,6 +239,7 @@ export function SmartAnalysisClient({
             familyTitle: j.familyTitle,
             familyNote: j.familyNote,
             prediction: j.prediction ?? null,
+            board: j.board ?? null,
           },
         }));
       } catch (e) {
@@ -289,6 +296,7 @@ export function SmartAnalysisClient({
             familyTitle?: string;
             familyNote?: string;
             prediction?: { primary: string; backup: string; reason: string } | null;
+            board?: BoardCall | null;
           };
           if (cancelled) return;
           if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
@@ -306,6 +314,7 @@ export function SmartAnalysisClient({
               familyTitle: j.familyTitle,
               familyNote: j.familyNote,
               prediction: j.prediction ?? null,
+              board: j.board ?? null,
             },
           }));
         } catch (e) {
@@ -500,6 +509,29 @@ export function SmartAnalysisClient({
                             ) : null}
                           </p>
                         ) : null}
+                      </div>
+                    ) : null}
+
+                    {simState.board?.alerts?.length ? (
+                      <div className={styles.steamAlerts} role="alert">
+                        {simState.board.alerts.map((a, i) => {
+                          const detail =
+                            a.includes("3:3")
+                              ? simState.board?.cs33Signal?.note
+                              : a.includes("0:0")
+                                ? simState.board?.cs00Signal?.note
+                                : a.includes("Favori")
+                                  ? simState.board?.favDriftSignal?.note
+                                  : undefined;
+                          return (
+                            <p key={i} className={styles.steamAlertItem} title={detail}>
+                              <span className={styles.steamAlertIcon} aria-hidden="true">
+                                ⚠
+                              </span>
+                              {a}
+                            </p>
+                          );
+                        })}
                       </div>
                     ) : null}
                     {rows?.length ? (

@@ -146,6 +146,29 @@
   margin-top: 0.4rem;
 }
 
+.steamAlerts {
+  border: 1px solid color-mix(in srgb, #d9534f 45%, var(--line));
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+  margin: 0 0 0.9rem;
+  background: color-mix(in srgb, #d9534f 8%, transparent);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.steamAlertItem {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  font-weight: 650;
+  color: var(--ink);
+  margin: 0;
+  cursor: help;
+}
+
+.steamAlertIcon {
+  margin-right: 0.4rem;
+}
+
 .filter {
   display: grid;
   gap: 0.25rem;
