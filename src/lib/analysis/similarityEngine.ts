@@ -300,12 +300,22 @@ export function readBoard(opts: {
   if (side === "PICKEM") veto.push("tek taraf kilidi yok");
 
   // --- YENİ: CS 3:3 gol enflasyonu sinyali (bkz. CS33_STEAM_PCT tanımı) ---
+  // GÜNCELLEME: artık tek başına CS hareketiyle ateşlenmiyor. CORRECT_SCORE pazarı
+  // isLiquidCode() tarafından "liquid" sayılmıyor (bkz. dosya başı) — tek bir kitapçının
+  // CS hattındaki %10 kısalma, ana pazarlardan mekanik türeme veya düşük likidite
+  // gürültüsü olabilir. Bu yüzden CS33 sinyali artık OU2.5 (likit pazar) AYNI YÖNDE
+  // (goalSteam === "OPEN", yani Over favorileniyor) teyit etmedikçe aktif olmuyor —
+  // "çift onaylı" bir eşik. Not: bu daha sıkı eşiğin kendi izole isabet oranı ayrıca
+  // backtest edilmedi; aşağıdaki %'ler ham (OU teyitsiz) CS33_STEAM_PCT grubuna aittir,
+  // gerçek (OU-teyitli) alt-küme muhtemelen daha yüksek isabetli ama teyit edilmemiştir.
   const cs33Row =
     pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:3:3") ||
     opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:3:3") ||
     null;
   const cs33Pct = steamPct(cs33Row);
-  const cs33Active = cs33Pct != null && cs33Pct >= CS33_STEAM_PCT;
+  const cs33RawTrigger = cs33Pct != null && cs33Pct >= CS33_STEAM_PCT;
+  const cs33Confirmed = goalSteam === "OPEN";
+  const cs33Active = cs33RawTrigger && cs33Confirmed;
   const cs33Signal: BoardCall["cs33Signal"] = cs33Row
     ? {
         active: cs33Active,
@@ -313,18 +323,24 @@ export function readBoard(opts: {
         odds: cs33Row.odds,
         opening: cs33Row.opening,
         note: cs33Active
-          ? `CS 3:3 oranı açılıştan %${(cs33Pct! * 100).toFixed(1)} kısaldı — backtestte (n=13713) bu grupta 5+ gol %15.5 (baz %12.0) ve Over 2.5 %53.8 (baz %48.4) çıkıyor. 3-3'ün kendisi gelme ihtimali ~sabit (%1.2); sinyal "gollü kaos" için, doğrudan skor için değil.`
-          : "CS 3:3 hareketi eşik altında (uyarı yok).",
+          ? `CS 3:3 oranı açılıştan %${(cs33Pct! * 100).toFixed(1)} kısaldı VE OU2.5 (likit pazar) aynı yönde (Over favori) teyit ediyor — ham backtestte (n=13713, OU teyidi aranmadan) bu grupta 5+ gol %15.5 (baz %12.0) ve Over 2.5 %53.8 (baz %48.4) çıkıyor. Çift onay isabeti ayrıca ölçülmedi, muhtemelen daha yüksek. 3-3'ün kendisi gelme ihtimali ~sabit (%1.2); sinyal "gollü kaos" için, doğrudan skor için değil.`
+          : cs33RawTrigger
+            ? "CS 3:3 kısaldı ama OU2.5 aynı yönde teyit etmiyor — tek başına düşük likiditeli CS hareketine güvenilmiyor, uyarı bastırıldı."
+            : "CS 3:3 hareketi eşik altında (uyarı yok).",
       }
     : null;
 
   // --- YENİ: CS 0:0 kısır maç sinyali (bkz. CS00_STEAM_PCT tanımı) ---
+  // Aynı gerekçeyle (CS pazarı non-liquid) OU2.5 aynı yönde (goalSteam === "SHUT",
+  // yani Under favorileniyor) teyit etmedikçe aktif olmuyor.
   const cs00Row =
     pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:0:0") ||
     opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:0:0") ||
     null;
   const cs00Pct = steamPct(cs00Row);
-  const cs00Active = cs00Pct != null && cs00Pct >= CS00_STEAM_PCT;
+  const cs00RawTrigger = cs00Pct != null && cs00Pct >= CS00_STEAM_PCT;
+  const cs00Confirmed = goalSteam === "SHUT";
+  const cs00Active = cs00RawTrigger && cs00Confirmed;
   const cs00Signal: BoardCall["cs00Signal"] = cs00Row
     ? {
         active: cs00Active,
@@ -332,8 +348,10 @@ export function readBoard(opts: {
         odds: cs00Row.odds,
         opening: cs00Row.opening,
         note: cs00Active
-          ? `CS 0:0 oranı açılıştan %${(cs00Pct! * 100).toFixed(1)} kısaldı — backtestte 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3'e çıkıyor. Bu maçlarda %51.5 ihtimalle BTTS NO gerçekleşiyor; Over 2.5 / BTTS YES önerilmemeli.`
-          : "CS 0:0 hareketi eşik altında (uyarı yok).",
+          ? `CS 0:0 oranı açılıştan %${(cs00Pct! * 100).toFixed(1)} kısaldı VE OU2.5 (likit pazar) aynı yönde (Under favori) teyit ediyor — ham backtestte (OU teyidi aranmadan) 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3'e çıkıyor. Çift onay isabeti ayrıca ölçülmedi, muhtemelen daha yüksek. Bu maçlarda %51.5 ihtimalle BTTS NO gerçekleşiyor; Over 2.5 / BTTS YES önerilmemeli.`
+          : cs00RawTrigger
+            ? "CS 0:0 kısaldı ama OU2.5 aynı yönde teyit etmiyor — tek başına düşük likiditeli CS hareketine güvenilmiyor, uyarı bastırıldı."
+            : "CS 0:0 hareketi eşik altında (uyarı yok).",
       }
     : null;
 
@@ -358,10 +376,10 @@ export function readBoard(opts: {
 
   const alerts: string[] = [];
   if (cs33Active) {
-    alerts.push("CS 3:3 kısalma sinyali → Over 2.5 / BTTS olasılığı artıyor (bkz. cs33Signal)");
+    alerts.push("CS 3:3 kısalma + OU2.5 teyitli → Over 2.5 / BTTS olasılığı artıyor (bkz. cs33Signal)");
   }
   if (cs00Active) {
-    alerts.push("CS 0:0 kısalma sinyali → Under 2.5 / BTTS NO olasılığı artıyor (bkz. cs00Signal)");
+    alerts.push("CS 0:0 kısalma + OU2.5 teyitli → Under 2.5 / BTTS NO olasılığı artıyor (bkz. cs00Signal)");
   }
   if (favDriftActive) {
     alerts.push(`Favori (${favSide}) oranı uzuyor → kısır/Under maç ihtimali artıyor (bkz. favDriftSignal)`);
