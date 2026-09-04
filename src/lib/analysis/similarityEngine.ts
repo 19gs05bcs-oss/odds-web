@@ -46,6 +46,13 @@ const CS00_STEAM_PCT = 0.10;
 // sadece istenen "favori uzarsa Under listesine al" kuralı uygulanıyor.
 const FAV_DRIFT_PCT = 0.10;
 
+// --- YENİ: HT/FT X/X (Berabere/Berabere) drift sinyali — favori MS1/MS2 filtresi.
+// X/X oranı açılıştan ≥%10 uzarsa (piyasa berabere ihtimalinden soğuyorsa):
+// beraberlik ihtimali %27 -> %19.6'ya düşüyor, favorinin kazanma ihtimali %47 -> %65.5'e çıkıyor.
+// Ayrıca aynı ailede: X/X uzarken 1/1 kısaldığında favori %62.9 kazanıyor ama sadece %10.8'i 2-1 bitiyor
+// (yani bu kombinasyon "temiz/dominant" galibiyet sinyalidir, 2-1/1-2 avı için KULLANILMAMALI).
+const XX_DRIFT_PCT = 0.10;
+
 // CS/HTFT ince ayarı icin core hatlar - liquid sorgusunda zaten cekiliyor
 const CS_CORE_LINES = [
   "1:0", "2:0", "2:1", "3:0", "3:1", "1:1", "0:0", "1:2", "0:1", "3:2", "2:2", "1:3",
@@ -203,6 +210,15 @@ export type BoardCall = {
     pct: number | null; // uzama yüzdesi (pozitif = uzadı)
     odds: number | null;
     opening: number | null;
+    note: string;
+  } | null;
+  // YENİ: HT/FT X/X (Berabere/Berabere) drift sinyali — bkz. XX_DRIFT_PCT tanımı.
+  xxDriftSignal: {
+    active: boolean; // X/X >= XX_DRIFT_PCT uzadı mı
+    pct: number | null; // uzama yüzdesi (pozitif = uzadı)
+    odds: number | null;
+    opening: number | null;
+    oneOneSteam: "DOWN" | "UP" | "FLAT"; // 1/1 aynı anda ne yapıyor (kombinasyon teşhisi için)
     note: string;
   } | null;
 };
@@ -374,15 +390,46 @@ export function readBoard(opts: {
       }
     : null;
 
+  // --- YENİ: HT/FT X/X (Berabere/Berabere) drift sinyali (bkz. XX_DRIFT_PCT tanımı) ---
+  const xxRow = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:X/X");
+  const xxPct = steamPct(xxRow); // pozitif = kısaldı
+  const xxDriftPct = xxPct != null ? -xxPct : null; // pozitif = uzadı (drift)
+  const xxDriftActive = xxDriftPct != null && xxDriftPct >= XX_DRIFT_PCT;
+  const oneOneRowForXx = pickRow(opts.fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:1/1");
+  const oneOneSteamForXx = steamDir(oneOneRowForXx, 0.04);
+  const xxDriftSignal: BoardCall["xxDriftSignal"] = xxRow
+    ? {
+        active: xxDriftActive,
+        pct: xxDriftPct,
+        odds: xxRow.odds,
+        opening: xxRow.opening,
+        oneOneSteam: oneOneSteamForXx,
+        note: xxDriftActive
+          ? `X/X (Berabere/Berabere) oranı açılıştan %${(xxDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta beraberlik ihtimali %27 -> %19.6'ya düşüyor, favorinin kazanma ihtimali %47 -> %65.5'e çıkıyor. Tek başına ~%65 isabetli MS (favori) sinyali.${
+              oneOneSteamForXx === "DOWN"
+                ? " Aynı anda 1/1 de kısalıyor — bu kombinasyonda favori %62.9 kazanıyor ama sadece %10.8'i 2-1/1-2 bitiyor: 'temiz/dominant' galibiyet sinyali, 2-1 avı için kullanılmamalı."
+                : ""
+            }`
+          : "X/X hareketi eşik altında (uyarı yok).",
+      }
+    : null;
+
   const alerts: string[] = [];
   if (cs33Active) {
-    alerts.push("CS 3:3 kısalma + OU2.5 teyitli → Over 2.5 / BTTS olasılığı artıyor (bkz. cs33Signal)");
+    alerts.push("CS 3:3 shortening + OU2.5 confirmed → Over 2.5 / BTTS probability increases");
   }
   if (cs00Active) {
-    alerts.push("CS 0:0 kısalma + OU2.5 teyitli → Under 2.5 / BTTS NO olasılığı artıyor (bkz. cs00Signal)");
+    alerts.push("CS 0:0 shortening + OU2.5 confirmed → Under 2.5 / BTTS NO probability increases");
   }
   if (favDriftActive) {
-    alerts.push(`Favori (${favSide}) oranı uzuyor → kısır/Under maç ihtimali artıyor (bkz. favDriftSignal)`);
+    alerts.push(`Favourite (${favSide}) odds drifting → low-scoring/Under match probability increases`);
+  }
+  if (xxDriftActive) {
+    alerts.push(
+      `X/X drifting → favourite win probability rises to ~65.5%${
+        oneOneSteamForXx === "DOWN" ? " (1/1 also shortening → dominant win, not a 2-1 scenario)" : ""
+      }`,
+    );
   }
 
   const conflict =
@@ -463,6 +510,7 @@ export function readBoard(opts: {
     cs33Signal,
     cs00Signal,
     favDriftSignal,
+    xxDriftSignal,
   };
 }
 
@@ -1371,6 +1419,7 @@ export async function findSimilarForBookmaker(opts: {
       "REGIME_A_B",
       "CS_LADDER",
       "HTFT_FAV",
+      "XX_DRIFT",
       `FAMILY:${prof.family}`,
       `LIQ_BAND:${usedLiqBand}`,
     ],
