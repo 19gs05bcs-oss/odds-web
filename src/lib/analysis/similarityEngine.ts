@@ -252,7 +252,7 @@ export type MarketInsight = {
 
 export type SimilarityResult = {
   matchedCount: number;
-  samples: { event_id: string; score: number }[];
+  samples: { event_id: string; score: number; similarityPct?: number | null }[];
   usedCodes: string[];
   family?: SimilarityFamily;
   buckets?: ScoreBucket[];
@@ -263,6 +263,7 @@ export type SimilarityResult = {
   insights?: MarketInsight[];
   durationMs?: number;
   usedLiqBand?: number; // YENİ: adaptif aramanın sonunda kullanılan LIQ_BAND değeri (şeffaflık için)
+  filterExhausted?: boolean; // YENİ: gol-profili filtresi tüm adayları elediyse true
 };
 
 function steamDir(row: FixtureOddsRow | null, min = 0.05): "DOWN" | "UP" | "FLAT" {
@@ -336,14 +337,6 @@ export function readBoard(opts: {
   if (side === "PICKEM") veto.push("tek taraf kilidi yok");
 
   // --- YENİ: CS 3:3 gol enflasyonu sinyali (bkz. CS33_STEAM_PCT tanımı) ---
-  // GÜNCELLEME: artık tek başına CS hareketiyle ateşlenmiyor. CORRECT_SCORE pazarı
-  // isLiquidCode() tarafından "liquid" sayılmıyor (bkz. dosya başı) — tek bir kitapçının
-  // CS hattındaki %10 kısalma, ana pazarlardan mekanik türeme veya düşük likidite
-  // gürültüsü olabilir. Bu yüzden CS33 sinyali artık OU2.5 (likit pazar) AYNI YÖNDE
-  // (goalSteam === "OPEN", yani Over favorileniyor) teyit etmedikçe aktif olmuyor —
-  // "çift onaylı" bir eşik. Not: bu daha sıkı eşiğin kendi izole isabet oranı ayrıca
-  // backtest edilmedi; aşağıdaki %'ler ham (OU teyitsiz) CS33_STEAM_PCT grubuna aittir,
-  // gerçek (OU-teyitli) alt-küme muhtemelen daha yüksek isabetli ama teyit edilmemiştir.
   const cs33Row =
     pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:3:3") ||
     opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:3:3") ||
@@ -367,8 +360,6 @@ export function readBoard(opts: {
     : null;
 
   // --- YENİ: CS 0:0 kısır maç sinyali (bkz. CS00_STEAM_PCT tanımı) ---
-  // Aynı gerekçeyle (CS pazarı non-liquid) OU2.5 aynı yönde (goalSteam === "SHUT",
-  // yani Under favorileniyor) teyit etmedikçe aktif olmuyor.
   const cs00Row =
     pickRow(opts.fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:0:0") ||
     opts.fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:0:0") ||
@@ -435,9 +426,7 @@ export function readBoard(opts: {
     : null;
 
   // --- YENİ: "Erken Gol Radarı" (HT Over 1.5) bileşik sinyali (bkz. HT_RADAR_* tanımları) ---
-  // Şart 1 (Fren): X/X kısalmış olmamalı. xxPct (yukarıda) pozitifse X/X kısalıyor demektir.
   const htRadarBrakeOn = xxPct != null && xxPct >= HT_RADAR_XX_BRAKE_PCT;
-  // Şart 2 (Tetik): FT 3.5 Üst (en güçlü tekil sinyal) veya İY 1.5 Üst >= %5 kısalmış olmalı.
   const ft35Pct = steamPct(p.ou35);
   const ht15Row = pickRow(opts.fixtureOdds, "OVER_UNDER:HALF_TIME:1.5", "OVER:1.5");
   const ht15Pct = steamPct(ht15Row);
@@ -446,8 +435,6 @@ export function readBoard(opts: {
   const ouTrigger: "FT_3.5" | "HT_1.5" | "BOTH" | null =
     ft35Triggered && ht15Triggered ? "BOTH" : ft35Triggered ? "FT_3.5" : ht15Triggered ? "HT_1.5" : null;
   const ouPct = ouTrigger === "BOTH" ? Math.max(ft35Pct!, ht15Pct!) : ouTrigger === "FT_3.5" ? ft35Pct : ouTrigger === "HT_1.5" ? ht15Pct : null;
-  // Şart 3 (Keskin nişancı): İY CS 2-1 veya 2-0 herhangi bir kısalma trendi göstermeli
-  // (MS CS 2-1'in aksine, İY CS 2-1 gerçek bir tetikleyicidir — bkz. not).
   const htCs21Row = pickRow(opts.fixtureOdds, "CORRECT_SCORE:HALF_TIME", "score:2:1");
   const htCs20Row = pickRow(opts.fixtureOdds, "CORRECT_SCORE:HALF_TIME", "score:2:0");
   const htCs21Pct = steamPct(htCs21Row);
@@ -612,7 +599,6 @@ function pickRow(rows: FixtureOddsRow[], market: string, selection: string): Fix
       null
     );
   }
-  // YENİ: İY 1.5 Üst (Erken Gol Radarı sinyali için) — FT 2.5/3.5 ile aynı fallback deseni.
   if (market === "OVER_UNDER:HALF_TIME:1.5") {
     return (
       rows.find((r) => r.market === "OVER_UNDER:HALF_TIME" && r.selection === "OVER:1.5") ||
@@ -802,45 +788,29 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
 // V2: Piyasa-skorlamalı tahmin motoru (aile kurallarına değil, tüm marketlerin
 // birleşik implied-probability'sine dayanır). predictScoreline (V1, kural
 // tabanlı) dokunulmadan duruyor — ikisi paralel çalıştırılıp karşılaştırılabilir.
-//
-// ÖNEMLİ: sabit bir "maxTotal" sınırıyla adaylar üretmiyoruz — bookmaker
-// FULL_TIME CORRECT_SCORE marketinde fiilen neyi fiyatlamışsa (bazılarında
-// 9-1/8-2/7-3'e kadar var, bazılarında sadece 4-4'e kadar) onu tarıyoruz. Yani
-// 7 gollü bir skor piyasada fiyatlanmışsa aday listesine giriyor, fiyatlanmamışsa
-// zaten piyasa da o ihtimale bir görüş bildirmemiş demektir.
 // ============================================================================
 
 export type ScoredCorrectScore = {
   h: number;
   a: number;
-  /** Sadece CORRECT_SCORE marketinin devig edilmiş implied prob'u */
   csProb: number;
-  /** 1X2/OU2.5/OU3.5/BTTS'ten gelen çarpan (kova düzeyinde, skor içi sıralamayı bozmaz) */
   crossMarketMult: number;
-  /** Son, normalize edilmiş olasılık (tüm adaylar toplamı 1) */
   prob: number;
 };
 
 export type GoalTotalBucket = { total: number; prob: number };
 
 export type V2Weights = {
-  /** 1X2 yönünün (H/D/A) etkisi */
   dir: number;
-  /** Over/Under 2.5'in etkisi */
   ou25: number;
-  /** Over/Under 3.5'in etkisi */
   ou35: number;
-  /** BTTS Yes/No'nun etkisi */
   btts: number;
-  /** Sağlama amaçlı üst sınır — piyasa hatası/garip novelty bahisleri elemek için.
-      Gerçek aday üretimini kısıtlamaz, sadece aşırı uçları (ör. 15+ gol) filtreler. */
   sanityMaxTotal: number;
 };
 
 // TODO(kalibrasyon): Bu ağırlıklar şu an sadece birkaç örnek maçla elle seçildi.
 // Arşiv (events/match_odds, ~90k maç) üzerinde backtest yapılıp grid/gradient
 // search ile kalibre edilmeli — production'a almadan önce bunu yapmadan güvenme.
-// calibrate_v2.py script'i bu amaçla hazırlandı.
 export const V2_DEFAULT_WEIGHTS: V2Weights = {
   dir: 0.6,
   ou25: 0.5,
@@ -849,7 +819,6 @@ export const V2_DEFAULT_WEIGHTS: V2Weights = {
   sanityMaxTotal: 12,
 };
 
-/** İki taraflı bir marketin (over/under, home/draw/away, btts yes/no) oranlarını devig eder. */
 function devigPair(a: number | null | undefined, b: number | null | undefined): [number, number] {
   const pa = a ? 1 / a : 0;
   const pb = b ? 1 / b : 0;
@@ -869,7 +838,6 @@ function devigTriple(
   return [pa / sum, pb / sum, pc / sum];
 }
 
-/** fixtureOdds içindeki tüm FULL_TIME CORRECT_SCORE satırlarını (h,a,odds) olarak çıkarır. */
 function extractAllCorrectScores(
   fixtureOdds: FixtureOddsRow[],
   sanityMaxTotal: number
@@ -878,7 +846,7 @@ function extractAllCorrectScores(
   for (const row of fixtureOdds) {
     if (row.market !== "CORRECT_SCORE:FULL_TIME") continue;
     if (!row.selection.startsWith("score:")) continue;
-    const parts = row.selection.split(":"); // ["score", "H", "A"]
+    const parts = row.selection.split(":");
     if (parts.length !== 3) continue;
     const h = Number(parts[1]);
     const a = Number(parts[2]);
@@ -890,14 +858,6 @@ function extractAllCorrectScores(
   return out;
 }
 
-/**
- * Tüm doğru skor adaylarını (bookmaker'ın fiilen fiyatladığı her h-a) piyasanın
- * birleşik görüşüne göre skorlayıp olasılığa göre sıralar. CS market taban
- * alınır (kova-içi sıralamayı o belirler); 1X2/OU2.5/OU3.5/BTTS ise her kovaya
- * (yön/toplam/btts durumu) eşit uygulanan çarpanlardır — yani "3-0 mı 4-0 mü"
- * CS'e, "az mı çok mu gol" OU'ya kalır. 7+ gollü kombinasyonlar dahil, piyasa
- * fiyatlamışsa hiçbir üst sınırla kesilmez.
- */
 export function scoreCorrectScoreDistribution(
   fixtureOdds: FixtureOddsRow[],
   weights: V2Weights = V2_DEFAULT_WEIGHTS
@@ -929,8 +889,6 @@ export function scoreCorrectScoreDistribution(
     const ou25Factor = total >= 3 ? pOver25 : pUnder25;
     const ou35Factor = total >= 4 ? pOver35 : pUnder35;
     const bttsFactor = hs > 0 && as > 0 ? pBttsYes : pBttsNo;
-    // *3 / *2: kovanın "nötr" payı (1/3, 1/2) 1.0'a gelsin diye — nötr bir
-    // sinyal çarpanı değiştirmesin, sadece piyasanın normalden sapması etkilesin.
     const crossMarketMult =
       Math.pow(dirFactor * 3, weights.dir) *
       Math.pow(ou25Factor * 2, weights.ou25) *
@@ -945,12 +903,6 @@ export function scoreCorrectScoreDistribution(
   return normalized;
 }
 
-/**
- * scoreCorrectScoreDistribution çıktısını toplam gol sayısına göre gruplar
- * (0, 1, 2, ... N gol). "7 gollü bir maça da, 0-0/1-0'a da yakın olabilmeli"
- * ihtiyacı için: bu, maçın olası toplam gol profilini (düşük mü yüksek mi
- * skorlu olacağı) tek bakışta gösterir.
- */
 export function goalTotalDistribution(fixtureOdds: FixtureOddsRow[], weights?: V2Weights): GoalTotalBucket[] {
   const dist = scoreCorrectScoreDistribution(fixtureOdds, weights);
   const byTotal = new Map<number, number>();
@@ -963,12 +915,6 @@ export function goalTotalDistribution(fixtureOdds: FixtureOddsRow[], weights?: V
     .sort((x, y) => x.total - y.total);
 }
 
-/**
- * predictScoreline (V1) ile aynı dönüş şeklinde (family/primary/backup/reason),
- * ama primary/backup aile kuralları yerine scoreCorrectScoreDistribution'ın
- * en olası 2 skorundan geliyor. `family` sadece etiketleme/loglama için
- * classifyFamily'den taşınıyor, karar mekanizmasına girmiyor.
- */
 export function predictScorelineV2(
   fixtureOdds: FixtureOddsRow[],
   weights: V2Weights = V2_DEFAULT_WEIGHTS
@@ -1067,8 +1013,6 @@ function rel(a: number, b: number): number {
   return Math.abs(a - b) / b;
 }
 
-// Yüzdesel steam yönü tespiti — steamDown/steamUp'ın yerini alıyor.
-// pct: opening'e göre yüzde kaç düşmüş/artmış olmalı (0.08 = %8).
 function steamDownPct(
   row: { odds: number; opening: number | null } | FixtureOddsRow | null | undefined,
   pct: number,
@@ -1207,7 +1151,6 @@ export async function findSimilarForBookmaker(opts: {
     m.set(`${row.market}|${sel}`, { odds: row.odds, opening: row.opening });
   }
 
-  // --- YENİ: fixture'ın kendi CS core hatları + favori HTFT kombinasyonu ---
   const fxCsRows = CS_CORE_LINES
     .map((line) => ({ line, row: pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", `score:${line}`) }))
     .filter((x): x is { line: string; row: FixtureOddsRow } => x.row != null);
@@ -1227,22 +1170,14 @@ export async function findSimilarForBookmaker(opts: {
   const fxShH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "H");
   const fxAhA1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.0");
   const fxAhH1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.0");
-  // YENİ: berabere-eksenli sinyaller — Flamengo-Mirassol testinde HT-D/2H-D/HTFT-X/X/CS
-  // kombinasyonunun tek başına 1X2'den daha isabetli komşu getirdiği görüldü. Sert veto değil,
-  // yumuşak ağırlıklı mesafe olarak ekleniyor (havuzu sıfıra düşürme riski olmasın diye).
   const fxHtD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "D");
   const fxShD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "D");
   const fxHtftXX = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:X/X");
-  // YENİ: dönüş senaryoları — bir yarıda önde olup diğerinde kaybeden/kazanan maçlar (1/2, 2/1)
-  // için ayrı bir eksen. U3LxCw77 (HT 0-1, FT 2-1 — deplasman önde başlayıp ev sahibi çevirdi) testi
-  // bu marketlerin comeback/dönüş dinamiğini yakalayabildiğini gösterdi.
   const fxHtft12 = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:1/2");
   const fxHtft21 = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:2/1");
 
   type Ranked = { event_id: string; score: number };
 
-  // Ranking hesaplamasını bir fonksiyona çıkardık ki adaptif band aramasında
-  // tekrar tekrar (farklı liqBand değerleriyle) çağırabilelim.
   function computeRanked(liqBand: number): Ranked[] {
     const out: Ranked[] = [];
     for (const r of stage1Scored) {
@@ -1261,8 +1196,6 @@ export async function findSimilarForBookmaker(opts: {
       const ahA1 = L?.get("ASIAN_HANDICAP:FULL_TIME|A:-1.0");
       const ahH1 = L?.get("ASIAN_HANDICAP:FULL_TIME|H:-1.0");
 
-      // YENİ: mutlak puan eşiği yerine yüzdesel steam kontrolü — düşük oranlarda (DNB ~1.3)
-      // ve yüksek oranlarda (DNB ~8.0) tutarlı davranır.
       if (steamDownPct(fxDnbA, STEAM_TRIGGER_PCT) && dnbA && !steamDownPct(dnbA, STEAM_MATCH_PCT)) continue;
       if (steamDownPct(fxDnbH, STEAM_TRIGGER_PCT) && dnbH && !steamDownPct(dnbH, STEAM_MATCH_PCT)) continue;
       if (steamDownPct(fxShA, STEAM_TRIGGER_PCT) && shA && !steamDownPct(shA, STEAM_MATCH_PCT)) continue;
@@ -1289,7 +1222,6 @@ export async function findSimilarForBookmaker(opts: {
       if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
       if (fxHtH && htH) parts.push((1.2 * rel(htH.odds, fxHtH.odds)) ** 2);
 
-      // YENİ: HT-D / 2H-D / HTFT-X/X — berabere-ekseni mesafesi
       const htD = L?.get("HOME_DRAW_AWAY:FIRST_HALF|D");
       if (fxHtD && htD) parts.push((1.1 * rel(htD.odds, fxHtD.odds)) ** 2);
       const shD = L?.get("HOME_DRAW_AWAY:SECOND_HALF|D");
@@ -1301,7 +1233,6 @@ export async function findSimilarForBookmaker(opts: {
       const htft21 = L?.get("HALF_FULL_TIME:FULL_TIME|htft:2/1");
       if (fxHtft21 && htft21) parts.push((1.2 * rel(htft21.odds, fxHtft21.odds)) ** 2);
 
-      // CORRECT_SCORE ladder ortalama mesafesi
       if (fxCsRows.length) {
         const csDists: number[] = [];
         for (const { line, row } of fxCsRows) {
@@ -1314,7 +1245,6 @@ export async function findSimilarForBookmaker(opts: {
         }
       }
 
-      // fixture'ın favori HTFT kombinasyonu üzerinden mesafe
       if (favHtft) {
         const candHtft = L?.get(`HALF_FULL_TIME:FULL_TIME|${favHtft.sel}`);
         if (candHtft) parts.push((1.2 * rel(candHtft.odds, favHtft.row.odds)) ** 2);
@@ -1326,17 +1256,13 @@ export async function findSimilarForBookmaker(opts: {
     return out;
   }
 
-  // --- YENİ: adaptif band araması. Varsayılan bandtan başlar; aday sayısı hedefin
-  // dışındaysa merdivende bir sonraki (uygun yöndeki) adıma geçer. "Akıllıca" davranışı:
-  // çok az aday -> bandı gevşet (daha fazla tarihsel maç kabul et)
-  // çok fazla aday -> bandı sıkılaştır (daha spesifik/benzer maçlara odaklan)
+  // --- YENİ: adaptif band araması. ---
   const defaultIdx = LIQ_BAND_STEPS.indexOf(LIQ_BAND_DEFAULT);
   let bandIdx = defaultIdx;
   let ranked = computeRanked(LIQ_BAND_STEPS[bandIdx]);
   let usedLiqBand = LIQ_BAND_STEPS[bandIdx];
 
   if (ranked.length < LIQ_MIN_SAMPLE) {
-    // yukarı doğru (daha geniş bantlara) tara, yeterli örnekleme ulaşınca dur
     for (let i = bandIdx + 1; i < LIQ_BAND_STEPS.length; i++) {
       const attempt = computeRanked(LIQ_BAND_STEPS[i]);
       bandIdx = i;
@@ -1345,10 +1271,9 @@ export async function findSimilarForBookmaker(opts: {
       if (attempt.length >= LIQ_MIN_SAMPLE) break;
     }
   } else if (ranked.length > LIQ_MAX_SAMPLE) {
-    // aşağı doğru (daha dar bantlara) tara, hedef aralığa girene kadar
     for (let i = bandIdx - 1; i >= 0; i--) {
       const attempt = computeRanked(LIQ_BAND_STEPS[i]);
-      if (attempt.length < LIQ_MIN_SAMPLE) break; // çok daraltma, örneklem tekrar azalıyor
+      if (attempt.length < LIQ_MIN_SAMPLE) break;
       bandIdx = i;
       ranked = attempt;
       usedLiqBand = LIQ_BAND_STEPS[i];
@@ -1356,7 +1281,22 @@ export async function findSimilarForBookmaker(opts: {
     }
   }
 
-  const shortlist = ranked.slice(0, 40);
+  // DÜZELTME (asıl istenen değişiklik): sabit "en yakın 40" yerine gerçek bir
+  // benzerlik eşiği kullanılıyor. `ranked` skoru küçük = daha benzer demek.
+  // En iyi (en düşük) skorun belli bir katından uzaklaşan adaylar tamamen
+  // elenir — "sadece 5-6 maç gerçekten benziyorsa liste de 5-6 döner" davranışı.
+  // SCORE_MULTIPLIER şu an tahmini bir değer (2.5); gerçek maçlarda ranked[].score
+  // dağılımına bakılıp (ör. bir "dirsek noktası" aranarak) kalibre edilmesi gerekir.
+  const SIMILARITY_SCORE_CAP = 40; // üst sınır — çok fazla gerçek eşleşme varsa
+  const MIN_SIMILAR = 3; // bu kadardan azını hiç gösterme (UI tamamen boş kalmasın)
+  const SCORE_MULTIPLIER = 2.5; // KALİBRE EDİLMELİ — gerçek score dağılımıyla doğrulanmadı
+
+  const bestScore = ranked[0]?.score ?? null;
+  const scoreThreshold = bestScore != null ? bestScore * SCORE_MULTIPLIER : Infinity;
+
+  const shortlist = ranked
+    .filter((r, idx) => idx < MIN_SIMILAR || r.score <= scoreThreshold)
+    .slice(0, SIMILARITY_SCORE_CAP);
   const ids = shortlist.map((s) => s.event_id);
 
   let scored: { event_id: string; score: number; hs: number; as: number }[] = [];
@@ -1379,40 +1319,43 @@ export async function findSimilarForBookmaker(opts: {
     }
   }
 
+  // DÜZELTME: pruning artık açılıştan HAREKETE (drift) değil, doğrudan kapanış
+  // SEVİYESİNE bakıyor. Eskiden OU2.5 açılıştan beri hareketsiz ama zaten net bir
+  // seviyede duran maçlarda filtre hiç tetiklenmiyordu (0-0 ile 4-5 aynı listede
+  // çıkabiliyordu). Ayrıca artık BTTS pazarı da seviye kontrolüne katkı sağlıyor,
+  // sadece OU2.5'e bağımlı kalınmıyor.
   const ouClose = prof.ou25?.odds ?? null;
-  const ouOpen = prof.ou25?.opening ?? null;
-  const goalShut =
-    ouOpen != null && ouClose != null && ouClose > ouOpen + 0.04;
-  const goalOpen =
-    ouOpen != null && ouClose != null && ouClose < ouOpen - 0.04;
+  const goalShutLevel =
+    (ouClose != null && ouClose >= 2.2) ||
+    (prof.bttsNo != null &&
+      prof.bttsYes != null &&
+      prof.bttsNo.odds <= prof.bttsYes.odds &&
+      prof.bttsNo.odds <= 1.7);
+  const goalOpenLevel =
+    (ouClose != null && ouClose <= 1.62) ||
+    (prof.bttsYes != null && prof.bttsYes.odds <= 1.55);
   const bttsNoFav =
     prof.bttsNo != null &&
     prof.bttsYes != null &&
     prof.bttsNo.odds <= prof.bttsYes.odds;
+
   const pruned = scored.filter((s) => {
     const tot = s.hs + s.as;
     const low = tot <= 1 || `${s.hs}-${s.as}` === "1-0" || `${s.hs}-${s.as}` === "0-0";
     const burst = tot >= 5;
-    // YENİ: burst artık koşulsuz elenmiyor — sadece fixture'ın kendi OU sinyali
-    // gerçekten düşük gollü bir maça işaret ediyorsa (goalShut + uzun over oranı)
-    // 5+ gollü tarihsel komşular havuzdan çıkarılıyor. Aksi halde (fixture yüksek
-    // gollü bir profil gösteriyorsa) burst'ler havuzda kalmaya devam eder — "7 gollü
-    // maça da yakın olmalı" ihtiyacı tam olarak bu simetriyi gerektiriyor.
-    if (goalShut && ouClose != null && ouClose >= 2.2) {
-      if (burst) return false;
-    }
-    if (goalOpen && ouClose != null && ouClose <= 1.62) {
-      if (low) return false;
-    }
+    if (goalShutLevel && burst) return false;
+    if (goalOpenLevel && low) return false;
     if (prof.family === "HOME_BURST" && low) return false;
     return true;
   });
-  const usedScores = pruned.length ? pruned : scored;
+  // DÜZELTME: eskiden pruned boşsa sessizce filtresiz `scored` listesine dönülüyordu —
+  // bu, "hiçbir geçmiş maç profile tam uymuyor" durumunda yanlışlıkla 0-0/burst gibi
+  // uymayan maçları geri getiriyordu. Artık filtre bir şeyleri elediyse sonuç o
+  // haliyle kullanılıyor; "boşsa iptal et" davranışı tamamen kaldırıldı.
+  const usedScores = pruned;
+  const filterExhausted = scored.length > 0 && pruned.length === 0;
 
   // --- YENİ: regime (open/shut) oylamasını sadece en yakın STAGE2_POOL komşuya kısıtla ---
-  // `usedScores` zaten `score`'a göre sıralı geliyor (scored, shortlist sırasını korur, shortlist ranked'a göre sıralı).
-  // Böylece CS/HTFT ile iyileşen sıralama artık call/alt'a da yansır; 40 komşuluk düz oy çoğunluğu yerine
-  // en benzer 12 komşu oy kullanır.
   const regimePool = usedScores.slice(0, STAGE2_POOL);
 
   function freqOf(rows: typeof scored): ScoreBucket[] {
@@ -1452,9 +1395,16 @@ export async function findSimilarForBookmaker(opts: {
       .join(", ")}`;
   }
 
+  // YENİ: sample'lara ham score'un yanında okunabilir bir "benzerlik yüzdesi"
+  // ekleniyor — en iyi eşleşme ~%100'e yakın, eşiğe yaklaşan adaylar ~%0'a yakın.
+  // Bu istatistiksel bir olasılık değildir, sadece sıralamayı UI'da okunur kılar.
   const top = usedScores.slice(0, Math.max(K_MIN, Math.min(limit, STAGE2_POOL))).map((s) => ({
     event_id: s.event_id,
     score: s.score,
+    similarityPct:
+      bestScore != null && scoreThreshold > 0 && Number.isFinite(scoreThreshold)
+        ? Math.max(0, Math.round(100 * (1 - s.score / scoreThreshold)))
+        : null,
   }));
   const insights: MarketInsight[] = [];
   if (scored.length) {
@@ -1504,5 +1454,6 @@ export async function findSimilarForBookmaker(opts: {
     insights,
     durationMs: Date.now() - t0,
     usedLiqBand,
+    filterExhausted,
   };
 }
