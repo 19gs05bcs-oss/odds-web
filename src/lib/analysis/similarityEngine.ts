@@ -173,6 +173,63 @@ export function explainFamily(family: SimilarityFamily | undefined) {
   return FAMILY_EXPLAIN[family ?? "BASE"];
 }
 
+export type GoalLevel = "OPEN" | "SHUT" | "MID";
+export type ContraFlag = "NONE" | "CONTRA_UNDER" | "CONTRA_OVER";
+
+export function classifyGoalLevel(fixtureOdds: FixtureOddsRow[]): {
+  goalLevel: GoalLevel;
+  contra: ContraFlag;
+  note: string;
+} {
+  const ou25 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:2.5", "OVER:2.5");
+  const ou35 = pickRow(fixtureOdds, "OVER_UNDER:FULL_TIME:3.5", "OVER:3.5");
+  const bttsN = pickRow(fixtureOdds, "BOTH_TEAMS_TO_SCORE:FULL_TIME", "btts:NO");
+  const cs00 =
+    pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:0:0") ||
+    fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:0:0") ||
+    null;
+  const cs33 =
+    pickRow(fixtureOdds, "CORRECT_SCORE:FULL_TIME", "score:3:3") ||
+    fixtureOdds.find((x) => x.market.includes("CORRECT_SCORE") && x.selection === "score:3:3") ||
+    null;
+  const xx = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:X/X");
+  const o25 = ou25?.odds ?? null;
+  const o35 = ou35?.odds ?? null;
+  const c00 = cs00?.odds ?? null;
+
+  let goalLevel: GoalLevel = "MID";
+  if ((o25 != null && o25 <= 1.62) || (o35 != null && o35 <= 2.45) || (c00 != null && c00 >= 14)) {
+    goalLevel = "OPEN";
+  }
+  if ((o25 != null && o25 >= 2.05) || (o35 != null && o35 >= 3.2) || (c00 != null && c00 <= 10)) {
+    goalLevel = "SHUT";
+  }
+
+  const pct = (row: FixtureOddsRow | null) => {
+    if (!row || row.opening == null || row.opening <= 0) return null;
+    return (row.opening - row.odds) / row.opening;
+  };
+  let contra: ContraFlag = "NONE";
+  if (o25 != null && o25 <= 1.7 && ((pct(cs00) ?? 0) >= 0.08 || (pct(xx) ?? 0) >= 0.05 || (pct(bttsN) ?? 0) >= 0.05)) {
+    contra = "CONTRA_UNDER";
+    goalLevel = "SHUT";
+  }
+  if (o25 != null && o25 >= 2.05 && ((pct(cs33) ?? 0) >= 0.1 || ((pct(ou35) ?? 0) >= 0.05 && (pct(cs00) ?? 0) <= -0.05))) {
+    contra = "CONTRA_OVER";
+    goalLevel = "OPEN";
+  }
+  return {
+    goalLevel,
+    contra,
+    note:
+      contra === "CONTRA_UNDER"
+        ? "Market over, barren steam → SHUT neighbours"
+        : contra === "CONTRA_OVER"
+          ? "Market under, inflation steam → OPEN neighbours"
+          : `Goal level ${goalLevel}`,
+  };
+}
+
 export type ScoreBucket = { scoreline: string; n: number };
 export type RegimeBuckets = {
   open: ScoreBucket[];
@@ -1324,28 +1381,18 @@ export async function findSimilarForBookmaker(opts: {
   // seviyede duran maçlarda filtre hiç tetiklenmiyordu (0-0 ile 4-5 aynı listede
   // çıkabiliyordu). Ayrıca artık BTTS pazarı da seviye kontrolüne katkı sağlıyor,
   // sadece OU2.5'e bağımlı kalınmıyor.
-  const ouClose = prof.ou25?.odds ?? null;
-  const goalShutLevel =
-    (ouClose != null && ouClose >= 2.2) ||
-    (prof.bttsNo != null &&
-      prof.bttsYes != null &&
-      prof.bttsNo.odds <= prof.bttsYes.odds &&
-      prof.bttsNo.odds <= 1.7);
-  const goalOpenLevel =
-    (ouClose != null && ouClose <= 1.62) ||
-    (prof.bttsYes != null && prof.bttsYes.odds <= 1.55);
-  const bttsNoFav =
-    prof.bttsNo != null &&
-    prof.bttsYes != null &&
-    prof.bttsNo.odds <= prof.bttsYes.odds;
+  const goalProf = classifyGoalLevel(fixtureOdds);
+  const Hc = prof.h?.odds ?? 99;
+  const Ac = prof.a?.odds ?? 99;
+  const sideGate: "HOME" | "AWAY" | "PICKEM" =
+    Math.abs(Hc - Ac) / Math.min(Hc, Ac) <= 0.12 ? "PICKEM" : Hc <= Ac ? "HOME" : "AWAY";
 
   const pruned = scored.filter((s) => {
     const tot = s.hs + s.as;
-    const low = tot <= 1 || `${s.hs}-${s.as}` === "1-0" || `${s.hs}-${s.as}` === "0-0";
-    const burst = tot >= 5;
-    if (goalShutLevel && burst) return false;
-    if (goalOpenLevel && low) return false;
-    if (prof.family === "HOME_BURST" && low) return false;
+    if (sideGate === "HOME" && s.as - s.hs >= 2) return false;
+    if (sideGate === "AWAY" && s.hs - s.as >= 2) return false;
+    if (goalProf.goalLevel === "OPEN" && tot <= 2) return false;
+    if (goalProf.goalLevel === "SHUT" && tot >= 4) return false;
     return true;
   });
   // DÜZELTME: eskiden pruned boşsa sessizce filtresiz `scored` listesine dönülüyordu —
@@ -1444,6 +1491,9 @@ export async function findSimilarForBookmaker(opts: {
       "HT_GOAL_RADAR",
       `FAMILY:${prof.family}`,
       `LIQ_BAND:${usedLiqBand}`,
+      `GOAL:${goalProf.goalLevel}`,
+      `CONTRA:${goalProf.contra}`,
+      `SIDE:${sideGate}`,
     ],
     family: pred.family,
     buckets,
