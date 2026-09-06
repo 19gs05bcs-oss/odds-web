@@ -695,6 +695,29 @@ function pickRow(rows: FixtureOddsRow[], market: string, selection: string): Fix
   return null;
 }
 
+function pickClosestAH(
+  rows: FixtureOddsRow[],
+  favSide: "HOME" | "AWAY",
+  targetLine: number,
+  tolerance = 0.3
+): FixtureOddsRow | null {
+  const prefix = favSide === "HOME" ? "H:" : "A:";
+  let best: FixtureOddsRow | null = null;
+  let bestDiff = Infinity;
+  for (const r of rows) {
+    if (r.market !== "ASIAN_HANDICAP:FULL_TIME") continue;
+    if (!r.selection.startsWith(prefix)) continue;
+    const line = parseLine(r.selection);
+    if (line == null) continue;
+    const diff = Math.abs(line - targetLine);
+    if (diff < bestDiff && diff <= tolerance) {
+      bestDiff = diff;
+      best = r;
+    }
+  }
+  return best;
+}
+
 export function classifyFamily(fixtureOdds: FixtureOddsRow[]): {
   family: SimilarityFamily;
   h: FixtureOddsRow | null;
@@ -780,10 +803,10 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   const awayGoalPriced = ratio21 != null && ratio21 <= 1.2;
 
   const htft11 = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:1/1");
-  const ahM15 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.5");
+  const ahM15 = pickClosestAH(fixtureOdds, "HOME", -1.5);
 
   if (p.family === "AWAY_SHUTOUT") {
-    const ahA = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.5");
+    const ahA = pickClosestAH(fixtureOdds, "AWAY", -1.5);
     if (ahA && ahA.odds >= 2.1) return { family: p.family, primary: "0-1", backup: "0-2", reason: "AWAY_SHUTOUT + AH-1.5 uzun" };
     return { family: p.family, primary: "0-2", backup: "0-1", reason: "AWAY_SHUTOUT" };
   }
@@ -1225,8 +1248,8 @@ export async function findSimilarForBookmaker(opts: {
   const fxDnbH = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "H");
   const fxShA = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "A");
   const fxShH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "H");
-  const fxAhA1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "A:-1.0");
-  const fxAhH1 = pickRow(fixtureOdds, "ASIAN_HANDICAP:FULL_TIME", "H:-1.0");
+  const favSide = (prof.h?.odds ?? 99) <= (prof.a?.odds ?? 99) ? "HOME" : "AWAY";
+  const fxAhFav = pickClosestAH(fixtureOdds, favSide, -1.0);
   const fxHtD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "D");
   const fxShD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "D");
   const fxHtftXX = pickRow(fixtureOdds, "HALF_FULL_TIME:FULL_TIME", "htft:X/X");
