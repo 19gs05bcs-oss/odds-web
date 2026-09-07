@@ -440,20 +440,20 @@ export function readBoard(opts: {
     : null;
 
   // --- YENİ: favori oranı drift (uzama) sinyali (bkz. FAV_DRIFT_PCT tanımı) ---
-  const favSide: "HOME" | "AWAY" | null = p.h != null || p.a != null ? (Hc <= Ac ? "HOME" : "AWAY") : null;
-  const favRow = favSide === "HOME" ? p.h : favSide === "AWAY" ? p.a : null;
+  const favSideForDrift: "HOME" | "AWAY" | null = p.h != null || p.a != null ? (Hc <= Ac ? "HOME" : "AWAY") : null;
+  const favRow = favSideForDrift === "HOME" ? p.h : favSideForDrift === "AWAY" ? p.a : null;
   const favPct = steamPct(favRow); // pozitif = favori kısaldı
   const favDriftPct = favPct != null ? -favPct : null; // pozitif = favori uzadı (drift)
   const favDriftActive = favDriftPct != null && favDriftPct >= FAV_DRIFT_PCT;
   const favDriftSignal: BoardCall["favDriftSignal"] = favRow
     ? {
         active: favDriftActive,
-        side: favSide,
+        side: favSideForDrift,
         pct: favDriftPct,
         odds: favRow.odds,
         opening: favRow.opening,
         note: favDriftActive
-          ? `Favori (${favSide}) oranı açılıştan %${(favDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta 0-0 ihtimali %8.3, Under 2.5 %52.9'a çıkıyor. Sürpriz gol düellosu değil, favorinin kilit açamadığı bir "alt/kısır" senaryosu daha olası.`
+          ? `Favori (${favSideForDrift}) oranı açılıştan %${(favDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta 0-0 ihtimali %8.3, Under 2.5 %52.9'a çıkıyor. Sürpriz gol düellosu değil, favorinin kilit açamadığı bir "alt/kısır" senaryosu daha olası.`
           : "Favori oranı hareketi eşik altında (uyarı yok).",
       }
     : null;
@@ -525,7 +525,7 @@ export function readBoard(opts: {
     alerts.push("CS 0:0 shortening + OU2.5 confirmed → Under 2.5 / BTTS NO probability increases");
   }
   if (favDriftActive) {
-    alerts.push(`Favourite (${favSide}) odds drifting → low-scoring/Under match probability increases`);
+    alerts.push(`Favourite (${favSideForDrift}) odds drifting → low-scoring/Under match probability increases`);
   }
   if (xxDriftActive) {
     alerts.push(
@@ -695,6 +695,11 @@ function pickRow(rows: FixtureOddsRow[], market: string, selection: string): Fix
   return null;
 }
 
+// DÜZELTME: AH satırları çift taraflı geliyor (H:-0.75 gibi favori tarafı NEGATİF,
+// diğer taraf pozitif). Sabit "-1.0" gibi bir line ve sabit taraf aramak, favori
+// ev/deplasman değiştikçe hep null dönüyordu. Bu fonksiyon: 1) favori tarafına göre
+// doğru prefix'i (H: veya A:) seçer, 2) tam olarak istenen line yoksa en yakın
+// quarter/half line'ı (tolerans dahilinde) bulur.
 function pickClosestAH(
   rows: FixtureOddsRow[],
   favSide: "HOME" | "AWAY",
@@ -713,6 +718,33 @@ function pickClosestAH(
     if (diff < bestDiff && diff <= tolerance) {
       bestDiff = diff;
       best = r;
+    }
+  }
+  return best;
+}
+
+// Aynı mantığın candidate (aday maç) tarafı için Map üzerinde çalışan versiyonu.
+// computeRanked içinde liqByEvent'ten çekilen candidate satırları bu şekilde aranır.
+function pickClosestAHFromMap(
+  L: Map<string, { odds: number; opening: number | null }> | undefined,
+  favSide: "HOME" | "AWAY",
+  targetLine: number,
+  tolerance = 0.3
+): { odds: number; opening: number | null } | undefined {
+  if (!L) return undefined;
+  const prefix = favSide === "HOME" ? "H:" : "A:";
+  let best: { odds: number; opening: number | null } | undefined;
+  let bestDiff = Infinity;
+  for (const [key, val] of L.entries()) {
+    if (!key.startsWith("ASIAN_HANDICAP:FULL_TIME|")) continue;
+    const sel = key.slice("ASIAN_HANDICAP:FULL_TIME|".length);
+    if (!sel.startsWith(prefix)) continue;
+    const line = parseLine(sel);
+    if (line == null) continue;
+    const diff = Math.abs(line - targetLine);
+    if (diff < bestDiff && diff <= tolerance) {
+      bestDiff = diff;
+      best = val;
     }
   }
   return best;
@@ -1213,7 +1245,7 @@ export async function findSimilarForBookmaker(opts: {
         OR (market = 'DRAW_NO_BET:FULL_TIME' AND selection IN ('H','A'))
         OR (market = 'HOME_DRAW_AWAY:SECOND_HALF' AND selection IN ('H','D','A'))
         OR (market = 'HOME_DRAW_AWAY:FIRST_HALF' AND selection IN ('H','D','A'))
-        OR (market = 'ASIAN_HANDICAP:FULL_TIME' AND selection IN ('A:-1.0','H:-1.0','A:0.0','H:0.0'))
+        OR (market = 'ASIAN_HANDICAP:FULL_TIME')
         OR (market = 'EUROPEAN_HANDICAP:FULL_TIME' AND selection IN ('A:-1.0','H:-1.0'))
       )
     `,
@@ -1248,7 +1280,10 @@ export async function findSimilarForBookmaker(opts: {
   const fxDnbH = pickRow(fixtureOdds, "DRAW_NO_BET:FULL_TIME", "H");
   const fxShA = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "A");
   const fxShH = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "H");
-  const favSide = (prof.h?.odds ?? 99) <= (prof.a?.odds ?? 99) ? "HOME" : "AWAY";
+  // DÜZELTME: AH artık her zaman favori tarafına göre tek bir taraftan okunuyor.
+  // Ev ve deplasman için ayrı ayrı sabit "-1.0" arayan eski fxAhA1/fxAhH1 kaldırıldı;
+  // hangi taraf favoriyse (Hc<=Ac -> HOME) o tarafın en yakın line'ı kullanılıyor.
+  const favSide: "HOME" | "AWAY" = (prof.h?.odds ?? 99) <= (prof.a?.odds ?? 99) ? "HOME" : "AWAY";
   const fxAhFav = pickClosestAH(fixtureOdds, favSide, -1.0);
   const fxHtD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:FIRST_HALF", "D");
   const fxShD = pickRow(fixtureOdds, "HOME_DRAW_AWAY:SECOND_HALF", "D");
@@ -1273,15 +1308,16 @@ export async function findSimilarForBookmaker(opts: {
       const dnbH = L?.get("DRAW_NO_BET:FULL_TIME|H");
       const shA = L?.get("HOME_DRAW_AWAY:SECOND_HALF|A");
       const shH = L?.get("HOME_DRAW_AWAY:SECOND_HALF|H");
-      const ahA1 = L?.get("ASIAN_HANDICAP:FULL_TIME|A:-1.0");
-      const ahH1 = L?.get("ASIAN_HANDICAP:FULL_TIME|H:-1.0");
+      // DÜZELTME: adayın AH satırı da artık aynı favSide + en yakın line mantığıyla aranıyor.
+      // Eski sabit "A:-1.0"/"H:-1.0" anahtarları, gerçek line'lar (-0.75, -1.25 vb.) hiç
+      // eşleşmediği için sürekli undefined dönüyordu.
+      const ahFav = pickClosestAHFromMap(L, favSide, -1.0);
 
       if (steamDownPct(fxDnbA, STEAM_TRIGGER_PCT) && dnbA && !steamDownPct(dnbA, STEAM_MATCH_PCT)) continue;
       if (steamDownPct(fxDnbH, STEAM_TRIGGER_PCT) && dnbH && !steamDownPct(dnbH, STEAM_MATCH_PCT)) continue;
       if (steamDownPct(fxShA, STEAM_TRIGGER_PCT) && shA && !steamDownPct(shA, STEAM_MATCH_PCT)) continue;
       if (steamDownPct(fxShH, STEAM_TRIGGER_PCT) && shH && !steamDownPct(shH, STEAM_MATCH_PCT)) continue;
-      if (steamDownPct(fxAhA1, STEAM_TRIGGER_PCT_AH) && ahA1 && !steamDownPct(ahA1, STEAM_MATCH_PCT_AH)) continue;
-      if (steamDownPct(fxAhH1, STEAM_TRIGGER_PCT_AH) && ahH1 && !steamDownPct(ahH1, STEAM_MATCH_PCT_AH)) continue;
+      if (steamDownPct(fxAhFav, STEAM_TRIGGER_PCT_AH) && ahFav && !steamDownPct(ahFav, STEAM_MATCH_PCT_AH)) continue;
 
       if (!ou25 || !bttsY) continue;
       if (prof.ou25 && rel(ou25.odds, prof.ou25.odds) > liqBand) continue;
@@ -1299,7 +1335,7 @@ export async function findSimilarForBookmaker(opts: {
       parts.push((1.4 * rel(bttsY.odds, prof.bttsYes?.odds ?? bttsY.odds)) ** 2);
       if (fxDnbA && dnbA) parts.push((1.2 * rel(dnbA.odds, fxDnbA.odds)) ** 2);
       if (fxShA && shA) parts.push((1.15 * rel(shA.odds, fxShA.odds)) ** 2);
-      if (fxAhA1 && ahA1) parts.push((1.1 * rel(ahA1.odds, fxAhA1.odds)) ** 2);
+      if (fxAhFav && ahFav) parts.push((1.1 * rel(ahFav.odds, fxAhFav.odds)) ** 2);
       if (fxHtH && htH) parts.push((1.2 * rel(htH.odds, fxHtH.odds)) ** 2);
 
       const htD = L?.get("HOME_DRAW_AWAY:FIRST_HALF|D");
