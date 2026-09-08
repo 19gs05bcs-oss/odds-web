@@ -83,7 +83,14 @@ export function computeMarketSignals(
     if (!Array.isArray(row) || row.length < 6) continue;
     const [bmId, mtype, scope, sideTok, opening, current, active] = row;
     if (String(mtype) !== "HOME_DRAW_AWAY" || String(scope) !== "FULL_TIME") continue;
-    if (active === false || active === 0 || active === "0" || active === "false") continue;
+    const activeRaw: unknown = active;
+    if (
+      activeRaw === false ||
+      activeRaw === 0 ||
+      activeRaw === "0" ||
+      activeRaw === "false"
+    )
+      continue;
     const side = String(sideTok);
     if (side !== "H" && side !== "D" && side !== "A") continue; // p:<id> vb. edge-case'ler atlanır
     const val = pickOddsValue(opening, current);
