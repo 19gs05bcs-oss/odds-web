@@ -58,6 +58,18 @@ function stdev(xs: number[], m: number): number {
   return Math.sqrt(variance);
 }
 
+// tableRows.ts'teki parseOddsNum/oddsValue ile AYNI kural: değerler bazen
+// string gelebiliyor (Number(v) ile coerce edilmeli) ve current boşsa
+// opening'e düşülüyor — bunu yapmazsak çoğu büro "eksik" sayılıp elenir.
+function parseOddsNum(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1.01 ? n : null;
+}
+
+function pickOddsValue(opening: unknown, current: unknown): number | null {
+  return parseOddsNum(current) ?? parseOddsNum(opening);
+}
+
 export function computeMarketSignals(
   odds: CompactOddsRow[] | null | undefined,
   bookmakers: Record<string, string> | null | undefined,
@@ -69,13 +81,13 @@ export function computeMarketSignals(
   const byBm = new Map<number, Partial<Record<Side, number>>>();
   for (const row of odds) {
     if (!Array.isArray(row) || row.length < 6) continue;
-    const [bmId, mtype, scope, sideTok, , current, active] = row;
+    const [bmId, mtype, scope, sideTok, opening, current, active] = row;
     if (String(mtype) !== "HOME_DRAW_AWAY" || String(scope) !== "FULL_TIME") continue;
-    if (active === false) continue;
+    if (active === false || active === 0 || active === "0" || active === "false") continue;
     const side = String(sideTok);
     if (side !== "H" && side !== "D" && side !== "A") continue; // p:<id> vb. edge-case'ler atlanır
-    const val = typeof current === "number" ? current : null;
-    if (val == null || val <= 1.0) continue;
+    const val = pickOddsValue(opening, current);
+    if (val == null) continue;
     const bmNum = Number(bmId);
     if (!byBm.has(bmNum)) byBm.set(bmNum, {});
     byBm.get(bmNum)![side as Side] = val;
