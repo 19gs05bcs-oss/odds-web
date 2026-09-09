@@ -1,30 +1,5 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
-/**
- * "V54 Rejim Motoru" (Regime-Based Correct-Score Portfolio Engine).
- *
- * Kaynak: Ali'nin test_v54_blackburn_sheffutd.py betiği. ESKİ motor (hacim/
- * konsensüs tabanlı CORRECT_SCORE ranking) tamamen bu mantıkla DEĞİŞTİRİLDİ.
- *
- * Yöntem özeti (script ile birebir aynı):
- *  1) 1X2 (HOME_DRAW_AWAY/FULL_TIME) tüm büro kotasyonlarının medyanından
- *     vig-normalize edilmiş Ev/Beraberlik/Deplasman olasılığı çıkarılır.
- *  2) Over/Under 2.5 (FULL_TIME) tüm büro kotasyonlarının medyanından
- *     2 yönlü implied Üst 2.5 olasılığı çıkarılır.
- *  3) Bu iki olasılığa göre maç bir "rejime" atanır (DOM_H / DOM_H_HYPER /
- *     DOM_A / DOM_A_HYPER / LOCK / OPEN) ve her rejim için sabit, elle
- *     ayarlanmış 4'lü bir skor portföyü döndürülür (ilk 3 = çekirdek/Hit@3,
- *     4.'sü = sigorta/Hit@4).
- *  4) Bu 4 skorun piyasa CORRECT_SCORE medyan oranı (varsa) sadece GÖSTERİM
- *     amaçlı eklenir — eski motorun aksine burada CS oranları sıralamayı
- *     BELİRLEMEZ, sadece rejim + O/U belirler.
- *
- * NOT — YORUM SINIRI: Bu bir "kesin skor tahmini" değil, kural-tabanlı bir
- * rejim sınıflandırması + heuristik skor portföyüdür. 1X2/OU kotasyonu
- * bulunamazsa script'teki gibi varsayılan (fallback) oranlara düşülür — bu
- * durumda sonuç daha az güvenilirdir.
- */
-
 export type ScoreConsensusSlot = {
   score: string; // "2:1" formatında
   marketOdds: number | null; // bu skor için piyasa medyan CORRECT_SCORE oranı (varsa)
@@ -34,8 +9,8 @@ export type ScoreConsensusSlot = {
 
 export type ScoreConsensus = {
   regimeCode: string; // DOM_H_HYPER | DOM_H | DOM_A_HYPER | DOM_A | LOCK | OPEN
-  regimeLabel: string; // Türkçe açıklama, script'teki "reg" metninin karşılığı
-  confidenceLabel: string; // "STANDART" | "YÜKSEK (...)" — script'teki confidence
+  regimeLabel: string; // Türkçe açıklama
+  confidenceLabel: string; // "STANDART" | "YÜKSEK (...)"
   homeProb: number; // yüzde
   drawProb: number; // yüzde
   awayProb: number; // yüzde
@@ -47,21 +22,18 @@ export type ScoreConsensus = {
   hit4: boolean | null; // gerçek skor 4'ünde mi
 };
 
-// script'teki varsayılan (fallback) medyanlar — hiç kotasyon yoksa kullanılır
 const FALLBACK_H = 2.8;
 const FALLBACK_D = 3.4;
 const FALLBACK_A = 2.45;
 const FALLBACK_OVER = 1.9;
 const FALLBACK_UNDER = 1.9;
 
-const HARD_UNDER_MAX = 0.44; // p_over <= bu -> "kısır" / alt destekli
-const HYPER_OVER_MIN = 0.6; // p_over >= bu -> yüksek tempolu / gol baskısı
-const HARD_OVER_MIN = 0.55; // p_over >= bu -> favori rejimlerde 3./4. slot değişir
-const DOM_THRESHOLD = 0.5; // p_h veya p_a >= bu -> tek taraflı favori rejimi
-const HEAVY_FAV_THRESHOLD = 0.58; // "Ağır Favori" etiketi eşiği
+const HARD_UNDER_MAX = 0.44;
+const HYPER_OVER_MIN = 0.6;
+const HARD_OVER_MIN = 0.55;
+const DOM_THRESHOLD = 0.43; // %43 eşiğine çekildi (2.25 ve altı favori sayılır)
+const HEAVY_FAV_THRESHOLD = 0.58;
 
-// tableRows.ts/marketSignals.ts ile AYNI kural: değerler bazen string gelebilir,
-// current boşsa opening'e düşülür.
 function parseOddsNum(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1.01 ? n : null;
@@ -75,7 +47,6 @@ function isActive(active: unknown): boolean {
   return !(active === false || active === 0 || active === "0" || active === "false");
 }
 
-/** "score:2:1" ya da "2:1" -> {score:"2:1", h:2, a:1} | null */
 function parseScoreToken(sideTok: string): { score: string; h: number; a: number } | null {
   const stripped = sideTok.startsWith("score:") ? sideTok.slice(6) : sideTok;
   const parts = stripped.split(":");
@@ -92,7 +63,6 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-/** 3 yönlü vig-normalize implied probability (script: normalize_1x2). */
 function normalize1x2(h: number, d: number, a: number): [number, number, number] {
   const ih = 1 / h;
   const id = 1 / d;
@@ -101,7 +71,6 @@ function normalize1x2(h: number, d: number, a: number): [number, number, number]
   return [ih / s, id / s, ia / s];
 }
 
-/** 2 yönlü vig-normalize implied probability — Üst 2.5 olasılığı (script: implied_two). */
 function impliedOver(over: number, under: number): number {
   const io = 1 / over;
   const iu = 1 / under;
@@ -112,89 +81,112 @@ type Regime = {
   code: string;
   label: string;
   confidence: string;
-  ranked: string[]; // "2:1" formatında 4 skor, azalan öncelik
+  ranked: string[];
 };
 
-/** script'teki if/elif zincirinin birebir karşılığı. */
-function resolveRegime(
+/** V55: Rejimin teorik koridoru ile büroların CS oranlarını sentezler */
+function resolveDynamicRegime(
   pH: number,
   pA: number,
+  pOver: number,
   isHyperOver: boolean,
   isHardUnder: boolean,
   isHardOver: boolean,
+  csOddsByScore: Map<string, number[]>,
 ): Regime {
-  if (pH >= DOM_THRESHOLD) {
+  let code = "OPEN";
+  let label = "Dengeli / Açık";
+  let confidence = "STANDART";
+  let basePrior: string[] = [];
+
+  const isHomeFav = pH >= DOM_THRESHOLD && pH > pA * 1.12;
+  const isAwayFav = pA >= DOM_THRESHOLD && pA > pH * 1.12;
+
+  if (isHomeFav) {
     if (isHyperOver) {
-      return {
-        code: "DOM_H_HYPER",
-        label: "Yüksek Tempolu Ev Favori",
-        confidence: "YÜKSEK (Gol Baskısı)",
-        ranked: ["2:1", "3:1", "2:2", "3:2"],
-      };
+      code = "DOM_H_HYPER";
+      label = "Yüksek Tempolu Ev Favori";
+      confidence = "YÜKSEK (Gol Baskısı)";
+      basePrior = ["2:1", "3:1", "2:2", "3:2", "2:0"];
+    } else if (isHardUnder) {
+      code = "DOM_H";
+      label = "Kısır Ev Favori";
+      confidence = "YÜKSEK (Alt Destekli)";
+      basePrior = ["2:0", "1:0", "1:1", "2:1", "0:0"];
+    } else {
+      code = "DOM_H";
+      label = "Ev Favori";
+      confidence = pH >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART";
+      basePrior = ["2:0", "1:1", "2:1", isHardOver ? "3:1" : "1:0", "3:0"];
     }
-    if (isHardUnder) {
-      return {
-        code: "DOM_H",
-        label: "Kısır Ev Favori",
-        confidence: "YÜKSEK (Alt Destekli)",
-        ranked: ["2:0", "1:0", "1:1", "2:1"],
-      };
-    }
-    return {
-      code: "DOM_H",
-      label: "Ev Favori",
-      confidence: pH >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART",
-      ranked: ["2:0", "1:1", "2:1", isHardOver ? "3:1" : "1:0"],
-    };
-  }
-
-  if (pA >= DOM_THRESHOLD) {
+  } else if (isAwayFav) {
     if (isHyperOver) {
-      return {
-        code: "DOM_A_HYPER",
-        label: "Yüksek Tempolu Deplasman Favori",
-        confidence: "YÜKSEK (Gol Baskısı)",
-        ranked: ["1:2", "1:3", "2:2", "2:3"],
-      };
+      code = "DOM_A_HYPER";
+      label = "Yüksek Tempolu Deplasman Favori";
+      confidence = "YÜKSEK (Gol Baskısı)";
+      basePrior = ["1:2", "1:3", "2:2", "2:3", "0:2"];
+    } else if (isHardUnder) {
+      code = "DOM_A";
+      label = "Kısır Deplasman Favori";
+      confidence = "YÜKSEK (Alt Destekli)";
+      basePrior = ["0:1", "0:2", "1:1", "0:0", "1:2"];
+    } else {
+      code = "DOM_A";
+      label = "Deplasman Favori";
+      confidence = pA >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART";
+      basePrior = ["0:2", "1:2", "0:1", isHardOver ? "1:3" : "2:2", "0:3"];
     }
-    if (isHardUnder) {
-      return {
-        code: "DOM_A",
-        label: "Kısır Deplasman Favori",
-        confidence: "YÜKSEK (Alt Destekli)",
-        ranked: ["0:1", "0:2", "1:1", "0:0"],
-      };
-    }
-    return {
-      code: "DOM_A",
-      label: "Deplasman Favori",
-      confidence: pA >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART",
-      ranked: ["0:2", "1:2", "0:1", isHardOver ? "1:3" : "2:2"],
-    };
+  } else if (isHardUnder) {
+    code = "LOCK";
+    label = "Kilit Alt";
+    confidence = "YÜKSEK (Piyasa Kilidi)";
+    basePrior = pH >= pA ? ["1:1", "1:0", "0:0", "2:0", "0:1"] : ["1:1", "0:1", "0:0", "0:2", "1:0"];
+  } else {
+    code = "OPEN";
+    label = "Dengeli / Açık";
+    confidence = "STANDART";
+    basePrior = pH >= pA ? ["1:1", "2:1", "1:2", "2:2", "2:0"] : ["1:1", "1:2", "2:1", "2:2", "0:2"];
   }
 
-  if (isHardUnder) {
-    return {
-      code: "LOCK",
-      label: "Kilit Alt",
-      confidence: "YÜKSEK (Piyasa Kilidi)",
-      ranked: pH >= pA ? ["1:1", "1:0", "0:0", "2:0"] : ["1:1", "0:1", "0:0", "0:2"],
-    };
+  // Eğer piyasada CS kotasyonu varsa, statik şablonu büro medyanlarıyla derecelendir
+  if (csOddsByScore.size >= 4) {
+    const scoredCandidates: { score: string; power: number }[] = [];
+
+    for (const [score, oddsList] of csOddsByScore.entries()) {
+      const medOdd = median(oddsList);
+      if (medOdd <= 1.0) continue;
+
+      const parsed = parseScoreToken(score);
+      if (!parsed) continue;
+      const { h, a } = parsed;
+      const totGoals = h + a;
+
+      // Piyasa Gol Uyumu
+      const ouFactor = totGoals >= 3 ? pOver / 0.5 : (1 - pOver) / 0.5;
+
+      // Rejim Önceliği Bonusu
+      const priorIndex = basePrior.indexOf(score);
+      const priorWeight = priorIndex !== -1 ? Math.max(1.1, 2.2 - priorIndex * 0.25) : 0.85;
+
+      // Fiyat Ters Oranı (İhtimal) * Barem Uyumu * Rejim Ağırlığı
+      const power = (1.0 / medOdd) * 100 * ouFactor * priorWeight;
+      scoredCandidates.push({ score, power });
+    }
+
+    scoredCandidates.sort((a, b) => b.power - a.power);
+    const ranked = scoredCandidates.slice(0, 4).map((item) => item.score);
+
+    if (ranked.length === 4) {
+      return { code, label, confidence, ranked };
+    }
   }
 
-  return {
-    code: "OPEN",
-    label: "Dengeli / Açık",
-    confidence: "STANDART",
-    ranked: pH >= pA ? ["1:1", "2:1", "1:2", "2:2"] : ["1:1", "1:2", "2:1", "2:2"],
-  };
+  // CS kotasyonu yetersizse rejim önceliğindeki ilk 4 skoru kullan
+  return { code, label, confidence, ranked: basePrior.slice(0, 4) };
 }
 
 export function computeScoreConsensus(
   odds: CompactOddsRow[] | null | undefined,
-  // V54 rejim motoru büro bazlı ayrım yapmıyor (script gibi tüm kotasyonlar
-  // birlikte medyanlanıyor) — imza SmartAnalysisClient.tsx çağrısıyla uyumlu
-  // kalsın diye korunuyor, kullanılmıyor.
   bookmakers: Record<string, string> | null | undefined,
   homeScore?: string | number | null,
   awayScore?: string | number | null,
@@ -251,7 +243,15 @@ export function computeScoreConsensus(
   const isHyperOver = pOver >= HYPER_OVER_MIN;
   const isHardOver = pOver >= HARD_OVER_MIN;
 
-  const regime = resolveRegime(pH, pA, isHyperOver, isHardUnder, isHardOver);
+  const regime = resolveDynamicRegime(
+    pH,
+    pA,
+    pOver,
+    isHyperOver,
+    isHardUnder,
+    isHardOver,
+    csOddsByScore,
+  );
 
   const hs = homeScore != null ? Number(homeScore) : null;
   const as_ = awayScore != null ? Number(awayScore) : null;
