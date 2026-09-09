@@ -1,70 +1,61 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
 /**
- * "Skor Konsensüs Motoru" — V8.
+ * "Skor Konsensüs Motoru" (Correct-Score Consensus / Volume Engine).
  *
- * Kaynak: Ali'nin ad-hoc test_v8_engine.py betiği. marketSignals.ts ile AYNI
- * şekilde saf client-side (ek API isteği YOK) çalışır: seçilen maçın kendi
- * `odds`/`bookmakers` verisinden hesaplanır.
+ * Kaynak: Ali'nin ad-hoc test_sporting_galatasaray.py betiği — orada Supabase'ten
+ * tek bir maç çekilip CORRECT_SCORE + OVER_UNDER 2.5 oranlarından hacim-uyumlu bir
+ * skor sıralaması üretiliyordu. Burada aynı mantık, marketSignals.ts ile AYNI
+ * şekilde saf client-side (ek API isteği YOK) çalışacak biçimde TS'e taşındı:
+ * seçilen maçın kendi `odds`/`bookmakers` verisinden hesaplanır.
  *
- * V7'den (önceki sürüm) farkı: genel "en hacimli 8 skor" tablosu yerine, script
- * ile birebir aynı 3 KOLTUKLU PORTFÖY üretir:
- *   1) Konsensüs / Favori   — 1X2 favorisi tarafındaki en güçlü skor
- *   2) Piyasa Temposu (BTTS Sentez) — kalan skorlardan en güçlüsü; KG Var
- *      piyasası çok baskılıysa (<=1.65) sadece "her iki takım da gol atar"
- *      skorlarına daralır
- *   3) Türev Kırılma / Hedge Anomali — favori DIŞI tarafta, drop*sqrt(prob)
- *      sıralamasına göre en belirgin oran kırılması
+ * Yöntem özeti:
+ *  1) Over/Under 2.5 medyan oranlarından üst/alt 2.5 gol olasılığı çıkarılır
+ *     (2 yönlü implied probability, vig normalize edilmiş).
+ *  2) Her büronun CORRECT_SCORE (FULL_TIME) skorları toplanır — en az
+ *     MIN_SCORES_PER_BOOKMAKER farklı skor veren bürolar dikkate alınır.
+ *  3) Büro başına implied probability^GAMMA / toplam ile normalize edilmiş bir
+ *     "hacim payı" hesaplanır; skor bazında bürolar arası medyan + CV
+ *     (tutarlılık) + medyan-min "drop" (para girişi izlenimi) çıkarılır.
+ *  4) Toplam gol sayısı, Over/Under 2.5 olasılığıyla ağırlıklandırılıp
+ *     (O/U piyasasıyla TUTARLI skorlar öne çıksın diye) nihai bir puan
+ *     üretilir ve azalan sırada sıralanır.
  *
- * Asian Handicap / HT-FT dönüş / "clear handicap" mantığı V8'de YOK — onun
- * yerine BTTS sentezi (is_btts_heavy) var. Bu, script'teki tasarım kararı;
- * burada da aynen korunuyor.
- *
- * NOT — YORUM SINIRI: bu bir "kesin skor tahmini" DEĞİL, bürolar arası
- * konsensüs + hacim izlenimini özetleyen bir portföy. Az büro veri verdiğinde
- * (confidence: "low") tek bir aykırı fiyat seçimi domine edebilir.
+ * NOT — YORUM SINIRI: marketSignals.ts'teki notla aynı: bu "kesin skor tahmini"
+ * DEĞİL, bürolar arası konsensüs + hacim izlenimini özetleyen bir sıralama.
+ * Az büro veri verdiğinde (confidence: "low") tek bir aykırı fiyat sıralamayı
+ * domine edebilir.
  */
 
-export type ScoreConsensusPickRole = "favorite" | "tempo" | "hedge";
-
-export type ScoreConsensusPick = {
-  role: ScoreConsensusPickRole;
+export type ScoreConsensusRow = {
   score: string; // "2:1" formatında
   totalGoals: number;
-  side: "H" | "D" | "A";
+  value: number; // sıralama puanı — yüksek = daha "hacimli" konsensüs
   medianOdds: number;
+  minOdds: number;
   dropPct: number; // (medyan-min)/medyan * 100
-  probPct: number; // büro-arası implied probability medyanı, yüzde
-  powerScore: number; // sıralama puanı
-  bookmakerCount: number; // bu skoru veren büro sayısı
+  bookmakerCount: number; // bu skoru veren (ve eşiği geçen) büro sayısı
+  cv: number; // bürolar-arası implied probability tutarsızlığı, yüzde
 };
 
 export type ScoreConsensus = {
   bookmakerCount: number; // CS için kullanılan (>= MIN_SCORES_PER_BOOKMAKER skor veren) büro sayısı
-  confidence: "high" | "low";
-  home1x2Prob: number; // yüzde
-  draw1x2Prob: number; // yüzde
-  away1x2Prob: number; // yüzde
   over25Prob: number; // yüzde
   under25Prob: number; // yüzde
-  bttsYesOdds: number;
-  bttsNoOdds: number;
-  isBttsHeavy: boolean; // KG Var medyan oranı <= 1.65
-  favoriteSide: "H" | "A";
-  picks: ScoreConsensusPick[]; // favorite + (varsa) tempo + hedge, bu sırayla
+  confidence: "high" | "low";
+  rankings: ScoreConsensusRow[]; // azalan value sırası, en fazla TOP_N
   actualScore: string | null; // maç oynandıysa gerçek skor, oynanmadıysa null
 };
 
-const MIN_SCORES_PER_BOOKMAKER = 8; // script: len(scores) < 8 -> o büro atlanır
-const MIN_QUOTES_PER_SCORE = 4; // script: len(p_list) < 4 / len(r) < 4 -> o skor atlanır
+const MIN_BOOKMAKERS_FOR_CS = 3; // test script: len(bm_scores) < 3 -> iptal
+const MIN_SCORES_PER_BOOKMAKER = 8; // test script: len(scores) < 8 -> o büro atlanır
+const MIN_QUOTES_PER_SCORE = 3; // test script: len(p_list) < 3 -> o skor atlanır
 export const LOW_CONFIDENCE_BM_COUNT = 6;
 const GAMMA = 1.18;
-const BTTS_HEAVY_THRESHOLD = 1.65;
-const PANIC_DROP_THRESHOLD = 0.45;
-const PANIC_DROP_MIN_BOOKMAKERS = 8;
-const NON_PANIC_MAX_ODDS = 55.0;
-const NON_PANIC_MIN_PROB_PCT = 1.0;
+const TOP_N = 8;
 
+// marketSignals.ts'teki parseOddsNum/pickOddsValue ile AYNI kural: değerler
+// bazen string gelebilir, current boşsa opening'e düşülür.
 function parseOddsNum(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1.01 ? n : null;
@@ -76,18 +67,6 @@ function pickOddsValue(opening: unknown, current: unknown): number | null {
 
 function isActive(active: unknown): boolean {
   return !(active === false || active === 0 || active === "0" || active === "false");
-}
-
-/** HOME_DRAW_AWAY side eşleşmesi — tableRows.ts'teki ile aynı defansif kural. */
-function matchHdaSide(side: string, want: "H" | "D" | "A"): boolean {
-  return side === want || side.startsWith(`${want}:`);
-}
-
-/** BOTH_TEAMS_TO_SCORE side eşleşmesi — tableRows.ts'teki ile aynı defansif kural. */
-function matchBttsSide(side: string, wantYes: boolean): boolean {
-  return wantYes
-    ? /btts:(YES|True)$/i.test(side) || side === "YES" || side === "True"
-    : /btts:(NO|False)$/i.test(side) || side === "NO" || side === "False";
 }
 
 /** "score:2:1" ya da (bkz. tableRows.ts'teki aynı defansif kontrol) "2:1" -> {score:"2:1", h:2, a:1} | null */
@@ -107,31 +86,14 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-type PoolRow = {
-  score: string;
-  h: number;
-  a: number;
-  tot: number;
-  side: "H" | "D" | "A";
-  medOdd: number;
-  dropPct: number;
-  probPct: number;
-  power: number;
-  bookmakerCount: number;
-};
+function mean(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0) / xs.length;
+}
 
-function toPick(row: PoolRow, role: ScoreConsensusPickRole): ScoreConsensusPick {
-  return {
-    role,
-    score: row.score,
-    totalGoals: row.tot,
-    side: row.side,
-    medianOdds: row.medOdd,
-    dropPct: row.dropPct,
-    probPct: row.probPct,
-    powerScore: row.power,
-    bookmakerCount: row.bookmakerCount,
-  };
+function stdev(xs: number[], m: number): number {
+  if (xs.length < 2) return 0;
+  const variance = xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1);
+  return Math.sqrt(variance);
 }
 
 export function computeScoreConsensus(
@@ -141,12 +103,13 @@ export function computeScoreConsensus(
   awayScore?: string | number | null,
 ): ScoreConsensus | null {
   if (!odds?.length) return null;
+  const bmNames = bookmakers ?? {};
+  const bmName = (id: number) => bmNames[String(id)] ?? `BM_${id}`;
 
-  const hdaFt: Record<"H" | "D" | "A", number[]> = { H: [], D: [], A: [] };
-  const ouLines = { over25: [] as number[], under25: [] as number[] };
-  const btts = { yes: [] as number[], no: [] as number[] };
-  // bmId -> skor -> oran
-  const csByBm = new Map<string, Map<string, number>>();
+  const over25: number[] = [];
+  const under25: number[] = [];
+  // büro adı -> skor -> oran
+  const bmScores = new Map<string, Map<string, number>>();
 
   for (const row of odds) {
     if (!Array.isArray(row) || row.length < 6) continue;
@@ -154,64 +117,42 @@ export function computeScoreConsensus(
     if (String(scope) !== "FULL_TIME" || !isActive(active)) continue;
     const val = pickOddsValue(opening, current);
     if (val == null) continue;
-    const side = String(sideTok);
-    const type = String(mtype);
 
-    if (type === "HOME_DRAW_AWAY") {
-      if (matchHdaSide(side, "H")) hdaFt.H.push(val);
-      else if (matchHdaSide(side, "D")) hdaFt.D.push(val);
-      else if (matchHdaSide(side, "A")) hdaFt.A.push(val);
+    if (String(mtype) === "OVER_UNDER") {
+      const side = String(sideTok);
+      if (side === "OVER:2.5") over25.push(val);
+      else if (side === "UNDER:2.5") under25.push(val);
       continue;
     }
-    if (type === "OVER_UNDER") {
-      if (side === "OVER:2.5") ouLines.over25.push(val);
-      else if (side === "UNDER:2.5") ouLines.under25.push(val);
-      continue;
-    }
-    if (type === "BOTH_TEAMS_TO_SCORE") {
-      if (matchBttsSide(side, true)) btts.yes.push(val);
-      else if (matchBttsSide(side, false)) btts.no.push(val);
-      continue;
-    }
-    if (type === "CORRECT_SCORE") {
-      const parsed = parseScoreToken(side);
+
+    if (String(mtype) === "CORRECT_SCORE") {
+      const parsed = parseScoreToken(String(sideTok));
       if (!parsed) continue;
-      const key = String(bmId);
-      let m = csByBm.get(key);
+      const name = bmName(Number(bmId));
+      let m = bmScores.get(name);
       if (!m) {
         m = new Map();
-        csByBm.set(key, m);
+        bmScores.set(name, m);
       }
       m.set(parsed.score, val);
     }
   }
 
-  // --- 1X2 implied probability (vig normalize) ---
-  const medH = hdaFt.H.length ? median(hdaFt.H) : 2.5;
-  const medD = hdaFt.D.length ? median(hdaFt.D) : 3.2;
-  const medA = hdaFt.A.length ? median(hdaFt.A) : 2.8;
-  const invHda = 1 / medH + 1 / medD + 1 / medA;
-  const pH = 1 / medH / invHda;
-  const pD = 1 / medD / invHda;
-  const pA = 1 / medA / invHda;
+  if (bmScores.size < MIN_BOOKMAKERS_FOR_CS) return null;
 
-  // --- Over/Under 2.5 implied probability ---
-  const medOver = ouLines.over25.length ? median(ouLines.over25) : 1.9;
-  const medUnder = ouLines.under25.length ? median(ouLines.under25) : 1.9;
-  const pOver = 1 / medOver / (1 / medOver + 1 / medUnder);
-  const pUnder = 1 - pOver;
-
-  // --- BTTS ---
-  const medBy = btts.yes.length ? median(btts.yes) : 1.85;
-  const medBn = btts.no.length ? median(btts.no) : 1.85;
-  const isBttsHeavy = medBy <= BTTS_HEAVY_THRESHOLD;
+  // --- Over/Under 2.5 implied probability (vig normalize) ---
+  const medOver = over25.length ? median(over25) : 1.9;
+  const medUnder = under25.length ? median(under25) : 1.9;
+  const invSum = 1 / medOver + 1 / medUnder;
+  const pOver = 1 / medOver / invSum;
+  const pUnder = 1 / medUnder / invSum;
 
   // --- Sadece yeterli skor veren büroları normalize et ---
   const probsByScore = new Map<string, number[]>();
   const oddsByScore = new Map<string, number[]>();
   let usedBmCount = 0;
 
-  for (const [, scores] of csByBm) {
+  for (const [, scores] of bmScores) {
     if (scores.size < MIN_SCORES_PER_BOOKMAKER) continue;
     usedBmCount += 1;
     let powerSum = 0;
@@ -226,81 +167,44 @@ export function computeScoreConsensus(
     }
   }
 
-  // --- Skor havuzu (script: scores_pool) ---
-  const pool: PoolRow[] = [];
+  if (usedBmCount < MIN_BOOKMAKERS_FOR_CS) return null;
+
+  const rankings: ScoreConsensusRow[] = [];
   for (const [score, pList] of probsByScore) {
     if (pList.length < MIN_QUOTES_PER_SCORE) continue;
-    const rOdds = oddsByScore.get(score)!;
-    if (rOdds.length < MIN_QUOTES_PER_SCORE) continue;
-
     const parts = score.split(":");
-    const h = Number(parts[0]);
-    const a = Number(parts[1]);
+    const totalGoals = Number(parts[0]) + Number(parts[1]);
 
+    const medP = median(pList);
+    const m = mean(pList);
+    const sd = stdev(pList, m);
+    const cv = m > 0 ? (sd / m) * 100 : 0;
+
+    const rOdds = oddsByScore.get(score)!;
     const medOdd = median(rOdds);
     const minOdd = Math.min(...rOdds);
     const drop = medOdd > 0 ? (medOdd - minOdd) / medOdd : 0;
-    const csP = median(pList);
 
-    // Sığ büro panik-drop koruması: en az 8 büro yoksa ekstrem drop'u yalan kabul et
-    const isPanic = drop >= PANIC_DROP_THRESHOLD && rOdds.length >= PANIC_DROP_MIN_BOOKMAKERS;
-    if (!isPanic && (medOdd > NON_PANIC_MAX_ODDS || csP * 100 < NON_PANIC_MIN_PROB_PCT)) continue;
+    // Over/Under piyasasıyla tutarlılık ağırlığı: 3+ gollü skorlar Over 2.5,
+    // 0-1-2 gollü skorlar Under 2.5 piyasasına göre ölçeklenir.
+    const volFactor = totalGoals >= 3 ? pOver / 0.5 : pUnder / 0.5;
+    const dampedDrop = drop * (1 / Math.log2(Math.max(medOdd, 2)));
 
-    const side: "H" | "D" | "A" = h > a ? "H" : h === a ? "D" : "A";
-    const tot = h + a;
+    const value = medP * 100 * volFactor * (1 + dampedDrop * 3) * (1 + cv / 15);
 
-    // BTTS Sinerji Cezası: KG Var <=1.65 iken 0 çeken skorlara ağır ceza
-    const bttsPenalty = isBttsHeavy && (h === 0 || a === 0) ? 0.1 : 1.0;
-
-    const power = csP * 100 * bttsPenalty * (1 + drop * 2.0);
-
-    pool.push({
+    rankings.push({
       score,
-      h,
-      a,
-      tot,
-      side,
-      medOdd: Math.round(medOdd * 100) / 100,
+      totalGoals,
+      value: Math.round(value * 100) / 100,
+      medianOdds: Math.round(medOdd * 100) / 100,
+      minOdds: Math.round(minOdd * 100) / 100,
       dropPct: Math.round(drop * 1000) / 10,
-      probPct: Math.round(csP * 10000) / 100,
-      power: Math.round(power * 100) / 100,
-      bookmakerCount: rOdds.length,
+      bookmakerCount: pList.length,
+      cv: Math.round(cv * 10) / 10,
     });
   }
 
-  if (pool.length === 0) return null;
-
-  const favoriteSide: "H" | "A" = pH >= pA ? "H" : "A";
-  const picks: ScoreConsensusPick[] = [];
-  const used = new Set<string>();
-
-  // 1. KOLTUK: Konsensüs / Favori
-  const favPool = pool.filter((r) => r.side === favoriteSide).sort((x, y) => y.power - x.power);
-  const pick1 = favPool[0] ?? pool[0];
-  picks.push(toPick(pick1, "favorite"));
-  used.add(pick1.score);
-
-  // 2. KOLTUK: Piyasa Temposu (BTTS Sentez)
-  let tempoPool = pool.filter((r) => !used.has(r.score));
-  if (isBttsHeavy) tempoPool = tempoPool.filter((r) => r.h >= 1 && r.a >= 1);
-  tempoPool = [...tempoPool].sort((x, y) => y.power - x.power);
-  const pick2 = tempoPool[0];
-  if (pick2) {
-    picks.push(toPick(pick2, "tempo"));
-    used.add(pick2.score);
-  }
-
-  // 3. KOLTUK: Türev Kırılma / Hedge Anomali
-  let counterPool = pool.filter((r) => !used.has(r.score) && r.side !== favoriteSide);
-  if (isBttsHeavy) counterPool = counterPool.filter((r) => r.h >= 1 && r.a >= 1);
-  counterPool = [...counterPool].sort(
-    (x, y) => y.dropPct * Math.sqrt(y.probPct) - x.dropPct * Math.sqrt(x.probPct),
-  );
-  // Not: script'teki gibi counterPool boşsa TÜM havuzdan (used'a bakmaksızın)
-  // en güçlü skora düşülüyor — bu, pick1 ile aynı skorun tekrar seçilebildiği
-  // bilinen bir davranış; V8 test script'iyle birebir aynı tutuldu.
-  const pick3 = counterPool[0] ?? [...pool].sort((x, y) => y.power - x.power)[0];
-  picks.push(toPick(pick3, "hedge"));
+  rankings.sort((a, b) => b.value - a.value);
 
   const hs = homeScore != null ? Number(homeScore) : null;
   const as_ = awayScore != null ? Number(awayScore) : null;
@@ -311,17 +215,10 @@ export function computeScoreConsensus(
 
   return {
     bookmakerCount: usedBmCount,
-    confidence: usedBmCount >= LOW_CONFIDENCE_BM_COUNT ? "high" : "low",
-    home1x2Prob: Math.round(pH * 1000) / 10,
-    draw1x2Prob: Math.round(pD * 1000) / 10,
-    away1x2Prob: Math.round(pA * 1000) / 10,
     over25Prob: Math.round(pOver * 1000) / 10,
     under25Prob: Math.round(pUnder * 1000) / 10,
-    bttsYesOdds: Math.round(medBy * 100) / 100,
-    bttsNoOdds: Math.round(medBn * 100) / 100,
-    isBttsHeavy,
-    favoriteSide,
-    picks,
+    confidence: usedBmCount >= LOW_CONFIDENCE_BM_COUNT ? "high" : "low",
+    rankings: rankings.slice(0, TOP_N),
     actualScore,
   };
 }
