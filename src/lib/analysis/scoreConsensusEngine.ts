@@ -85,8 +85,10 @@ type Regime = {
   ranked: string[];
 };
 
+/** V55.2 Saf Piyasa Konsensüsü */
 function resolveDynamicRegime(
   pH: number,
+  pD: number,
   pA: number,
   pOver: number,
   isHyperOver: boolean,
@@ -97,8 +99,6 @@ function resolveDynamicRegime(
   let code = "OPEN";
   let label = "Dengeli / Açık";
   let confidence = "STANDART";
-  let corePrior: string[] = [];
-  let insuranceScore = "2:2";
 
   const isHomeFav = pH >= DOM_THRESHOLD && pH > pA * 1.12;
   const isAwayFav = pA >= DOM_THRESHOLD && pA > pH * 1.12;
@@ -108,84 +108,90 @@ function resolveDynamicRegime(
       code = "DOM_H_HYPER";
       label = "Yüksek Tempolu Ev Favori";
       confidence = "YÜKSEK (Gol Baskısı)";
-      corePrior = ["2:1", "3:1", "2:0", "3:0"];
-      insuranceScore = "2:2";
     } else if (isHardUnder) {
       code = "DOM_H";
       label = "Kısır Ev Favori";
       confidence = "YÜKSEK (Alt Destekli)";
-      corePrior = ["2:0", "1:0", "1:1", "2:1"];
-      insuranceScore = "0:0";
     } else {
       code = "DOM_H";
       label = "Ev Favori";
       confidence = pH >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART";
-      corePrior = ["2:0", "1:1", "2:1", isHardOver ? "3:1" : "1:0"];
-      insuranceScore = "2:2";
     }
   } else if (isAwayFav) {
     if (isHyperOver) {
       code = "DOM_A_HYPER";
       label = "Yüksek Tempolu Deplasman Favori";
       confidence = "YÜKSEK (Gol Baskısı)";
-      corePrior = ["1:2", "1:3", "0:2", "2:3"];
-      insuranceScore = "2:2";
     } else if (isHardUnder) {
       code = "DOM_A";
       label = "Kısır Deplasman Favori";
       confidence = "YÜKSEK (Alt Destekli)";
-      corePrior = ["0:1", "0:2", "1:1", "0:0"];
-      insuranceScore = "1:2";
     } else {
       code = "DOM_A";
       label = "Deplasman Favori";
       confidence = pA >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART";
-      corePrior = ["0:2", "1:2", "0:1", isHardOver ? "1:3" : "2:2"];
-      insuranceScore = "2:2";
     }
   } else if (isHardUnder) {
     code = "LOCK";
     label = "Kilit Alt";
     confidence = "YÜKSEK (Piyasa Kilidi)";
-    corePrior = pH >= pA ? ["1:1", "1:0", "0:0"] : ["1:1", "0:1", "0:0"];
-    insuranceScore = pH >= pA ? "2:0" : "0:2";
   } else {
     code = "OPEN";
     label = "Dengeli / Açık";
     confidence = "STANDART";
-    corePrior = pH >= pA ? ["1:1", "2:1", "1:2"] : ["1:1", "1:2", "2:1"];
-    insuranceScore = "2:2";
   }
 
   const scoredCandidates: { score: string; power: number }[] = [];
+  const pUnder = 1.0 - pOver;
 
   if (csOddsByScore.size >= 4) {
     for (const [score, oddsList] of csOddsByScore.entries()) {
-      if (score === insuranceScore) continue;
       const medOdd = median(oddsList);
       if (medOdd <= 1.0) continue;
 
       const parsed = parseScoreToken(score);
       if (!parsed) continue;
       const { h, a } = parsed;
+
+      // 1. Büro Zımni Olasılığı (Implied Probability)
+      const baseProb = (1.0 / medOdd) * 100;
+
+      // 2. 1X2 Taraf Hizalaması
+      let sideWeight = 1.0;
+      if (h > a) {
+        sideWeight = pH / 0.33;
+      } else if (a > h) {
+        sideWeight = pA / 0.33;
+      } else {
+        sideWeight = pD / 0.33;
+      }
+
+      // 3. 2.5 Gol Baremi Hizalaması
       const totGoals = h + a;
+      const ouWeight = totGoals >= 3 ? pOver / 0.5 : pUnder / 0.5;
 
-      const ouFactor = totGoals >= 3 ? pOver / 0.5 : (1 - pOver) / 0.5;
-      const priorIdx = corePrior.indexOf(score);
-      const priorWeight = priorIdx !== -1 ? Math.max(1.1, 2.2 - priorIdx * 0.25) : 0.8;
-
-      const power = (1.0 / medOdd) * 100 * ouFactor * priorWeight;
+      // Nihai Güç Puanı
+      const power = baseProb * sideWeight * ouWeight;
       scoredCandidates.push({ score, power });
     }
 
     scoredCandidates.sort((a, b) => b.power - a.power);
   }
 
-  const rankedCore = scoredCandidates.length >= 3
-    ? scoredCandidates.slice(0, 3).map((item) => item.score)
-    : corePrior.filter((s) => s !== insuranceScore).slice(0, 3);
+  let ranked: string[] = [];
+  if (scoredCandidates.length >= 4) {
+    ranked = scoredCandidates.slice(0, 4).map((item) => item.score);
+  } else {
+    // Oran yoksa varsayılan koridor
+    if (isHomeFav) {
+      ranked = ["2:1", "1:0", "2:0", "3:1"];
+    } else if (isAwayFav) {
+      ranked = ["1:2", "0:1", "0:2", "1:3"];
+    } else {
+      ranked = pH >= pA ? ["1:1", "1:0", "2:1", "2:0"] : ["1:1", "0:1", "1:2", "0:2"];
+    }
+  }
 
-  const ranked = [...rankedCore, insuranceScore];
   return { code, label, confidence, ranked };
 }
 
@@ -251,6 +257,7 @@ export function computeScoreConsensus(
 
   const regime = resolveDynamicRegime(
     pH,
+    pD,
     pA,
     pOver,
     isHyperOver,
