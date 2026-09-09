@@ -1,61 +1,67 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
 /**
- * "Skor Konsensüs Motoru" (Correct-Score Consensus / Volume Engine).
+ * "V54 Rejim Motoru" (Regime-Based Correct-Score Portfolio Engine).
  *
- * Kaynak: Ali'nin ad-hoc test_sporting_galatasaray.py betiği — orada Supabase'ten
- * tek bir maç çekilip CORRECT_SCORE + OVER_UNDER 2.5 oranlarından hacim-uyumlu bir
- * skor sıralaması üretiliyordu. Burada aynı mantık, marketSignals.ts ile AYNI
- * şekilde saf client-side (ek API isteği YOK) çalışacak biçimde TS'e taşındı:
- * seçilen maçın kendi `odds`/`bookmakers` verisinden hesaplanır.
+ * Kaynak: Ali'nin test_v54_blackburn_sheffutd.py betiği. ESKİ motor (hacim/
+ * konsensüs tabanlı CORRECT_SCORE ranking) tamamen bu mantıkla DEĞİŞTİRİLDİ.
  *
- * Yöntem özeti:
- *  1) Over/Under 2.5 medyan oranlarından üst/alt 2.5 gol olasılığı çıkarılır
- *     (2 yönlü implied probability, vig normalize edilmiş).
- *  2) Her büronun CORRECT_SCORE (FULL_TIME) skorları toplanır — en az
- *     MIN_SCORES_PER_BOOKMAKER farklı skor veren bürolar dikkate alınır.
- *  3) Büro başına implied probability^GAMMA / toplam ile normalize edilmiş bir
- *     "hacim payı" hesaplanır; skor bazında bürolar arası medyan + CV
- *     (tutarlılık) + medyan-min "drop" (para girişi izlenimi) çıkarılır.
- *  4) Toplam gol sayısı, Over/Under 2.5 olasılığıyla ağırlıklandırılıp
- *     (O/U piyasasıyla TUTARLI skorlar öne çıksın diye) nihai bir puan
- *     üretilir ve azalan sırada sıralanır.
+ * Yöntem özeti (script ile birebir aynı):
+ *  1) 1X2 (HOME_DRAW_AWAY/FULL_TIME) tüm büro kotasyonlarının medyanından
+ *     vig-normalize edilmiş Ev/Beraberlik/Deplasman olasılığı çıkarılır.
+ *  2) Over/Under 2.5 (FULL_TIME) tüm büro kotasyonlarının medyanından
+ *     2 yönlü implied Üst 2.5 olasılığı çıkarılır.
+ *  3) Bu iki olasılığa göre maç bir "rejime" atanır (DOM_H / DOM_H_HYPER /
+ *     DOM_A / DOM_A_HYPER / LOCK / OPEN) ve her rejim için sabit, elle
+ *     ayarlanmış 4'lü bir skor portföyü döndürülür (ilk 3 = çekirdek/Hit@3,
+ *     4.'sü = sigorta/Hit@4).
+ *  4) Bu 4 skorun piyasa CORRECT_SCORE medyan oranı (varsa) sadece GÖSTERİM
+ *     amaçlı eklenir — eski motorun aksine burada CS oranları sıralamayı
+ *     BELİRLEMEZ, sadece rejim + O/U belirler.
  *
- * NOT — YORUM SINIRI: marketSignals.ts'teki notla aynı: bu "kesin skor tahmini"
- * DEĞİL, bürolar arası konsensüs + hacim izlenimini özetleyen bir sıralama.
- * Az büro veri verdiğinde (confidence: "low") tek bir aykırı fiyat sıralamayı
- * domine edebilir.
+ * NOT — YORUM SINIRI: Bu bir "kesin skor tahmini" değil, kural-tabanlı bir
+ * rejim sınıflandırması + heuristik skor portföyüdür. 1X2/OU kotasyonu
+ * bulunamazsa script'teki gibi varsayılan (fallback) oranlara düşülür — bu
+ * durumda sonuç daha az güvenilirdir.
  */
 
-export type ScoreConsensusRow = {
+export type ScoreConsensusSlot = {
   score: string; // "2:1" formatında
-  totalGoals: number;
-  value: number; // sıralama puanı — yüksek = daha "hacimli" konsensüs
-  medianOdds: number;
-  minOdds: number;
-  dropPct: number; // (medyan-min)/medyan * 100
-  bookmakerCount: number; // bu skoru veren (ve eşiği geçen) büro sayısı
-  cv: number; // bürolar-arası implied probability tutarsızlığı, yüzde
+  marketOdds: number | null; // bu skor için piyasa medyan CORRECT_SCORE oranı (varsa)
+  tier: "core" | "insurance"; // ilk 3 = Hit@3 çekirdek, 4. = Hit@4 sigorta
+  isActual: boolean; // gerçekleşen skor bu mu
 };
 
 export type ScoreConsensus = {
-  bookmakerCount: number; // CS için kullanılan (>= MIN_SCORES_PER_BOOKMAKER skor veren) büro sayısı
+  regimeCode: string; // DOM_H_HYPER | DOM_H | DOM_A_HYPER | DOM_A | LOCK | OPEN
+  regimeLabel: string; // Türkçe açıklama, script'teki "reg" metninin karşılığı
+  confidenceLabel: string; // "STANDART" | "YÜKSEK (...)" — script'teki confidence
+  homeProb: number; // yüzde
+  drawProb: number; // yüzde
+  awayProb: number; // yüzde
   over25Prob: number; // yüzde
   under25Prob: number; // yüzde
-  confidence: "high" | "low";
-  rankings: ScoreConsensusRow[]; // azalan value sırası, en fazla TOP_N
-  actualScore: string | null; // maç oynandıysa gerçek skor, oynanmadıysa null
+  portfolio: ScoreConsensusSlot[]; // 4 slot, azalan öncelik sırası
+  actualScore: string | null;
+  hit3: boolean | null; // gerçek skor ilk 3'te mi (maç oynandıysa)
+  hit4: boolean | null; // gerçek skor 4'ünde mi
 };
 
-const MIN_BOOKMAKERS_FOR_CS = 3; // test script: len(bm_scores) < 3 -> iptal
-const MIN_SCORES_PER_BOOKMAKER = 8; // test script: len(scores) < 8 -> o büro atlanır
-const MIN_QUOTES_PER_SCORE = 3; // test script: len(p_list) < 3 -> o skor atlanır
-export const LOW_CONFIDENCE_BM_COUNT = 6;
-const GAMMA = 1.18;
-const TOP_N = 8;
+// script'teki varsayılan (fallback) medyanlar — hiç kotasyon yoksa kullanılır
+const FALLBACK_H = 2.8;
+const FALLBACK_D = 3.4;
+const FALLBACK_A = 2.45;
+const FALLBACK_OVER = 1.9;
+const FALLBACK_UNDER = 1.9;
 
-// marketSignals.ts'teki parseOddsNum/pickOddsValue ile AYNI kural: değerler
-// bazen string gelebilir, current boşsa opening'e düşülür.
+const HARD_UNDER_MAX = 0.44; // p_over <= bu -> "kısır" / alt destekli
+const HYPER_OVER_MIN = 0.6; // p_over >= bu -> yüksek tempolu / gol baskısı
+const HARD_OVER_MIN = 0.55; // p_over >= bu -> favori rejimlerde 3./4. slot değişir
+const DOM_THRESHOLD = 0.5; // p_h veya p_a >= bu -> tek taraflı favori rejimi
+const HEAVY_FAV_THRESHOLD = 0.58; // "Ağır Favori" etiketi eşiği
+
+// tableRows.ts/marketSignals.ts ile AYNI kural: değerler bazen string gelebilir,
+// current boşsa opening'e düşülür.
 function parseOddsNum(v: unknown): number | null {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1.01 ? n : null;
@@ -69,7 +75,7 @@ function isActive(active: unknown): boolean {
   return !(active === false || active === 0 || active === "0" || active === "false");
 }
 
-/** "score:2:1" ya da (bkz. tableRows.ts'teki aynı defansif kontrol) "2:1" -> {score:"2:1", h:2, a:1} | null */
+/** "score:2:1" ya da "2:1" -> {score:"2:1", h:2, a:1} | null */
 function parseScoreToken(sideTok: string): { score: string; h: number; a: number } | null {
   const stripped = sideTok.startsWith("score:") ? sideTok.slice(6) : sideTok;
   const parts = stripped.split(":");
@@ -86,125 +92,166 @@ function median(xs: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-function mean(xs: number[]): number {
-  return xs.reduce((a, b) => a + b, 0) / xs.length;
+/** 3 yönlü vig-normalize implied probability (script: normalize_1x2). */
+function normalize1x2(h: number, d: number, a: number): [number, number, number] {
+  const ih = 1 / h;
+  const id = 1 / d;
+  const ia = 1 / a;
+  const s = ih + id + ia;
+  return [ih / s, id / s, ia / s];
 }
 
-function stdev(xs: number[], m: number): number {
-  if (xs.length < 2) return 0;
-  const variance = xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1);
-  return Math.sqrt(variance);
+/** 2 yönlü vig-normalize implied probability — Üst 2.5 olasılığı (script: implied_two). */
+function impliedOver(over: number, under: number): number {
+  const io = 1 / over;
+  const iu = 1 / under;
+  return io / (io + iu);
+}
+
+type Regime = {
+  code: string;
+  label: string;
+  confidence: string;
+  ranked: string[]; // "2:1" formatında 4 skor, azalan öncelik
+};
+
+/** script'teki if/elif zincirinin birebir karşılığı. */
+function resolveRegime(
+  pH: number,
+  pA: number,
+  isHyperOver: boolean,
+  isHardUnder: boolean,
+  isHardOver: boolean,
+): Regime {
+  if (pH >= DOM_THRESHOLD) {
+    if (isHyperOver) {
+      return {
+        code: "DOM_H_HYPER",
+        label: "Yüksek Tempolu Ev Favori",
+        confidence: "YÜKSEK (Gol Baskısı)",
+        ranked: ["2:1", "3:1", "2:2", "3:2"],
+      };
+    }
+    if (isHardUnder) {
+      return {
+        code: "DOM_H",
+        label: "Kısır Ev Favori",
+        confidence: "YÜKSEK (Alt Destekli)",
+        ranked: ["2:0", "1:0", "1:1", "2:1"],
+      };
+    }
+    return {
+      code: "DOM_H",
+      label: "Ev Favori",
+      confidence: pH >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART",
+      ranked: ["2:0", "1:1", "2:1", isHardOver ? "3:1" : "1:0"],
+    };
+  }
+
+  if (pA >= DOM_THRESHOLD) {
+    if (isHyperOver) {
+      return {
+        code: "DOM_A_HYPER",
+        label: "Yüksek Tempolu Deplasman Favori",
+        confidence: "YÜKSEK (Gol Baskısı)",
+        ranked: ["1:2", "1:3", "2:2", "2:3"],
+      };
+    }
+    if (isHardUnder) {
+      return {
+        code: "DOM_A",
+        label: "Kısır Deplasman Favori",
+        confidence: "YÜKSEK (Alt Destekli)",
+        ranked: ["0:1", "0:2", "1:1", "0:0"],
+      };
+    }
+    return {
+      code: "DOM_A",
+      label: "Deplasman Favori",
+      confidence: pA >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART",
+      ranked: ["0:2", "1:2", "0:1", isHardOver ? "1:3" : "2:2"],
+    };
+  }
+
+  if (isHardUnder) {
+    return {
+      code: "LOCK",
+      label: "Kilit Alt",
+      confidence: "YÜKSEK (Piyasa Kilidi)",
+      ranked: pH >= pA ? ["1:1", "1:0", "0:0", "2:0"] : ["1:1", "0:1", "0:0", "0:2"],
+    };
+  }
+
+  return {
+    code: "OPEN",
+    label: "Dengeli / Açık",
+    confidence: "STANDART",
+    ranked: pH >= pA ? ["1:1", "2:1", "1:2", "2:2"] : ["1:1", "1:2", "2:1", "2:2"],
+  };
 }
 
 export function computeScoreConsensus(
   odds: CompactOddsRow[] | null | undefined,
+  // V54 rejim motoru büro bazlı ayrım yapmıyor (script gibi tüm kotasyonlar
+  // birlikte medyanlanıyor) — imza SmartAnalysisClient.tsx çağrısıyla uyumlu
+  // kalsın diye korunuyor, kullanılmıyor.
   bookmakers: Record<string, string> | null | undefined,
   homeScore?: string | number | null,
   awayScore?: string | number | null,
 ): ScoreConsensus | null {
   if (!odds?.length) return null;
-  const bmNames = bookmakers ?? {};
-  const bmName = (id: number) => bmNames[String(id)] ?? `BM_${id}`;
 
-  const over25: number[] = [];
-  const under25: number[] = [];
-  // büro adı -> skor -> oran
-  const bmScores = new Map<string, Map<string, number>>();
+  const hOdds: number[] = [];
+  const dOdds: number[] = [];
+  const aOdds: number[] = [];
+  const overOdds: number[] = [];
+  const underOdds: number[] = [];
+  const csOddsByScore = new Map<string, number[]>();
 
   for (const row of odds) {
     if (!Array.isArray(row) || row.length < 6) continue;
-    const [bmId, mtype, scope, sideTok, opening, current, active] = row;
+    const [, mtype, scope, sideTok, opening, current, active] = row;
     if (String(scope) !== "FULL_TIME" || !isActive(active)) continue;
     const val = pickOddsValue(opening, current);
     if (val == null) continue;
 
-    if (String(mtype) === "OVER_UNDER") {
+    const type = String(mtype);
+    if (type === "HOME_DRAW_AWAY") {
       const side = String(sideTok);
-      if (side === "OVER:2.5") over25.push(val);
-      else if (side === "UNDER:2.5") under25.push(val);
+      if (side === "H") hOdds.push(val);
+      else if (side === "D") dOdds.push(val);
+      else if (side === "A") aOdds.push(val);
       continue;
     }
-
-    if (String(mtype) === "CORRECT_SCORE") {
+    if (type === "OVER_UNDER") {
+      const side = String(sideTok);
+      if (side === "OVER:2.5") overOdds.push(val);
+      else if (side === "UNDER:2.5") underOdds.push(val);
+      continue;
+    }
+    if (type === "CORRECT_SCORE") {
       const parsed = parseScoreToken(String(sideTok));
       if (!parsed) continue;
-      const name = bmName(Number(bmId));
-      let m = bmScores.get(name);
-      if (!m) {
-        m = new Map();
-        bmScores.set(name, m);
-      }
-      m.set(parsed.score, val);
+      if (!csOddsByScore.has(parsed.score)) csOddsByScore.set(parsed.score, []);
+      csOddsByScore.get(parsed.score)!.push(val);
     }
   }
 
-  if (bmScores.size < MIN_BOOKMAKERS_FOR_CS) return null;
+  const medH = hOdds.length ? median(hOdds) : FALLBACK_H;
+  const medD = dOdds.length ? median(dOdds) : FALLBACK_D;
+  const medA = aOdds.length ? median(aOdds) : FALLBACK_A;
+  const [pH, pD, pA] = normalize1x2(medH, medD, medA);
 
-  // --- Over/Under 2.5 implied probability (vig normalize) ---
-  const medOver = over25.length ? median(over25) : 1.9;
-  const medUnder = under25.length ? median(under25) : 1.9;
-  const invSum = 1 / medOver + 1 / medUnder;
-  const pOver = 1 / medOver / invSum;
-  const pUnder = 1 / medUnder / invSum;
+  const medOver = overOdds.length ? median(overOdds) : FALLBACK_OVER;
+  const medUnder = underOdds.length ? median(underOdds) : FALLBACK_UNDER;
+  const pOver = impliedOver(medOver, medUnder);
+  const pUnder = 1 - pOver;
 
-  // --- Sadece yeterli skor veren büroları normalize et ---
-  const probsByScore = new Map<string, number[]>();
-  const oddsByScore = new Map<string, number[]>();
-  let usedBmCount = 0;
+  const isHardUnder = pOver <= HARD_UNDER_MAX;
+  const isHyperOver = pOver >= HYPER_OVER_MIN;
+  const isHardOver = pOver >= HARD_OVER_MIN;
 
-  for (const [, scores] of bmScores) {
-    if (scores.size < MIN_SCORES_PER_BOOKMAKER) continue;
-    usedBmCount += 1;
-    let powerSum = 0;
-    for (const o of scores.values()) powerSum += Math.pow(1 / o, GAMMA);
-    if (powerSum <= 0) continue;
-    for (const [score, o] of scores) {
-      const p = Math.pow(1 / o, GAMMA) / powerSum;
-      if (!probsByScore.has(score)) probsByScore.set(score, []);
-      probsByScore.get(score)!.push(p);
-      if (!oddsByScore.has(score)) oddsByScore.set(score, []);
-      oddsByScore.get(score)!.push(o);
-    }
-  }
-
-  if (usedBmCount < MIN_BOOKMAKERS_FOR_CS) return null;
-
-  const rankings: ScoreConsensusRow[] = [];
-  for (const [score, pList] of probsByScore) {
-    if (pList.length < MIN_QUOTES_PER_SCORE) continue;
-    const parts = score.split(":");
-    const totalGoals = Number(parts[0]) + Number(parts[1]);
-
-    const medP = median(pList);
-    const m = mean(pList);
-    const sd = stdev(pList, m);
-    const cv = m > 0 ? (sd / m) * 100 : 0;
-
-    const rOdds = oddsByScore.get(score)!;
-    const medOdd = median(rOdds);
-    const minOdd = Math.min(...rOdds);
-    const drop = medOdd > 0 ? (medOdd - minOdd) / medOdd : 0;
-
-    // Over/Under piyasasıyla tutarlılık ağırlığı: 3+ gollü skorlar Over 2.5,
-    // 0-1-2 gollü skorlar Under 2.5 piyasasına göre ölçeklenir.
-    const volFactor = totalGoals >= 3 ? pOver / 0.5 : pUnder / 0.5;
-    const dampedDrop = drop * (1 / Math.log2(Math.max(medOdd, 2)));
-
-    const value = medP * 100 * volFactor * (1 + dampedDrop * 3) * (1 + cv / 15);
-
-    rankings.push({
-      score,
-      totalGoals,
-      value: Math.round(value * 100) / 100,
-      medianOdds: Math.round(medOdd * 100) / 100,
-      minOdds: Math.round(minOdd * 100) / 100,
-      dropPct: Math.round(drop * 1000) / 10,
-      bookmakerCount: pList.length,
-      cv: Math.round(cv * 10) / 10,
-    });
-  }
-
-  rankings.sort((a, b) => b.value - a.value);
+  const regime = resolveRegime(pH, pA, isHyperOver, isHardUnder, isHardOver);
 
   const hs = homeScore != null ? Number(homeScore) : null;
   const as_ = awayScore != null ? Number(awayScore) : null;
@@ -213,12 +260,30 @@ export function computeScoreConsensus(
       ? `${hs}:${as_}`
       : null;
 
+  const portfolio: ScoreConsensusSlot[] = regime.ranked.map((score, i) => {
+    const quotes = csOddsByScore.get(score);
+    return {
+      score,
+      marketOdds: quotes?.length ? Math.round(median(quotes) * 100) / 100 : null,
+      tier: i < 3 ? "core" : "insurance",
+      isActual: actualScore === score,
+    };
+  });
+
+  void bookmakers;
+
   return {
-    bookmakerCount: usedBmCount,
+    regimeCode: regime.code,
+    regimeLabel: regime.label,
+    confidenceLabel: regime.confidence,
+    homeProb: Math.round(pH * 1000) / 10,
+    drawProb: Math.round(pD * 1000) / 10,
+    awayProb: Math.round(pA * 1000) / 10,
     over25Prob: Math.round(pOver * 1000) / 10,
     under25Prob: Math.round(pUnder * 1000) / 10,
-    confidence: usedBmCount >= LOW_CONFIDENCE_BM_COUNT ? "high" : "low",
-    rankings: rankings.slice(0, TOP_N),
+    portfolio,
     actualScore,
+    hit3: actualScore ? regime.ranked.slice(0, 3).includes(actualScore) : null,
+    hit4: actualScore ? regime.ranked.includes(actualScore) : null,
   };
 }
