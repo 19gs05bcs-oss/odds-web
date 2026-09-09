@@ -8,6 +8,8 @@ import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
 import type { TableRow } from "@/lib/analysis/tableRows";
 import type { BoardCall } from "@/lib/analysis/similarityEngine";
 import { computeMarketSignals } from "@/lib/analysis/marketSignals";
+import { computeScoreConsensus } from "@/lib/analysis/scoreConsensusEngine";
+import { ScoreConsensusPanel } from "@/components/ScoreConsensusPanel";
 type SimilarityCardState = {
   status: "idle" | "loading" | "done" | "error";
   matchedCount?: number;
@@ -119,6 +121,25 @@ export function SmartAnalysisClient({
   const marketSignals = useMemo(
     () => computeMarketSignals(selectedFixture?.odds, selectedFixture?.bookmakers),
     [selectedFixture?.odds, selectedFixture?.bookmakers],
+  );
+
+  // marketSignals ile AYNI mantık: similarity aramasına gitmeden önce, seçilen
+  // maçın kendi CORRECT_SCORE + Over/Under 2.5 oranlarından hacim-uyumlu bir
+  // skor sıralaması — ek API isteği yok, saf client-side hesap.
+  const scoreConsensus = useMemo(
+    () =>
+      computeScoreConsensus(
+        selectedFixture?.odds,
+        selectedFixture?.bookmakers,
+        selectedFixture?.home_score,
+        selectedFixture?.away_score,
+      ),
+    [
+      selectedFixture?.odds,
+      selectedFixture?.bookmakers,
+      selectedFixture?.home_score,
+      selectedFixture?.away_score,
+    ],
   );
 
   // Sunucudan gelen sıra = benzerlik skoruna göre artan (en benzer önce; bkz.
@@ -416,7 +437,10 @@ export function SmartAnalysisClient({
           {oddsLoading ? (
             <p className={styles.empty}>Oranlar yükleniyor…</p>
           ) : (
-            <MarketSignalsPanel signals={marketSignals} />
+            <>
+              <MarketSignalsPanel signals={marketSignals} />
+              <ScoreConsensusPanel consensus={scoreConsensus} />
+            </>
           )}
 
           {referenceBms.length ? (
