@@ -1,37 +1,37 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
 export type ScoreConsensusSlot = {
-  score: string; // "2:1" formatında
-  marketOdds: number | null; // bu skor için piyasa medyan CORRECT_SCORE oranı (varsa)
-  tier: "core" | "insurance"; // ilk 3 = Hit@3 çekirdek, 4. = Hit@4 sigorta
-  isActual: boolean; // gerçekleşen skor bu mu
+  score: string;
+  marketOdds: number | null;
+  tier: "core" | "insurance";
+  isActual: boolean;
 };
 
 export type ScoreConsensus = {
-  regimeCode: string; // DOM_H_HYPER | DOM_H | DOM_A_HYPER | DOM_A | LOCK | OPEN
-  regimeLabel: string; // Türkçe açıklama
-  confidenceLabel: string; // "STANDART" | "YÜKSEK (...)"
-  homeProb: number; // yüzde
-  drawProb: number; // yüzde
-  awayProb: number; // yüzde
-  over25Prob: number; // yüzde
-  under25Prob: number; // yüzde
-  portfolio: ScoreConsensusSlot[]; // 4 slot, azalan öncelik sırası
+  regimeCode: string;
+  regimeLabel: string;
+  confidenceLabel: string;
+  homeProb: number;
+  drawProb: number;
+  awayProb: number;
+  over25Prob: number;
+  under25Prob: number;
+  portfolio: ScoreConsensusSlot[];
   actualScore: string | null;
-  hit3: boolean | null; // gerçek skor ilk 3'te mi (maç oynandıysa)
-  hit4: boolean | null; // gerçek skor 4'ünde mi
+  hit3: boolean | null;
+  hit4: boolean | null;
 };
 
-const FALLBACK_H = 2.8;
+const FALLBACK_H = 2.5;
 const FALLBACK_D = 3.4;
-const FALLBACK_A = 2.45;
-const FALLBACK_OVER = 1.9;
-const FALLBACK_UNDER = 1.9;
+const FALLBACK_A = 2.8;
+const FALLBACK_OVER = 1.95;
+const FALLBACK_UNDER = 1.85;
 
 const HARD_UNDER_MAX = 0.44;
 const HYPER_OVER_MIN = 0.6;
 const HARD_OVER_MIN = 0.55;
-const DOM_THRESHOLD = 0.43; // %43 eşiğine çekildi (2.25 ve altı favori sayılır)
+const DOM_THRESHOLD = 0.43;
 const HEAVY_FAV_THRESHOLD = 0.58;
 
 function parseOddsNum(v: unknown): number | null {
@@ -49,7 +49,7 @@ function isActive(active: unknown): boolean {
 
 function parseScoreToken(sideTok: string): { score: string; h: number; a: number } | null {
   const stripped = sideTok.startsWith("score:") ? sideTok.slice(6) : sideTok;
-  const parts = stripped.split(":");
+  const parts = stripped.replace("-", ":").split(":");
   if (parts.length !== 2) return null;
   const h = Number(parts[0]);
   const a = Number(parts[1]);
@@ -58,6 +58,7 @@ function parseScoreToken(sideTok: string): { score: string; h: number; a: number
 }
 
 function median(xs: number[]): number {
+  if (!xs.length) return 0;
   const s = [...xs].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
@@ -84,7 +85,6 @@ type Regime = {
   ranked: string[];
 };
 
-/** V55: Rejimin teorik koridoru ile büroların CS oranlarını sentezler */
 function resolveDynamicRegime(
   pH: number,
   pA: number,
@@ -97,7 +97,8 @@ function resolveDynamicRegime(
   let code = "OPEN";
   let label = "Dengeli / Açık";
   let confidence = "STANDART";
-  let basePrior: string[] = [];
+  let corePrior: string[] = [];
+  let insuranceScore = "2:2";
 
   const isHomeFav = pH >= DOM_THRESHOLD && pH > pA * 1.12;
   const isAwayFav = pA >= DOM_THRESHOLD && pA > pH * 1.12;
@@ -107,52 +108,60 @@ function resolveDynamicRegime(
       code = "DOM_H_HYPER";
       label = "Yüksek Tempolu Ev Favori";
       confidence = "YÜKSEK (Gol Baskısı)";
-      basePrior = ["2:1", "3:1", "2:2", "3:2", "2:0"];
+      corePrior = ["2:1", "3:1", "2:0", "3:0"];
+      insuranceScore = "2:2";
     } else if (isHardUnder) {
       code = "DOM_H";
       label = "Kısır Ev Favori";
       confidence = "YÜKSEK (Alt Destekli)";
-      basePrior = ["2:0", "1:0", "1:1", "2:1", "0:0"];
+      corePrior = ["2:0", "1:0", "1:1", "2:1"];
+      insuranceScore = "0:0";
     } else {
       code = "DOM_H";
       label = "Ev Favori";
       confidence = pH >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART";
-      basePrior = ["2:0", "1:1", "2:1", isHardOver ? "3:1" : "1:0", "3:0"];
+      corePrior = ["2:0", "1:1", "2:1", isHardOver ? "3:1" : "1:0"];
+      insuranceScore = "2:2";
     }
   } else if (isAwayFav) {
     if (isHyperOver) {
       code = "DOM_A_HYPER";
       label = "Yüksek Tempolu Deplasman Favori";
       confidence = "YÜKSEK (Gol Baskısı)";
-      basePrior = ["1:2", "1:3", "2:2", "2:3", "0:2"];
+      corePrior = ["1:2", "1:3", "0:2", "2:3"];
+      insuranceScore = "2:2";
     } else if (isHardUnder) {
       code = "DOM_A";
       label = "Kısır Deplasman Favori";
       confidence = "YÜKSEK (Alt Destekli)";
-      basePrior = ["0:1", "0:2", "1:1", "0:0", "1:2"];
+      corePrior = ["0:1", "0:2", "1:1", "0:0"];
+      insuranceScore = "1:2";
     } else {
       code = "DOM_A";
       label = "Deplasman Favori";
       confidence = pA >= HEAVY_FAV_THRESHOLD ? "YÜKSEK (Ağır Favori)" : "STANDART";
-      basePrior = ["0:2", "1:2", "0:1", isHardOver ? "1:3" : "2:2", "0:3"];
+      corePrior = ["0:2", "1:2", "0:1", isHardOver ? "1:3" : "2:2"];
+      insuranceScore = "2:2";
     }
   } else if (isHardUnder) {
     code = "LOCK";
     label = "Kilit Alt";
     confidence = "YÜKSEK (Piyasa Kilidi)";
-    basePrior = pH >= pA ? ["1:1", "1:0", "0:0", "2:0", "0:1"] : ["1:1", "0:1", "0:0", "0:2", "1:0"];
+    corePrior = pH >= pA ? ["1:1", "1:0", "0:0"] : ["1:1", "0:1", "0:0"];
+    insuranceScore = pH >= pA ? "2:0" : "0:2";
   } else {
     code = "OPEN";
     label = "Dengeli / Açık";
     confidence = "STANDART";
-    basePrior = pH >= pA ? ["1:1", "2:1", "1:2", "2:2", "2:0"] : ["1:1", "1:2", "2:1", "2:2", "0:2"];
+    corePrior = pH >= pA ? ["1:1", "2:1", "1:2"] : ["1:1", "1:2", "2:1"];
+    insuranceScore = "2:2";
   }
 
-  // Eğer piyasada CS kotasyonu varsa, statik şablonu büro medyanlarıyla derecelendir
-  if (csOddsByScore.size >= 4) {
-    const scoredCandidates: { score: string; power: number }[] = [];
+  const scoredCandidates: { score: string; power: number }[] = [];
 
+  if (csOddsByScore.size >= 4) {
     for (const [score, oddsList] of csOddsByScore.entries()) {
+      if (score === insuranceScore) continue;
       const medOdd = median(oddsList);
       if (medOdd <= 1.0) continue;
 
@@ -161,28 +170,23 @@ function resolveDynamicRegime(
       const { h, a } = parsed;
       const totGoals = h + a;
 
-      // Piyasa Gol Uyumu
       const ouFactor = totGoals >= 3 ? pOver / 0.5 : (1 - pOver) / 0.5;
+      const priorIdx = corePrior.indexOf(score);
+      const priorWeight = priorIdx !== -1 ? Math.max(1.1, 2.2 - priorIdx * 0.25) : 0.8;
 
-      // Rejim Önceliği Bonusu
-      const priorIndex = basePrior.indexOf(score);
-      const priorWeight = priorIndex !== -1 ? Math.max(1.1, 2.2 - priorIndex * 0.25) : 0.85;
-
-      // Fiyat Ters Oranı (İhtimal) * Barem Uyumu * Rejim Ağırlığı
       const power = (1.0 / medOdd) * 100 * ouFactor * priorWeight;
       scoredCandidates.push({ score, power });
     }
 
     scoredCandidates.sort((a, b) => b.power - a.power);
-    const ranked = scoredCandidates.slice(0, 4).map((item) => item.score);
-
-    if (ranked.length === 4) {
-      return { code, label, confidence, ranked };
-    }
   }
 
-  // CS kotasyonu yetersizse rejim önceliğindeki ilk 4 skoru kullan
-  return { code, label, confidence, ranked: basePrior.slice(0, 4) };
+  const rankedCore = scoredCandidates.length >= 3
+    ? scoredCandidates.slice(0, 3).map((item) => item.score)
+    : corePrior.filter((s) => s !== insuranceScore).slice(0, 3);
+
+  const ranked = [...rankedCore, insuranceScore];
+  return { code, label, confidence, ranked };
 }
 
 export function computeScoreConsensus(
@@ -208,21 +212,23 @@ export function computeScoreConsensus(
     if (val == null) continue;
 
     const type = String(mtype);
-    if (type === "HOME_DRAW_AWAY") {
-      const side = String(sideTok);
-      if (side === "H") hOdds.push(val);
-      else if (side === "D") dOdds.push(val);
-      else if (side === "A") aOdds.push(val);
+    const side = String(sideTok);
+
+    if (type === "HOME_DRAW_AWAY" || type === "1X2") {
+      if (side === "H" || side === "1") hOdds.push(val);
+      else if (side === "D" || side === "X") dOdds.push(val);
+      else if (side === "A" || side === "2") aOdds.push(val);
       continue;
     }
-    if (type === "OVER_UNDER") {
-      const side = String(sideTok);
-      if (side === "OVER:2.5") overOdds.push(val);
-      else if (side === "UNDER:2.5") underOdds.push(val);
+    if (type === "OVER_UNDER" || type === "TOTAL") {
+      if (side.includes("2.5") || type.includes("2.5")) {
+        if (side.includes("OVER") || side === "O") overOdds.push(val);
+        else if (side.includes("UNDER") || side === "U") underOdds.push(val);
+      }
       continue;
     }
     if (type === "CORRECT_SCORE") {
-      const parsed = parseScoreToken(String(sideTok));
+      const parsed = parseScoreToken(side);
       if (!parsed) continue;
       if (!csOddsByScore.has(parsed.score)) csOddsByScore.set(parsed.score, []);
       csOddsByScore.get(parsed.score)!.push(val);
