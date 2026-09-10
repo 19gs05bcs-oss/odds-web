@@ -96,7 +96,7 @@ export function computeScoreConsensus(
     const scp = String(scope).toUpperCase();
     const side = String(sideTok).toUpperCase();
 
-    // 1X2 Piyasa Dağılımı
+    // 1X2 Oranları
     if ((type === "HOME_DRAW_AWAY" || type === "1X2") && (scp === "FULL_TIME" || !scp.includes("HALF"))) {
       if (side === "H" || side === "1") hOdds.push(effVal);
       else if (side === "D" || side === "X") dOdds.push(effVal);
@@ -113,7 +113,7 @@ export function computeScoreConsensus(
       continue;
     }
 
-    // Karşılıklı Gol (KG Var / Yok)
+    // KG Var / Yok
     if (type.includes("BOTH_TEAMS_TO_SCORE") && (scp === "FULL_TIME" || !scp.includes("HALF"))) {
       if (side.includes("YES") || side === "Y") bttsYesOdds.push(effVal);
       else if (side.includes("NO") || side === "N") bttsNoOdds.push(effVal);
@@ -168,7 +168,7 @@ export function computeScoreConsensus(
   }
   const pBttsNo = 1 - pBttsYes;
 
-  // 4. HT1 Korelasyon Matrisi
+  // 4. HT1 Korelasyon Dağılımı
   const htNormMap = new Map<string, number>();
   if (htCsCurrent.size > 0) {
     let totHtInv = 0;
@@ -180,20 +180,23 @@ export function computeScoreConsensus(
     }
   }
 
-  // 5. Ham Büro Sıralaması ve Mutlak Çapa / Clean Sheet Tespiti (Colon Formatı Uyumlu)
+  // 5. Ham Büro Sıralaması ve Temiz Galibiyet / Çapa Tespiti
   const sortedRawCs = Array.from(ftCsCurrent.entries())
     .map(([sc, list]) => ({ sc, med: median(list) }))
     .filter((x) => x.med > 1.0)
     .sort((a, b) => a.med - b.med);
 
   const absoluteTopScore = sortedRawCs.length ? sortedRawCs[0].sc : null;
+  const top5RawScores = sortedRawCs.slice(0, 5).map((x) => x.sc);
   const top6RawScores = sortedRawCs.slice(0, 6).map((x) => x.sc);
 
-  const isHeavyFav = pH >= 0.75 || pA >= 0.75;
-  const cleanSheetTarget = pH >= 0.75 ? "1:0" : "0:1";
+  // Dominasyon ve Rölanti Kontrolleri (0.68 Eşiğiyle Tam Hizalı)
+  const isHeavyFav = pH >= 0.68 || pA >= 0.68;
+  const favIsHome = pH >= 0.68;
+  const cleanSheetTarget = favIsHome ? "1:0" : "0:1";
   const hasCleanSheetControl = isHeavyFav && top6RawScores.includes(cleanSheetTarget);
 
-  // 6. Çoklu Piyasa Konsensüs ve Drift Puanlaması
+  // 6. Çoklu Piyasa Konsensüs ve Akıllı Denge Puanlaması
   const candidates: {
     score: string;
     power: number;
@@ -216,37 +219,58 @@ export function computeScoreConsensus(
     const { h, a } = parsed;
     const totG = h + a;
 
-    // (a) Ham Piyasa Zımni Olasılığı
+    // (a) Ham Zımni Olasılık
     const baseProb = (1 / curOdd) * 100;
 
-    // (b) Drift Velocity
+    // (b) Drift Velocity Sınırlandırması
     const rawDrift = curOdd > 0 && opOdd > 0 ? opOdd / curOdd : 1.0;
-    const driftVelocity = Math.max(0.6, Math.min(1.6, rawDrift));
+    const driftVelocity = Math.max(0.6, Math.min(1.65, rawDrift));
 
     // (c) 1X2 Taraf Uyumu
     const sideW = h > a ? pH / 0.33 : a > h ? pA / 0.33 : pD / 0.33;
 
-    // (d) Barem Maske Kırıcı & Rölanti Kontrolü
+    // (d) Barem Maske Kırıcı & Kaos Ayrışması
     let baremFactor = 1.0;
     if (hasCleanSheetControl && scoreStr === cleanSheetTarget) {
-      baremFactor = 1.45; // Erken Gol + Rölanti (Clean Sheet Control)
+      baremFactor = 1.45;
     } else if (isHyperOver) {
       if (totG <= 1) baremFactor = 0.35;
       else if (totG === 2) baremFactor = 0.65;
       else if (totG >= 4) baremFactor = 1.5;
       else baremFactor = 1.15;
+
+      // Ağır dominasyon olmayan açık maçlarda çift taraflı gol patlaması desteği
+      if (pOver25 >= 0.62 && !isHeavyFav && h >= 2 && a >= 2) {
+        baremFactor *= 1.35;
+      }
     } else if (isHardUnder) {
-      if (totG <= 1) baremFactor = 1.4;
-      else if (totG === 2) baremFactor = 1.1;
-      else if (totG >= 3) baremFactor = 0.5;
+      if (totG >= 3 && driftVelocity >= 1.12) {
+        baremFactor = 1.3;
+      } else {
+        if (totG <= 1) baremFactor = 1.4;
+        else if (totG === 2) baremFactor = 1.1;
+        else if (totG >= 3) baremFactor = 0.5;
+      }
     }
 
-    // (e) KG Var / Yok Uyumu
+    // (e) KG Uyumu ve Akıllı Denge Modeli (Perakende Trap Filtresi)
     const isBoth = h > 0 && a > 0;
-    const bttsW = isBoth ? pBttsYes / 0.5 : pBttsNo / 0.5;
+    const isCleanFavWin =
+      (favIsHome && a === 0 && h >= 2) || (!favIsHome && pA >= 0.68 && h === 0 && a >= 2);
 
-    // (f) HT1 Yarı Desteği
-    let htFactor = 1.1;
+    let bttsW = 1.0;
+    let effDriftPow = Math.pow(driftVelocity, 1.6);
+
+    if (isCleanFavWin && top5RawScores.includes(scoreStr) && curOdd <= 11.0) {
+      // Ağır favorinin tek taraflı fark skorunu suni KG Var hücumundan koru
+      bttsW = 1.05;
+      effDriftPow = Math.pow(Math.max(1.0, driftVelocity), 1.1);
+    } else {
+      bttsW = isBoth ? pBttsYes / 0.5 : pBttsNo / 0.5;
+    }
+
+    // (f) HT1 Korelasyon Çarpanı
+    let htFactor = 1.0;
     if (htNormMap.size > 0) {
       let compatibleHtProb = 0;
       let paths = 0;
@@ -262,8 +286,7 @@ export function computeScoreConsensus(
       htFactor = 1.0 + (paths > 0 ? compatibleHtProb / paths : 0.05);
     }
 
-    // Master Power Formülü
-    const power = baseProb * sideW * baremFactor * bttsW * Math.pow(driftVelocity, 1.5) * htFactor;
+    const power = baseProb * sideW * baremFactor * bttsW * effDriftPow * htFactor;
 
     candidates.push({
       score: scoreStr,
@@ -276,16 +299,15 @@ export function computeScoreConsensus(
     });
   }
 
-  // Güce göre büyükten küçüğe sırala
   candidates.sort((a, b) => b.power - a.power);
 
-  // 7. Çapa Dokunulmazlığı ve Portföy İnşası
+  // 7. Çapa Dokunulmazlığı ve Portföy Kurgusu
   const finalPortfolioItems: typeof candidates = [];
   const top3PowerScores = candidates.slice(0, 3).map((c) => c.score);
 
   if (absoluteTopScore && !top3PowerScores.includes(absoluteTopScore)) {
-    finalPortfolioItems.push(candidates[0]);
-    finalPortfolioItems.push(candidates[1]);
+    if (candidates[0]) finalPortfolioItems.push(candidates[0]);
+    if (candidates[1]) finalPortfolioItems.push(candidates[1]);
     const anchorItem = candidates.find((c) => c.score === absoluteTopScore);
     if (anchorItem) finalPortfolioItems.push(anchorItem);
   }
@@ -299,10 +321,10 @@ export function computeScoreConsensus(
   const isBalancedUnder = pOver25 <= 0.51 && pD >= 0.27 && Math.max(pH, pA) <= 0.55;
 
   if (isSuperFav) {
-    const favIsHome = pH >= 0.85;
+    const favIsHomeSuper = pH >= 0.85;
     const consolationCandidate = candidates.find((c) => {
       if (used.has(c.score)) return false;
-      return favIsHome ? c.a === 1 && c.h >= 3 : c.h === 1 && c.a >= 3;
+      return favIsHomeSuper ? c.a === 1 && c.h >= 3 : c.h === 1 && c.a >= 3;
     });
     if (consolationCandidate) {
       finalPortfolioItems.push(consolationCandidate);
@@ -323,7 +345,7 @@ export function computeScoreConsensus(
 
   const rankedScores = finalPortfolioItems.slice(0, 4);
 
-  // Rejim Sınıflandırması
+  // 8. Rejim Tanımlaması
   const isHomeFav = pH >= 0.43 && pH > pA * 1.12;
   const isAwayFav = pA >= 0.43 && pA > pH * 1.12;
 
