@@ -180,13 +180,28 @@ export function computeScoreConsensus(
     }
   }
 
-  // 5. Çoklu Piyasa Konsensüs ve Drift Puanlaması
+  // 5. Ham Büro Sıralaması ve Mutlak Çapa / Clean Sheet Tespiti (Colon Formatı Uyumlu)
+  const sortedRawCs = Array.from(ftCsCurrent.entries())
+    .map(([sc, list]) => ({ sc, med: median(list) }))
+    .filter((x) => x.med > 1.0)
+    .sort((a, b) => a.med - b.med);
+
+  const absoluteTopScore = sortedRawCs.length ? sortedRawCs[0].sc : null;
+  const top6RawScores = sortedRawCs.slice(0, 6).map((x) => x.sc);
+
+  const isHeavyFav = pH >= 0.75 || pA >= 0.75;
+  const cleanSheetTarget = pH >= 0.75 ? "1:0" : "0:1";
+  const hasCleanSheetControl = isHeavyFav && top6RawScores.includes(cleanSheetTarget);
+
+  // 6. Çoklu Piyasa Konsensüs ve Drift Puanlaması
   const candidates: {
     score: string;
     power: number;
     curOdd: number;
     opOdd: number | null;
     drift: number;
+    h: number;
+    a: number;
   }[] = [];
 
   for (const [scoreStr, curList] of ftCsCurrent.entries()) {
@@ -211,9 +226,11 @@ export function computeScoreConsensus(
     // (c) 1X2 Taraf Uyumu
     const sideW = h > a ? pH / 0.33 : a > h ? pA / 0.33 : pD / 0.33;
 
-    // (d) Barem Maske Kırıcı
+    // (d) Barem Maske Kırıcı & Rölanti Kontrolü
     let baremFactor = 1.0;
-    if (isHyperOver) {
+    if (hasCleanSheetControl && scoreStr === cleanSheetTarget) {
+      baremFactor = 1.45; // Erken Gol + Rölanti (Clean Sheet Control)
+    } else if (isHyperOver) {
       if (totG <= 1) baremFactor = 0.35;
       else if (totG === 2) baremFactor = 0.65;
       else if (totG >= 4) baremFactor = 1.5;
@@ -254,11 +271,57 @@ export function computeScoreConsensus(
       curOdd,
       opOdd: opList?.length ? opOdd : null,
       drift: driftVelocity,
+      h,
+      a,
     });
   }
 
   // Güce göre büyükten küçüğe sırala
   candidates.sort((a, b) => b.power - a.power);
+
+  // 7. Çapa Dokunulmazlığı ve Portföy İnşası
+  const finalPortfolioItems: typeof candidates = [];
+  const top3PowerScores = candidates.slice(0, 3).map((c) => c.score);
+
+  if (absoluteTopScore && !top3PowerScores.includes(absoluteTopScore)) {
+    finalPortfolioItems.push(candidates[0]);
+    finalPortfolioItems.push(candidates[1]);
+    const anchorItem = candidates.find((c) => c.score === absoluteTopScore);
+    if (anchorItem) finalPortfolioItems.push(anchorItem);
+  }
+
+  if (finalPortfolioItems.length === 0) {
+    finalPortfolioItems.push(...candidates.slice(0, 3));
+  }
+
+  const used = new Set(finalPortfolioItems.map((x) => x.score));
+  const isSuperFav = pH >= 0.85 || pA >= 0.85;
+  const isBalancedUnder = pOver25 <= 0.51 && pD >= 0.27 && Math.max(pH, pA) <= 0.55;
+
+  if (isSuperFav) {
+    const favIsHome = pH >= 0.85;
+    const consolationCandidate = candidates.find((c) => {
+      if (used.has(c.score)) return false;
+      return favIsHome ? c.a === 1 && c.h >= 3 : c.h === 1 && c.a >= 3;
+    });
+    if (consolationCandidate) {
+      finalPortfolioItems.push(consolationCandidate);
+      used.add(consolationCandidate.score);
+    }
+  } else if (isBalancedUnder) {
+    const zeroZeroCand = candidates.find((c) => c.score === "0:0" && !used.has(c.score));
+    if (zeroZeroCand && zeroZeroCand.curOdd <= 11.0) {
+      finalPortfolioItems.push(zeroZeroCand);
+      used.add("0:0");
+    }
+  }
+
+  if (finalPortfolioItems.length < 4) {
+    const remaining = candidates.filter((c) => !used.has(c.score));
+    if (remaining.length) finalPortfolioItems.push(remaining[0]);
+  }
+
+  const rankedScores = finalPortfolioItems.slice(0, 4);
 
   // Rejim Sınıflandırması
   const isHomeFav = pH >= 0.43 && pH > pA * 1.12;
@@ -268,7 +331,15 @@ export function computeScoreConsensus(
   let regimeLabel = "Dengeli / Açık";
   let confidenceLabel = "STANDART";
 
-  if (isHyperOver) {
+  if (pH >= 0.85) {
+    regimeCode = "DOM_H_SUPER";
+    regimeLabel = "Ağır Baskılı Ev Favori";
+    confidenceLabel = "ÇOK YÜKSEK (Tek Taraflı)";
+  } else if (pA >= 0.85) {
+    regimeCode = "DOM_A_SUPER";
+    regimeLabel = "Ağır Baskılı Deplasman Favori";
+    confidenceLabel = "ÇOK YÜKSEK (Tek Taraflı)";
+  } else if (isHyperOver) {
     if (isHomeFav) {
       regimeCode = "DOM_H_HYPER";
       regimeLabel = "Yüksek Tempolu Ev Favori";
@@ -314,8 +385,6 @@ export function computeScoreConsensus(
     hs != null && as_ != null && Number.isFinite(hs) && Number.isFinite(as_)
       ? `${hs}:${as_}`
       : null;
-
-  const rankedScores = candidates.slice(0, 4);
 
   const portfolio: ScoreConsensusSlot[] = rankedScores.map((item, i) => ({
     score: item.score,
