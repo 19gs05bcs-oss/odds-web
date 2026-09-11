@@ -10,6 +10,10 @@ import type { BoardCall } from "@/lib/analysis/similarityEngine";
 import { computeMarketSignals } from "@/lib/analysis/marketSignals";
 import { computeScoreConsensus } from "@/lib/analysis/scoreConsensusEngine";
 import { ScoreConsensusPanel } from "@/components/ScoreConsensusPanel";
+// import bloğuna eklendi
+import { computeGoalEngine } from "@/lib/analysis/goalEngine";
+import { GoalEnginePanel } from "@/components/GoalEnginePanel";
+
 type SimilarityCardState = {
   status: "idle" | "loading" | "done" | "error";
   matchedCount?: number;
@@ -141,6 +145,12 @@ export function SmartAnalysisClient({
       selectedFixture?.away_score,
     ],
   );
+
+  // scoreConsensus useMemo'sundan hemen sonra
+const goalEngine = useMemo(
+  () => computeGoalEngine(selectedFixture?.odds),
+  [selectedFixture?.odds],
+);
 
   // Sunucudan gelen sıra = benzerlik skoruna göre artan (en benzer önce; bkz.
   // similarityEngine.ts ranked.sort). "date" seçilince tarihe göre (eski→yeni)
@@ -440,6 +450,7 @@ export function SmartAnalysisClient({
             <>
               <MarketSignalsPanel signals={marketSignals} />
               <ScoreConsensusPanel consensus={scoreConsensus} />
+              <GoalEnginePanel metrics={goalEngine} actualScore={scoreConsensus?.actualScore ?? null} />
             </>
           )}
 
