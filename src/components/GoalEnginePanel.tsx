@@ -11,26 +11,6 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   LOCKED_CORRIDOR: "Locked corridor (false open)",
 };
 
-// getScoreMultiplier tüm (h,a) çiftleri için tanımlı — burada sadece küçük bir
-// aday havuzu üzerinden en yüksek ağırlıklı skorları sıralayıp gösteriyoruz.
-// Bu, motorun kendi karar mantığına dokunmadan salt bir sunum katmanı.
-const MAX_GOALS_PER_SIDE = 4;
-const TOP_N = 6;
-
-function rankScorelines(metrics: GoalEngineMetrics): { score: string; multiplier: number }[] {
-  const rows: { score: string; multiplier: number }[] = [];
-  for (let h = 0; h <= MAX_GOALS_PER_SIDE; h++) {
-    for (let a = 0; a <= MAX_GOALS_PER_SIDE; a++) {
-      rows.push({
-        score: `${h}:${a}`,
-        multiplier: Math.round(metrics.getScoreMultiplier(h, a) * 100) / 100,
-      });
-    }
-  }
-  rows.sort((x, y) => y.multiplier - x.multiplier);
-  return rows.slice(0, TOP_N);
-}
-
 export function GoalEnginePanel({
   metrics,
   actualScore,
@@ -41,9 +21,9 @@ export function GoalEnginePanel({
   if (!metrics) {
     return (
       <section className={styles.card}>
-        <h3>Goal Engine</h3>
+        <h3>Goal & Market Engine</h3>
         <p className={styles.empty}>
-          Not enough 1X2 / Over-Under odds for this match to build a goal-expectancy profile.
+          Bu maç için yeterli 1X2 / Alt-Üst / HT oran verisi bulunamadı.
         </p>
       </section>
     );
@@ -54,92 +34,150 @@ export function GoalEnginePanel({
     isHeavyFavorite,
     isExtremeDominance,
     favoriteOdds,
-    htVelocityLabel,
+    htZeroZeroOdd,
     pOver15,
     pOver25,
     pOver35,
     pOver45,
-    isUnderLeaking,
-    isFalseOpen,
     fairGoalLine,
     bttsExpectancy,
     scoreProfile,
+    anomalies,
+    htVerdict,
+    ftVerdict,
   } = metrics;
-
-  const ranked = rankScorelines(metrics);
 
   const favoriteLabel =
     dominanceSide === "NONE"
-      ? "None"
-      : `${dominanceSide === "HOME" ? "Home" : "Away"}${
-          isExtremeDominance ? " (extreme)" : isHeavyFavorite ? " (heavy)" : ""
+      ? "Dengeli (Belirgin favori yok)"
+      : `${dominanceSide === "HOME" ? "Ev Sahibi" : "Deplasman"}${
+          isExtremeDominance ? " (Aşırı Baskın)" : isHeavyFavorite ? " (Ağır Favori)" : ""
         }`;
 
   return (
     <section className={styles.card}>
-      <h3>
-        Goal Engine <span className={styles.muted}>· {SCORE_PROFILE_LABEL[scoreProfile]}</span>
-      </h3>
-      <p className={styles.cardLead}>
-        Rule-based goal-expectancy profile from the 1X2, Draw-No-Bet, HT Correct Score and
-        Over/Under markets — used to weight likely final scorelines. Not a prediction.
-      </p>
-
-      {isFalseOpen ? (
-        <p className={styles.hint}>
-          Over/Under 1.5 and 2.5 lines have barely moved since opening — this looks like a static,
-          low-liquidity price rather than a real goal-expectancy signal. Classified as a locked
-          corridor instead of Open Exchange; 0:0 and 1:1 are weighted up.
-        </p>
-      ) : null}
-
-      {isUnderLeaking ? (
-        <p className={styles.hint}>
-          Under 2.5 price has drifted up since opening — possible late money moving away from a
-          low-scoring outcome.
-        </p>
-      ) : null}
-
-      <p className={styles.subHead}>
-        Favourite: <strong>{favoriteLabel}</strong>
-        {favoriteOdds != null ? <> · odds @{favoriteOdds}</> : null} · {htVelocityLabel}
-      </p>
-
-      <p className={styles.subHead}>
-        Fair goal line <strong>{fairGoalLine}</strong> · BTTS expectancy{" "}
-        <strong>{bttsExpectancy ? "Yes" : "No"}</strong>
-      </p>
-
-      <p className={styles.subHead}>
-        Over 1.5 <strong>{pOver15 != null ? `${pOver15}%` : "—"}</strong> · Over 2.5{" "}
-        <strong>{pOver25}%</strong> · Over 3.5{" "}
-        <strong>{pOver35 != null ? `${pOver35}%` : "—"}</strong> · Over 4.5{" "}
-        <strong>{pOver45 != null ? `${pOver45}%` : "—"}</strong>
-      </p>
-
-      <div
-        className={styles.simGrid}
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(4.5rem, 5.5rem))", gap: "0.5rem" }}
-      >
-        {ranked.map((row) => (
-          <div key={row.score} className={styles.simCard} style={{ padding: "0.55rem 0.65rem" }}>
-            <div className={styles.simVal} style={{ fontSize: "1.05rem", margin: 0 }}>
-              {row.score}
-              {actualScore === row.score ? <span className={styles.pos}> ←</span> : null}
-            </div>
-          </div>
-        ))}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+        <h3 style={{ margin: 0 }}>
+          🎯 Goal & Market Anomaly Engine{" "}
+          <span className={styles.muted} style={{ fontSize: "0.85rem", fontWeight: 400 }}>
+            · {SCORE_PROFILE_LABEL[scoreProfile]}
+          </span>
+        </h3>
+        {actualScore && (
+          <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted, #888)" }}>
+            Biten Skor: <strong style={{ color: "var(--text-main, #fff)" }}>{actualScore}</strong>
+          </span>
+        )}
       </div>
-      <p className={styles.hint}>
-        *Note: these are the scorelines favoured by the Goal Engine&rsquo;s goal-expectancy
-        multipliers, not a prediction.
-      </p>
 
-      {actualScore ? (
-        <p className={styles.cardLead}>
-          Final score: <strong>{actualScore}</strong>
-        </p>
-      ) : null}
+      {/* 1. TEŞHİS KARTLARI (HT & FT VERDICTS) */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          gap: "0.75rem",
+          marginBottom: "1rem",
+        }}
+      >
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "8px",
+            backgroundColor: "rgba(255, 255, 255, 0.03)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+          }}
+        >
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted, #888)", textTransform: "uppercase", marginBottom: "0.35rem" }}>
+            🎯 İlk Yarı Teşhisi
+          </div>
+          <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-main, #fff)" }}>
+            {htVerdict}
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "0.85rem 1rem",
+            borderRadius: "8px",
+            backgroundColor: "rgba(255, 255, 255, 0.03)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+          }}
+        >
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted, #888)", textTransform: "uppercase", marginBottom: "0.35rem" }}>
+            🎯 Maç Sonu Teşhisi
+          </div>
+          <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-main, #fff)" }}>
+            {ftVerdict}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. TESPİT EDİLEN PİYASA ANOMALİLERİ */}
+      <div
+        style={{
+          padding: "0.85rem 1rem",
+          borderRadius: "8px",
+          backgroundColor: anomalies.length > 0 ? "rgba(239, 68, 68, 0.05)" : "rgba(255, 255, 255, 0.02)",
+          border: anomalies.length > 0 ? "1px solid rgba(239, 68, 68, 0.2)" : "1px solid rgba(255, 255, 255, 0.05)",
+          marginBottom: "1rem",
+        }}
+      >
+        <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.45rem", color: anomalies.length > 0 ? "#f87171" : "#888" }}>
+          🚨 TESPİT EDİLEN PİYASA ANOMALİLERİ
+        </div>
+        {anomalies.length > 0 ? (
+          <ul style={{ margin: 0, paddingLeft: "1.2rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+            {anomalies.map((ano, idx) => (
+              <li key={idx} style={{ fontSize: "0.88rem", lineHeight: 1.4, color: "var(--text-main, #eee)" }}>
+                {ano}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div style={{ fontSize: "0.85rem", color: "var(--text-muted, #777)" }}>
+            Belirgin bir oran anomalisi veya likidite kayması tespit edilmedi.
+          </div>
+        )}
+      </div>
+
+      {/* 3. PİYASA GÖSTERGELERİ DETAY ÇİZELGESİ */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: "0.5rem",
+          padding: "0.75rem",
+          borderRadius: "6px",
+          backgroundColor: "rgba(0, 0, 0, 0.2)",
+          fontSize: "0.82rem",
+        }}
+      >
+        <div>
+          <span style={{ color: "var(--text-muted, #888)" }}>Taraf Baskısı: </span>
+          <strong>{favoriteLabel}</strong>
+          {favoriteOdds != null ? ` (@${favoriteOdds.toFixed(2)})` : ""}
+        </div>
+        <div>
+          <span style={{ color: "var(--text-muted, #888)" }}>HT 0:0 Oranı: </span>
+          <strong>{htZeroZeroOdd != null ? `@${htZeroZeroOdd.toFixed(2)}` : "—"}</strong>
+        </div>
+        <div>
+          <span style={{ color: "var(--text-muted, #888)" }}>KG Beklentisi: </span>
+          <strong>{bttsExpectancy ? "Var (Yüksek)" : "Yok (Zayıf)"}</strong>
+        </div>
+        <div>
+          <span style={{ color: "var(--text-muted, #888)" }}>Adil Gol Çizgisi: </span>
+          <strong>{fairGoalLine}</strong>
+        </div>
+        <div>
+          <span style={{ color: "var(--text-muted, #888)" }}>2.5 Üst İhtimali: </span>
+          <strong>%{pOver25}</strong>
+        </div>
+        <div>
+          <span style={{ color: "var(--text-muted, #888)" }}>3.5 Üst İhtimali: </span>
+          <strong>{pOver35 != null ? `%${pOver35}` : "—"}</strong>
+        </div>
+      </div>
     </section>
   );
 }
