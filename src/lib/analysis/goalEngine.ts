@@ -1,31 +1,31 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
 export type GoalEngineMetrics = {
-  // Dominance & Güç Dağılımı
+  // 1. Dominance & Güç Dağılımı
   dominanceSide: "HOME" | "AWAY" | "NONE";
   isHeavyFavorite: boolean;
   isExtremeDominance: boolean;
   favoriteOdds: number | null;
 
-  // İlk Yarı Hızı (HT Velocity)
+  // 2. İlk Yarı Hızı (HT Velocity)
   htVelocity: "HARD_LOCK" | "BALANCED" | "HIGH_VELOCITY";
   htVelocityLabel: string;
   htZeroZeroOdd: number | null;
   htZeroZeroDrift: number;
 
-  // Barem Olasılıkları
+  // 3. Barem Olasılıkları
   pOver15: number | null;
   pOver25: number;
   pOver35: number | null;
   pOver45: number | null;
-  isUnderLeaking: boolean;
-  // "False Open" koruması: 1.5 ve 2.5 barem O/U oranları açılıştan kapanışa
-  // (neredeyse) hiç kımıldamamışsa true — piyasa hacimsiz/şablon fiyatlıyor
-  // demektir, KG Var/yüksek Üst olasılığı yanıltıcı bir OPEN_EXCHANGE sinyali
-  // üretebilir. Estoril–Arouca (0:0) vakası bu koruma için referans örnek.
-  isFalseOpen: boolean;
 
-  // Karar Parametreleri
+  // 4. Piyasa Anomalileri & Likidite Sinyalleri
+  isUnderLeaking: boolean;
+  isFalseOpen: boolean;
+  handicapSmashCount: number;
+  anomalies: string[];
+
+  // 5. Karar Parametreleri & Net Teşhisler
   fairGoalLine: number;
   bttsExpectancy: boolean;
   scoreProfile:
@@ -35,9 +35,12 @@ export type GoalEngineMetrics = {
     | "OPEN_EXCHANGE"
     | "BALANCED"
     | "HARD_UNDER"
-    | "LOCKED_CORRIDOR"; // False Open tespit edilince OPEN_EXCHANGE yerine buraya düşer
+    | "LOCKED_CORRIDOR";
 
-  // Skor Motoru Çarpan Fonksiyonu
+  htVerdict: string;
+  ftVerdict: string;
+
+  // 6. Skor Motoru Çarpan Fonksiyonu
   getScoreMultiplier: (homeGoals: number, awayGoals: number) => number;
 };
 
@@ -63,9 +66,7 @@ function impliedTwo(o: number, u: number): [number, number] {
   return [io / (io + iu), iu / (io + iu)];
 }
 
-// False Open koruması: açılış -> kapanış oran değişimi %STATIC_DRIFT_MAX'ın
-// altındaysa o taraf "SABİT" kabul edilir.
-const STATIC_DRIFT_MAX = 0.02;
+const STATIC_DRIFT_MAX = 0.025; // %2.5 altı değişim hareketsiz piyasadır
 
 function driftRatio(current: number[], opening: number[]): number | null {
   if (!current.length || !opening.length) return null;
@@ -75,11 +76,10 @@ function driftRatio(current: number[], opening: number[]): number | null {
   return Math.abs(c - o) / o;
 }
 
-/** true: her iki taraf da SABİT | false: en az biri hareketli | null: açılış verisi yok, karar verilemez */
-function isLineStatic(over: number[], overOp: number[], under: number[], underOp: number[]): boolean | null {
+function isLineStatic(over: number[], overOp: number[], under: number[], underOp: number[]): boolean {
   const dOver = driftRatio(over, overOp);
   const dUnder = driftRatio(under, underOp);
-  if (dOver == null || dUnder == null) return null;
+  if (dOver == null || dUnder == null) return false;
   return dOver <= STATIC_DRIFT_MAX && dUnder <= STATIC_DRIFT_MAX;
 }
 
@@ -101,8 +101,12 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     "4.5": { o: [], u: [], o_op: [], u_op: [] },
   };
 
+  const htOu05: number[] = [];
   const bttsYes: number[] = [];
   const bttsNo: number[] = [];
+
+  // Asya Handikap takibi (Botafogo, Como, Kyoto tipi sert likidite çöküşleri için)
+  const asianMinusLines: Array<{ key: string; op: number; cur: number }> = [];
 
   for (const row of odds) {
     if (!Array.isArray(row) || row.length < 6) continue;
@@ -139,7 +143,15 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       }
     }
 
-    // Over / Under
+    // HT Over 0.5
+    if ((type.includes("OVER_UNDER") || type.includes("TOTAL")) &&
+        (scp.includes("FIRST_HALF") || scp.includes("1ST") || scp.includes("HT1"))) {
+      if (side.includes("0.5") && (side.includes("OVER") || side === "O")) {
+        htOu05.push(eff);
+      }
+    }
+
+    // Over / Under Full Time
     if ((type.includes("OVER_UNDER") || type.includes("TOTAL")) && (scp === "FULL_TIME" || !scp.includes("HALF"))) {
       const isOver = side.includes("OVER") || side === "O";
       const isUnder = side.includes("UNDER") || side === "U";
@@ -161,6 +173,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     if (type.includes("BOTH_TEAMS_TO_SCORE") && (scp === "FULL_TIME" || !scp.includes("HALF"))) {
       if (side.includes("YES") || side === "Y") bttsYes.push(eff);
       else if (side.includes("NO") || side === "N") bttsNo.push(eff);
+    }
+
+    // Asya Handikap Eksi Baremler (-0.75, -1.0, -1.25, -1.5)
+    if (type.includes("ASIAN_HANDICAP") && (scp === "FULL_TIME" || !scp.includes("HALF"))) {
+      if (op && cur && (side.includes("-0.75") || side.includes("-1.0") || side.includes("-1.25") || side.includes("-1.5"))) {
+        asianMinusLines.push({ key: side, op, cur });
+      }
     }
   }
 
@@ -194,17 +213,18 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const medHt00Cur = ht00Current.length ? median(ht00Current) : null;
   const medHt00Op = ht00Opening.length ? median(ht00Opening) : medHt00Cur;
   const ht00Drift = medHt00Cur && medHt00Op ? medHt00Op / medHt00Cur : 1.0;
+  const medHtOu05 = htOu05.length ? median(htOu05) : null;
 
   let htVelocity: GoalEngineMetrics["htVelocity"] = "BALANCED";
-  let htVelocityLabel = "Balanced first half";
+  let htVelocityLabel = "Dengeli İlk Yarı";
 
   if (medHt00Cur != null) {
-    if (medHt00Cur <= 2.30 && !isHeavyFavorite) {
+    if (medHt00Cur <= 2.35 && !isHeavyFavorite) {
       htVelocity = "HARD_LOCK";
-      htVelocityLabel = "Hard lock (0:0 expected)";
+      htVelocityLabel = "Sert Kilit (0:0 Beklentisi)";
     } else if (medHt00Cur >= 3.00 || (medHt00Cur >= 2.70 && isHeavyFavorite)) {
       htVelocity = "HIGH_VELOCITY";
-      htVelocityLabel = "High velocity (early goal)";
+      htVelocityLabel = "Yüksek Hız (Erken Gol Patlaması)";
     }
   }
 
@@ -222,67 +242,134 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const pOver35 = calcP("3.5");
   const pOver45 = calcP("4.5");
 
-  // 4. Alt Kaçışı / Trap Under Tespiti (Botafogo / Stevenage Filtresi)
+  // 4. Anomaliler & Likidite Sinyalleri
+  const anomalies: string[] = [];
+
+  // 4a. Under Leakage (Alt Kaçışı)
   let isUnderLeaking = false;
   if (ou["2.5"].u.length && ou["2.5"].u_op.length) {
     const uCur = median(ou["2.5"].u);
     const uOp = median(ou["2.5"].u_op);
-    if (uCur / uOp >= 1.04) isUnderLeaking = true;
+    if (uCur / uOp >= 1.04) {
+      isUnderLeaking = true;
+      anomalies.push(`UNDER LEAKAGE: 2.5 Alt oranı @${uOp.toFixed(2)} -> @${uCur.toFixed(2)} yükseldi. Para Üst baremine akıyor!`);
+    }
+  }
+
+  // 4b. Asya Handikap Çöküşü (Handicap Smash)
+  let handicapSmashCount = 0;
+  for (const h of asianMinusLines) {
+    if (h.cur / h.op <= 0.86) {
+      handicapSmashCount++;
+      anomalies.push(`HANDICAP SMASH: ${h.key} @${h.op.toFixed(2)} -> @${h.cur.toFixed(2)} seviyesine sert çöktü!`);
+    }
+  }
+
+  // 4c. False Open (Estoril Koruması)
+  const static15 = isLineStatic(ou["1.5"].o, ou["1.5"].o_op, ou["1.5"].u, ou["1.5"].u_op);
+  const static25 = isLineStatic(ou["2.5"].o, ou["2.5"].o_op, ou["2.5"].u, ou["2.5"].u_op);
+  const isFalseOpen = static15 && static25 && !isUnderLeaking && handicapSmashCount === 0;
+  if (isFalseOpen) {
+    anomalies.push("DEAD/STATIC MARKET: Barem oranlarında sıfır hareket var. Üst şablonu yanıltıcı, kilit riski tavan!");
   }
 
   const medBttsYes = bttsYes.length ? median(bttsYes) : 2.0;
-  const bttsExpectancy = medBttsYes <= 1.65;
+  const bttsExpectancy = medBttsYes <= 1.68;
 
-  // 4b. False Open Tespiti: 1.5 ve 2.5 baremlerinin ikisi de açılıştan
-  // kapanışa SABİT kaldıysa piyasada gerçek gol/likidite hareketi yoktur —
-  // KG Var/yüksek Üst rakamları o zaman şablon fiyat, gerçek sinyal değildir.
-  const static15 = isLineStatic(ou["1.5"].o, ou["1.5"].o_op, ou["1.5"].u, ou["1.5"].u_op);
-  const static25 = isLineStatic(ou["2.5"].o, ou["2.5"].o_op, ou["2.5"].u, ou["2.5"].u_op);
-  const isFalseOpen = static15 === true && static25 === true;
-
-  // 5. Profil Hiyerarşisi
+  // 5. Profil Hiyerarşisi (Tüm Uç Vakaların Sentezi)
   let fairGoalLine = 2.5;
   let scoreProfile: GoalEngineMetrics["scoreProfile"] = "BALANCED";
 
+  // A. Ekstrem Ezme (Bayern Vakası)
   if (isExtremeDominance && (pOver35 ?? 0) >= 0.50) {
     fairGoalLine = 4.5;
     scoreProfile = "EXTREME_BLOWOUT";
-  } else if (isHeavyFavorite && bttsExpectancy) {
+  }
+  // B. Ağır Favori ama Karşılıklı Gol Baskısı (PSV Vakası)
+  else if (isHeavyFavorite && bttsExpectancy) {
     fairGoalLine = 2.75;
     scoreProfile = "CONTESTED_FAVORITE";
-  } else if (isHeavyFavorite && !bttsExpectancy) {
+  }
+  // C. Tek Taraflı Ağır Üstünlük (Sport Recife, Panathinaikos, Palermo)
+  else if (isHeavyFavorite && !bttsExpectancy) {
     fairGoalLine = pOver25 >= 0.55 ? 3.0 : 2.5;
     scoreProfile = "DOMINANT_WIN";
-  } else if (!isHeavyFavorite && bttsExpectancy && pOver25 >= 0.525 && !isFalseOpen) {
+  }
+  // D. Botafogo Düzeltmesi (Fake Under / Anomalik Üst Patlaması)
+  // Barem %42 gibi kısır görünse dahi alt kaçağı ve handikap çöküşü varsa maç patlar!
+  else if (isUnderLeaking && handicapSmashCount >= 1) {
     fairGoalLine = 2.75;
     scoreProfile = "OPEN_EXCHANGE";
-  } else if (!isHeavyFavorite && (pOver15 ?? 1) < 0.70 && pOver25 < 0.48 && !isUnderLeaking && (medHt00Cur ?? 99) <= 2.40) {
-    fairGoalLine = 1.5;
-    scoreProfile = "HARD_UNDER";
-  } else if (!isHeavyFavorite && isFalseOpen) {
-    // False Open koruması: piyasa hareketsiz olduğu için OPEN_EXCHANGE (ya da
-    // varsayılan BALANCED) yerine "Kısır Koridor"a düşürülür; 0:0 ve 1:1
-    // skorları getScoreMultiplier'da öncelikli ağırlık alır.
-    fairGoalLine = 2.0;
+  }
+  // E. Estoril Koruması (Hareketsiz Şablon Tuzağı)
+  else if (!isHeavyFavorite && isFalseOpen) {
+    fairGoalLine = 1.75;
     scoreProfile = "LOCKED_CORRIDOR";
   }
+  // F. Karşılıklı Yangın / Yüksek Tempo (Como, Elche, Kyoto)
+  else if (
+    !isHeavyFavorite &&
+    (
+      (bttsExpectancy && pOver25 >= 0.51) ||
+      (htVelocity === "HIGH_VELOCITY" && bttsExpectancy) ||
+      (isUnderLeaking && pOver25 >= 0.48)
+    )
+  ) {
+    fairGoalLine = 2.75;
+    scoreProfile = "OPEN_EXCHANGE";
+  }
+  // G. Gerçek Kilit / Under Duvarı (Atlantico, Vila Nova)
+  else if (
+    !isHeavyFavorite &&
+    (pOver15 ?? 1) < 0.70 &&
+    pOver25 < 0.46 &&
+    !isUnderLeaking &&
+    medBttsYes >= 1.95 &&
+    (medHt00Cur ?? 99) <= 2.40
+  ) {
+    fairGoalLine = 1.5;
+    scoreProfile = "HARD_UNDER";
+  }
 
-  // 6. Dinamik Skor Ağırlıklandırma
+  // 6. Net HT / FT Teşhis Metinleri
+  let htVerdict = "DENGELİ İLK YARI (0-1 Gol Beklentisi)";
+  if (htVelocity === "HIGH_VELOCITY" || (medHtOu05 != null && medHtOu05 <= 1.30)) {
+    htVerdict = "🔥 İLK YARI TEMPO / ERKEN GOL (HT 0.5 & 1.5 Üst Potansiyeli Yüksek)";
+  } else if (htVelocity === "HARD_LOCK" || (isFalseOpen && (medHtOu05 == null || medHtOu05 >= 1.35))) {
+    htVerdict = "🔒 İLK YARI SERT KİLİT (0:0 Riski Tavan)";
+  }
+
+  let ftVerdict = "DENGELİ KORİDOR (2-3 Gol Beklentisi)";
+  if (scoreProfile === "LOCKED_CORRIDOR") {
+    ftVerdict = "🧊 SAHTE ÜST TUZAĞI (Ölü Piyasa / 0-0 veya 1-1 Kilit Skoru Riski)";
+  } else if (isUnderLeaking && handicapSmashCount >= 1) {
+    ftVerdict = "💣 ANOMALİK ÜST PATLAMASI (Baremler Kısır Görünse Bile Maç 3+ / 4+ Gole Patlayacak!)";
+  } else if (scoreProfile === "OPEN_EXCHANGE") {
+    ftVerdict = "💣 MAÇ SONU GOL YAĞMURU (Karşılıklı Vuruşma & 3+ / 4+ Gol)";
+  } else if (scoreProfile === "EXTREME_BLOWOUT" || scoreProfile === "DOMINANT_WIN") {
+    ftVerdict = "🚀 TEK TARAFLI EZME (Favori Takım Baremi Tek Başına Aşabilir)";
+  } else if (scoreProfile === "HARD_UNDER") {
+    ftVerdict = "🛡️ GERÇEK SERT KISIR DUVARI (Maksimum 1 Gol / 0-0, 1-0)";
+  } else if (pOver25 < 0.45 && !isUnderLeaking) {
+    ftVerdict = "⚖️ KONTROLLÜ DÜŞÜK TEMPO (Maksimum 2 Gol / 1-0, 0-1, 1-1)";
+  }
+
+  // 7. Dinamik Skor Ağırlıklandırma
   const getScoreMultiplier = (hG: number, aG: number): number => {
     const totG = hG + aG;
     const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
     const favGoals = dominanceSide === "HOME" ? hG : aG;
     const dogGoals = dominanceSide === "HOME" ? aG : hG;
 
-    // A. Bayern / Man Utd Tipi Ekstrem Ezme
+    // A. EXTREME_BLOWOUT
     if (scoreProfile === "EXTREME_BLOWOUT") {
-      if (totG <= 2) return 0.25;
+      if (totG <= 2) return 0.20;
       if (totG === 3 && isCleanSheet) return 1.20;
       if (totG >= 4 && isCleanSheet) return 1.65;
       return 0.80;
     }
 
-    // B. PSV - Shakhtar Tipi Karşılıklı Favori Maçı
+    // B. CONTESTED_FAVORITE
     if (scoreProfile === "CONTESTED_FAVORITE") {
       if (hG === 1 && aG === 1) return 1.60;
       if (favGoals >= 2 && dogGoals >= 1 && totG <= 4) return 1.50;
@@ -290,25 +377,25 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       return 0.85;
     }
 
-    // C. Sport Recife / Panathinaikos Tipi Tek Taraflı Üstünlük
+    // C. DOMINANT_WIN (Panathinaikos / Palermo 3-1 emniyeti dahil)
     if (scoreProfile === "DOMINANT_WIN") {
-      if (isCleanSheet && (totG === 2 || totG === 3)) return 1.45;
-      if (isCleanSheet && totG >= 4) return 1.25;
-      if (favGoals >= 2 && dogGoals === 1 && totG <= 4) return 1.35; // 2:1 ve 3:1 emniyeti
+      if (isCleanSheet && (totG === 2 || totG === 3)) return 1.45; // 2:0, 3:0
+      if (isCleanSheet && totG >= 4) return 1.25;                  // 4:0
+      if (favGoals >= 2 && dogGoals === 1 && totG <= 4) return 1.35; // 2:1, 3:1
       if (!isCleanSheet && totG <= 2) return 0.50;
       return 0.90;
     }
 
-    // D. Slavia - Lens / Como - Leipzig Tipi Karşılıklı Vuruşma
+    // D. OPEN_EXCHANGE
     if (scoreProfile === "OPEN_EXCHANGE") {
       if (hG > 0 && aG > 0) {
-        if (totG >= 3) return 1.50;
-        return 1.15;
+        if (totG >= 3) return 1.55; // 2:1, 1:2, 2:2, 2:3, 3:2
+        return 1.15; // 1:1
       }
-      return 0.40;
+      return 0.35; // Kısır tek taraflı skorlara blok
     }
 
-    // E. Atlantico - Delfines Tipi Gerçek Kilit
+    // E. HARD_UNDER
     if (scoreProfile === "HARD_UNDER") {
       if (totG === 0) return 1.70;
       if (totG === 1) return 1.50;
@@ -316,17 +403,24 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       return 0.20;
     }
 
-    // E2. Estoril - Arouca Tipi "False Open" / Kısır Koridor: piyasa hareketsiz,
-    // KG Var/Üst rakamları şablon fiyat — 0:0 ve 1:1 (berabere) öne çıkar.
+    // E2. LOCKED_CORRIDOR (Estoril Koruması)
     if (scoreProfile === "LOCKED_CORRIDOR") {
-      if (totG === 0) return 1.60; // 0:0
-      if (hG === aG) return 1.55; // 1:1 ve diğer berabere kilit skorları
-      if (totG === 1) return 1.10; // 1:0 / 0:1
+      if (totG === 0) return 1.65; // 0:0
+      if (hG === aG) return 1.50;  // 1:1
+      if (totG === 1) return 1.15; // 1:0, 0:1
       if (totG === 2) return 0.70;
       return 0.20;
     }
 
-    // F. BALANCED (Stevenage, Botafogo Kırılmaları Dahil)
+    // F. BALANCED (Cagliari / Vila Nova Düzeltmesi)
+    // KG Var ölü ise (@1.95+) ve barem düşükse 1:0 ve 2:0 favori skorlarına prim ver:
+    if (medBttsYes >= 1.95 && pOver25 < 0.45) {
+      if ((hG === 1 && aG === 0) || (hG === 2 && aG === 0)) return 1.35;
+      if ((aG === 1 && hG === 0) || (aG === 2 && hG === 0)) return 1.35;
+      if (totG <= 2) return 1.10;
+      return 0.70;
+    }
+
     if (totG === 2 || totG === 3 || totG === 4) return 1.25;
     return 0.85;
   };
@@ -346,9 +440,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     pOver45: pOver45 ? Math.round(pOver45 * 1000) / 10 : null,
     isUnderLeaking,
     isFalseOpen,
+    handicapSmashCount,
+    anomalies,
     fairGoalLine,
     bttsExpectancy,
     scoreProfile,
+    htVerdict,
+    ftVerdict,
     getScoreMultiplier,
   };
 }
