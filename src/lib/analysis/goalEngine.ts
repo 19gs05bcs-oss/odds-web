@@ -9,10 +9,14 @@ export type ScoreProfile =
   | "HARD_UNDER"
   | "LOCKED_CORRIDOR"
   | "LOW_BASELINE_TRAP"
+  | "BASELINE_FAV_BREAK"
   | "PHANTOM_BLOWOUT"
+  | "SOLO_HOME_BLOWOUT"
   | "REVERSE_TAKEOVER"
+  | "HIDDEN_FIRE_LEAK"
   | "SUPER_FAV_TRAP"
   | "AWAY_CONTROL_LOCK"
+  | "AWAY_SURGE_TRAP"
   | "COLLECTIVE_SURGE";
 
 export type GoalEngineMetrics = {
@@ -388,10 +392,10 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     anomalies.push("DEAD/STATIC MARKET: Zero movement despite Open-Exchange-level Over/BTTS pricing. Locked corridor risk is at its peak!");
   }
 
-  // 4e. Correct-score collapses (for Phantom Blowout / Collective Surge thresholds)
+  // 4e. Correct-score collapses (for Phantom Blowout / Hidden Fire / Collective Surge thresholds)
   let sc01: number | null = null; // "0:1" (away wins 1-0)
   let sc10: number | null = null; // "1:0" (home wins 1-0)
-  let highScoreDropCount = 0;
+  const highScoreDrops = new Set<string>(); // collapsed scores outside the low-score set, e.g. "3:3", "4:2"
   for (const [key, pool] of ftCorrectScore.entries()) {
     if (key === "0:1") sc01 = effOf(pool);
     if (key === "1:0") sc10 = effOf(pool);
@@ -399,18 +403,49 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     const op = median(pool.open);
     const cur = median(pool.cur);
     if (op > 0 && cur / op <= 0.88 && !LOW_SCORES.has(key)) {
-      highScoreDropCount++;
+      highScoreDrops.add(key);
     }
   }
+  const highScoreDropCount = highScoreDrops.size;
+  const EXTREME_SCORES = ["3:3", "4:3", "4:2", "5:2"];
+  const hasExtremeScoreDrop = EXTREME_SCORES.some((s) => highScoreDrops.has(s));
 
   // ---------------------------------------------------------------------
   // 5. New Pattern Hierarchy (ported from the latest anomaly-detection model)
   //    Checked in priority order; the first match wins.
   // ---------------------------------------------------------------------
   const p25 = pOver25;
+  const AGGRESSIVE_OVER_FLOW = "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️";
 
-  const isLowBaselineTrap = p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38;
+  // A. Reverse Market Takeover — HIGHEST PRIORITY. Widened range (1.55–2.45).
+  const isReverseTakeover =
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.55 &&
+    rawFavOdds <= 2.45 &&
+    hasDogHandicapSupport &&
+    (msADrift <= 0.90 || moneyFlow1X2.startsWith("AWAY")) &&
+    ouFlow !== AGGRESSIVE_OVER_FLOW;
 
+  // B. Hidden Fire Infiltration — only considered when Reverse Takeover hasn't fired.
+  const isHiddenFireLeak =
+    !isReverseTakeover && hasExtremeScoreDrop && !hasDogHandicapSupport && moneyFlow1X2 === "BALANCED";
+
+  // C. Low Baseline Trap / Baseline Fav Break
+  let isLowBaselineTrap = false;
+  let isBaselineFavBreak = false;
+  if (p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38 && !isHiddenFireLeak && !isReverseTakeover) {
+    if (
+      (rawFavSide === "H" && msHDrift <= 0.85 && hasFavHandicapSmash) ||
+      (rawFavSide === "A" && msADrift <= 0.85 && hasFavHandicapSmash)
+    ) {
+      isBaselineFavBreak = true;
+    } else {
+      isLowBaselineTrap = true;
+    }
+  }
+
+  // D. Phantom Blowout Trap
   const isPhantomBlowout =
     rawFavSide === "A" &&
     rawFavOdds != null &&
@@ -421,17 +456,19 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     !isUnderLeaking &&
     highScoreDropCount >= 4;
 
-  const isReverseTakeover =
+  // E. Solo Home Blowout
+  const isSoloHomeBlowout =
     rawFavSide === "H" &&
     rawFavOdds != null &&
-    rawFavOdds >= 1.65 &&
-    rawFavOdds <= 2.15 &&
-    hasDogHandicapSupport &&
-    (msADrift <= 0.90 || moneyFlow1X2.startsWith("AWAY")) &&
-    ouFlow !== "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️";
+    rawFavOdds <= 1.35 &&
+    !hasDogHandicapSupport &&
+    isUnderLeaking &&
+    ouFlow === AGGRESSIVE_OVER_FLOW;
 
+  // F. Super Favourite Resistance
   const isSuperFavTrap = rawFavOdds != null && rawFavOdds <= 1.30 && hasDogHandicapSupport;
 
+  // G. Away Control Lock
   const isAwayControlLock =
     rawFavSide === "A" &&
     rawFavOdds != null &&
@@ -444,18 +481,44 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     sc01 <= 8.0 &&
     sc10 != null &&
     sc10 >= 12.0 &&
-    ouFlow !== "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️";
+    ouFlow !== AGGRESSIVE_OVER_FLOW;
 
-  const isCollectiveSurge =
+  // H. Collective Surge / Away Surge Trap
+  let isCollectiveSurge = false;
+  let isAwaySurgeTrap = false;
+  if (
     !isAwayControlLock &&
     !isPhantomBlowout &&
+    !isReverseTakeover &&
     isUnderLeaking &&
     medHt00 != null &&
     medHt00 >= 3.1 &&
     medBttsYes <= 1.65 &&
     p25 >= 0.5 &&
-    (ouFlow === "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️" || highScoreDropCount >= 3);
+    (ouFlow === AGGRESSIVE_OVER_FLOW || highScoreDropCount >= 3)
+  ) {
+    if (rawFavSide === "A" && medHtOu05 != null && medHtOu05 >= 1.30) {
+      isAwaySurgeTrap = true;
+    } else {
+      isCollectiveSurge = true;
+    }
+  }
 
+  if (isReverseTakeover) {
+    anomalies.push(
+      "🎯 PATTERN: REVERSE MARKET TAKEOVER: The paper favourite is being dumped — sharp money has piled onto the underdog's points and handicap (0-1 / 1-1 / 0-2 corridor)."
+    );
+  }
+  if (isHiddenFireLeak) {
+    anomalies.push(
+      "💣 PATTERN: HIDDEN FIRE INFILTRATION: 1X2 looks balanced, but money has quietly backed extreme scorelines like 3-3 / 4-3! The barren-lock read is void — surge/upset risk."
+    );
+  }
+  if (isBaselineFavBreak) {
+    anomalies.push(
+      "🎯 PATTERN: BASELINE FAV BREAK: The goal baseline opened thin, but heavy institutional money has hit the favourite (drift below x0.85). First half locked, 2-0 / 2-1 favourite corridor expected."
+    );
+  }
   if (isLowBaselineTrap) {
     anomalies.push("⚠️ LOW BASELINE TRAP: Goal baseline is thin (Over 2.5 under 48%) and HT tempo is slow. High risk of a barren lock.");
   }
@@ -464,9 +527,9 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       "⚠️ PATTERN: PHANTOM BLOWOUT TRAP: Extreme-margin scorelines are being backed but the Over/Under line hasn't moved at all! Templated favourite balloon — 1-1 / 1-2 upset-corridor risk."
     );
   }
-  if (isReverseTakeover) {
+  if (isSoloHomeBlowout) {
     anomalies.push(
-      "🎯 PATTERN: REVERSE MARKET TAKEOVER: The paper favourite is being dumped — sharp money has piled onto the underdog's points and handicap (0-1 / 1-1 / 0-2 corridor)."
+      "🎯 PATTERN: SOLO HOME BLOWOUT: The home favourite is breaking the line alone! Under-leakage and high-scoring correct scores confirm a one-sided goal rush (3+ goals / Home Over 2.5)."
     );
   }
   if (isSuperFavTrap) {
@@ -477,6 +540,11 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   if (isAwayControlLock) {
     anomalies.push(
       "🎯 PATTERN: AWAY CONTROL LOCK: Away favourite is priced to win by a single goal only. The Over/Under line is misleading — 0-1 / 0-2 corridor!"
+    );
+  }
+  if (isAwaySurgeTrap) {
+    anomalies.push(
+      "⚠️ PATTERN: AWAY SURGE TRAP: The line is flowing Over, but the favourite is away and HT tempo is controlled. A 4+ explosion is unlikely — expect a controlled 1-1 / 1-2 contest."
     );
   }
   if (isCollectiveSurge) {
@@ -492,21 +560,33 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   let fairGoalLine = 2.5;
   let scoreProfile: ScoreProfile = "BALANCED";
   let teamGoalVerdict = "⛔ Single-team goal line is risky — prefer the overall total-goals line.";
+  const favLabel = rawFavSide === "H" ? "Home" : "Away";
 
-  if (isPhantomBlowout) {
-    fairGoalLine = 1.75;
-    scoreProfile = "PHANTOM_BLOWOUT";
-    teamGoalVerdict = "❌ Favourite's team-goal line should NOT be backed (no baseline support, crowd-inflated favourite).";
-  } else if (isReverseTakeover) {
+  if (isReverseTakeover) {
     fairGoalLine = 2.0;
     scoreProfile = "REVERSE_TAKEOVER";
     teamGoalVerdict = "✅ Double Chance X2 / Away Over 0.5 (stay away from the home side).";
+  } else if (isHiddenFireLeak) {
+    fairGoalLine = 3.0;
+    scoreProfile = "HIDDEN_FIRE_LEAK";
+    teamGoalVerdict = "✅ BTTS / Over 2.5 as a surprise play — the balanced-looking board is masking mutual goals.";
+  } else if (isBaselineFavBreak) {
+    fairGoalLine = 2.25;
+    scoreProfile = "BASELINE_FAV_BREAK";
+    teamGoalVerdict = `✅ ${favLabel} to Win / ${favLabel} Over 1.5 (a 3+ margin alone is unlikely).`;
+  } else if (isPhantomBlowout) {
+    fairGoalLine = 1.75;
+    scoreProfile = "PHANTOM_BLOWOUT";
+    teamGoalVerdict = "❌ Favourite's team-goal line should NOT be backed (no baseline support, crowd-inflated favourite).";
   } else if (isLowBaselineTrap) {
     fairGoalLine = 1.25;
     scoreProfile = "LOW_BASELINE_TRAP";
     teamGoalVerdict = "❌ Team-goal line should NOT be backed (thin baseline / false-smash trap).";
+  } else if (isSoloHomeBlowout) {
+    fairGoalLine = 3.25;
+    scoreProfile = "SOLO_HOME_BLOWOUT";
+    teamGoalVerdict = "✅ Home Over 2.0 / 2.5 and Home Handicap -1 are supported.";
   } else if (isSuperFavTrap) {
-    const favLabel = rawFavSide === "H" ? "Home" : "Away";
     fairGoalLine = 2.5;
     scoreProfile = "SUPER_FAV_TRAP";
     teamGoalVerdict = `❌ ${favLabel} Over 2.5 (team goals) should NOT be backed — the underdog's handicap is well supported.`;
@@ -514,6 +594,10 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     fairGoalLine = 1.75;
     scoreProfile = "AWAY_CONTROL_LOCK";
     teamGoalVerdict = "✅ Away to Win / Away Over 1.5 unlikely alone (single-goal win expected, not a 3+ margin).";
+  } else if (isAwaySurgeTrap) {
+    fairGoalLine = 2.75;
+    scoreProfile = "AWAY_SURGE_TRAP";
+    teamGoalVerdict = "✅ BTTS / 2-3 goal corridor (the away side tends to protect the scoreline rather than blow it out).";
   } else if (isCollectiveSurge) {
     fairGoalLine = 3.5;
     scoreProfile = "COLLECTIVE_SURGE";
@@ -569,16 +653,24 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   }
 
   let ftVerdict = "BALANCED CORRIDOR (2-3 Goal Expectation)";
-  if (scoreProfile === "PHANTOM_BLOWOUT") {
-    ftVerdict = "🧊 TEMPLATED AWAY UPSET (1-1 / 1-2 Corridor — Inflated Over Balloon)";
-  } else if (scoreProfile === "REVERSE_TAKEOVER") {
+  if (scoreProfile === "REVERSE_TAKEOVER") {
     ftVerdict = "🛡️ REVERSE LIQUIDITY RESISTANCE (0-1 / 1-1 / 0-2 — Away Points, Home Has Collapsed)";
+  } else if (scoreProfile === "HIDDEN_FIRE_LEAK") {
+    ftVerdict = "💣 HIDDEN FIRE INFILTRATION (3-3 / 4-3 Signal — Off-Baseline Mutual Goals)";
+  } else if (scoreProfile === "BASELINE_FAV_BREAK") {
+    ftVerdict = "⚖️ CONTROLLED FAVOURITE DOMINANCE (First Half Locked / FT 2-0, 2-1 Corridor)";
+  } else if (scoreProfile === "PHANTOM_BLOWOUT") {
+    ftVerdict = "🧊 TEMPLATED AWAY UPSET (1-1 / 1-2 Corridor — Inflated Over Balloon)";
   } else if (scoreProfile === "LOW_BASELINE_TRAP") {
     ftVerdict = "🛡️ HARD BARREN BASELINE LOCK (Max 0-1 Goals / 0-0, 0-1, 1-0)";
+  } else if (scoreProfile === "SOLO_HOME_BLOWOUT") {
+    ftVerdict = "💣 HOME SOLO GOAL RUSH (Home Over 2.5 / 3+ Goal Show)";
   } else if (scoreProfile === "SUPER_FAV_TRAP") {
     ftVerdict = "🧊 ARTIFICIAL BASELINE TRAP (1-1 / 2-0 / 2-1 Upset Risk)";
   } else if (scoreProfile === "AWAY_CONTROL_LOCK") {
     ftVerdict = "🛡️ CONTROLLED AWAY WIN (0-1 / 0-2 Corridor — Line Is Misleading)";
+  } else if (scoreProfile === "AWAY_SURGE_TRAP") {
+    ftVerdict = "⚖️ CONTROLLED MUTUAL CONTEST (1-1 / 1-2 Corridor — 3.5 Over Is Misleading)";
   } else if (scoreProfile === "COLLECTIVE_SURGE") {
     ftVerdict = "💣 ANOMALOUS OPEN FIRE (Mutual Goals & 3.5 Over / 4+ Goal Threat)";
   } else if (scoreProfile === "LOCKED_CORRIDOR") {
@@ -642,6 +734,32 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       if (hG > 0 && aG > 0 && totG >= 4) return 1.65;
       if (hG > 0 && aG > 0) return 1.2;
       return 0.3;
+    }
+    if (scoreProfile === "HIDDEN_FIRE_LEAK") {
+      // Balanced-looking board masking an extreme mutual-scoring outcome.
+      if (hG > 0 && aG > 0 && totG >= 5) return 1.75; // 3-3, 4-3-style outcomes
+      if (hG > 0 && aG > 0 && totG >= 3) return 1.35;
+      if (totG <= 1) return 0.4;
+      return 0.9;
+    }
+    if (scoreProfile === "BASELINE_FAV_BREAK") {
+      // Favourite controls the match behind a locked first half.
+      if (rawFavGoals === 2 && rawDogGoals <= 1) return 1.6; // 2-0, 2-1
+      if (rawFavGoals >= 3) return 0.7;
+      if (rawDogGoals === 0 && rawFavGoals <= 1) return 1.1; // 1-0
+      if (rawFavGoals === 0) return 0.3;
+      return 0.75;
+    }
+    if (scoreProfile === "SOLO_HOME_BLOWOUT") {
+      if (rawFavGoals >= 2 && rawDogGoals === 0) return 1.6; // 2-0, 3-0
+      if (rawFavGoals >= 3) return 1.35;
+      if (rawFavGoals === 0) return 0.15;
+      return 0.7;
+    }
+    if (scoreProfile === "AWAY_SURGE_TRAP") {
+      if (hG === aG || (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 3)) return 1.5; // 1-1, 1-2
+      if (totG >= 4) return 0.4;
+      return 0.85;
     }
 
     // A. EXTREME_BLOWOUT
