@@ -2,13 +2,13 @@ import type { GoalEngineMetrics } from "@/lib/analysis/goalEngine";
 import styles from "./SmartAnalysisClient.module.css";
 
 const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
-  EXTREME_BLOWOUT: "Extreme blowout",
-  DOMINANT_WIN: "Dominant win",
-  CONTESTED_FAVORITE: "Contested favourite",
-  OPEN_EXCHANGE: "Open exchange",
+  EXTREME_BLOWOUT: "Extreme Blowout",
+  DOMINANT_WIN: "Dominant Win",
+  CONTESTED_FAVORITE: "Contested Favourite",
+  OPEN_EXCHANGE: "Open Exchange",
   BALANCED: "Balanced",
-  HARD_UNDER: "Hard under",
-  LOCKED_CORRIDOR: "Locked corridor (false open)",
+  HARD_UNDER: "Hard Under",
+  LOCKED_CORRIDOR: "Locked Corridor (False Open)",
 };
 
 export function GoalEnginePanel({
@@ -21,7 +21,7 @@ export function GoalEnginePanel({
   if (!metrics) {
     return (
       <section className={styles.card}>
-        <h3>Goal & Market Engine</h3>
+        <h3>🎯 Gol & Piyasa Anomali Motoru</h3>
         <p className={styles.empty}>
           Bu maç için yeterli 1X2 / Alt-Üst / HT oran verisi bulunamadı.
         </p>
@@ -35,14 +35,12 @@ export function GoalEnginePanel({
     isExtremeDominance,
     favoriteOdds,
     htZeroZeroOdd,
-    pOver15,
     pOver25,
     pOver35,
-    pOver45,
     fairGoalLine,
     bttsExpectancy,
     scoreProfile,
-    anomalies,
+    anomalies = [],
     htVerdict,
     ftVerdict,
   } = metrics;
@@ -56,126 +54,86 @@ export function GoalEnginePanel({
 
   return (
     <section className={styles.card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-        <h3 style={{ margin: 0 }}>
-          🎯 Goal & Market Anomaly Engine{" "}
-          <span className={styles.muted} style={{ fontSize: "0.85rem", fontWeight: 400 }}>
-            · {SCORE_PROFILE_LABEL[scoreProfile]}
+      <h3>
+        🎯 Gol & Piyasa Anomali Motoru{" "}
+        <span className={styles.muted}>· {SCORE_PROFILE_LABEL[scoreProfile]}</span>
+      </h3>
+      <p className={styles.cardLead}>
+        Bu maçın kendi 1X2 / Alt-Üst / İlk Yarı oranlarından türetilen skor profili, HT-FT
+        teşhisleri ve piyasa anomalileri. Tek başına kesin bir tahmin değildir.
+      </p>
+
+      {actualScore ? (
+        <p className={styles.subHead}>
+          Biten skor: <span className={styles.geScoreTag}>{actualScore}</span>
+        </p>
+      ) : null}
+
+      <div className={styles.geVerdictGrid}>
+        <div className={styles.geVerdictBox}>
+          <span className={styles.geVerdictLabel}>İlk Yarı Teşhisi</span>
+          <span className={styles.geVerdictText}>{htVerdict || "Dengeli İlk Yarı"}</span>
+        </div>
+        <div className={styles.geVerdictBox}>
+          <span className={styles.geVerdictLabel}>Maç Sonu Teşhisi</span>
+          <span className={styles.geVerdictText}>{ftVerdict || "Normal Tempo"}</span>
+        </div>
+      </div>
+
+      <p className={styles.subHead}>
+        <strong>Tespit Edilen Piyasa Anomalileri</strong>
+      </p>
+      {anomalies.length > 0 ? (
+        <div className={styles.steamAlerts} role="status">
+          {anomalies.map((item, idx) => (
+            <p key={idx} className={styles.steamAlertItem}>
+              <span className={styles.steamAlertIcon} aria-hidden="true">
+                🚨
+              </span>
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : (
+        <p className={styles.muted}>
+          Belirgin bir oran anomalisi veya sert likidite kayması tespit edilmedi.
+        </p>
+      )}
+
+      <p className={styles.subHead}>
+        <strong>Piyasa Göstergeleri</strong>
+      </p>
+      <div className={styles.geStatsGrid}>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>Taraf Baskısı</span>
+          <span className={styles.geStatValue}>{favoriteLabel}</span>
+          {favoriteOdds != null ? (
+            <span className={styles.geStatSub}>@{favoriteOdds.toFixed(2)}</span>
+          ) : null}
+        </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>HT 0:0 Oranı</span>
+          <span className={styles.geStatValue}>
+            {htZeroZeroOdd != null ? `@${htZeroZeroOdd.toFixed(2)}` : "—"}
           </span>
-        </h3>
-        {actualScore && (
-          <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-muted, #888)" }}>
-            Biten Skor: <strong style={{ color: "var(--text-main, #fff)" }}>{actualScore}</strong>
+        </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>KG Beklentisi</span>
+          <span className={bttsExpectancy ? styles.pos : styles.neg}>
+            {bttsExpectancy ? "Var (Yüksek)" : "Yok (Zayıf)"}
           </span>
-        )}
-      </div>
-
-      {/* 1. TEŞHİS KARTLARI (HT & FT VERDICTS) */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: "0.75rem",
-          marginBottom: "1rem",
-        }}
-      >
-        <div
-          style={{
-            padding: "0.85rem 1rem",
-            borderRadius: "8px",
-            backgroundColor: "rgba(255, 255, 255, 0.03)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
-        >
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted, #888)", textTransform: "uppercase", marginBottom: "0.35rem" }}>
-            🎯 İlk Yarı Teşhisi
-          </div>
-          <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-main, #fff)" }}>
-            {htVerdict}
-          </div>
         </div>
-
-        <div
-          style={{
-            padding: "0.85rem 1rem",
-            borderRadius: "8px",
-            backgroundColor: "rgba(255, 255, 255, 0.03)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-          }}
-        >
-          <div style={{ fontSize: "0.75rem", color: "var(--text-muted, #888)", textTransform: "uppercase", marginBottom: "0.35rem" }}>
-            🎯 Maç Sonu Teşhisi
-          </div>
-          <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-main, #fff)" }}>
-            {ftVerdict}
-          </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>Adil Gol Çizgisi</span>
+          <span className={styles.geStatValue}>{fairGoalLine}</span>
         </div>
-      </div>
-
-      {/* 2. TESPİT EDİLEN PİYASA ANOMALİLERİ */}
-      <div
-        style={{
-          padding: "0.85rem 1rem",
-          borderRadius: "8px",
-          backgroundColor: anomalies.length > 0 ? "rgba(239, 68, 68, 0.05)" : "rgba(255, 255, 255, 0.02)",
-          border: anomalies.length > 0 ? "1px solid rgba(239, 68, 68, 0.2)" : "1px solid rgba(255, 255, 255, 0.05)",
-          marginBottom: "1rem",
-        }}
-      >
-        <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.45rem", color: anomalies.length > 0 ? "#f87171" : "#888" }}>
-          🚨 TESPİT EDİLEN PİYASA ANOMALİLERİ
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>2.5 Üst İhtimali</span>
+          <span className={styles.geStatValue}>%{pOver25}</span>
         </div>
-        {anomalies.length > 0 ? (
-          <ul style={{ margin: 0, paddingLeft: "1.2rem", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-            {anomalies.map((ano, idx) => (
-              <li key={idx} style={{ fontSize: "0.88rem", lineHeight: 1.4, color: "var(--text-main, #eee)" }}>
-                {ano}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div style={{ fontSize: "0.85rem", color: "var(--text-muted, #777)" }}>
-            Belirgin bir oran anomalisi veya likidite kayması tespit edilmedi.
-          </div>
-        )}
-      </div>
-
-      {/* 3. PİYASA GÖSTERGELERİ DETAY ÇİZELGESİ */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: "0.5rem",
-          padding: "0.75rem",
-          borderRadius: "6px",
-          backgroundColor: "rgba(0, 0, 0, 0.2)",
-          fontSize: "0.82rem",
-        }}
-      >
-        <div>
-          <span style={{ color: "var(--text-muted, #888)" }}>Taraf Baskısı: </span>
-          <strong>{favoriteLabel}</strong>
-          {favoriteOdds != null ? ` (@${favoriteOdds.toFixed(2)})` : ""}
-        </div>
-        <div>
-          <span style={{ color: "var(--text-muted, #888)" }}>HT 0:0 Oranı: </span>
-          <strong>{htZeroZeroOdd != null ? `@${htZeroZeroOdd.toFixed(2)}` : "—"}</strong>
-        </div>
-        <div>
-          <span style={{ color: "var(--text-muted, #888)" }}>KG Beklentisi: </span>
-          <strong>{bttsExpectancy ? "Var (Yüksek)" : "Yok (Zayıf)"}</strong>
-        </div>
-        <div>
-          <span style={{ color: "var(--text-muted, #888)" }}>Adil Gol Çizgisi: </span>
-          <strong>{fairGoalLine}</strong>
-        </div>
-        <div>
-          <span style={{ color: "var(--text-muted, #888)" }}>2.5 Üst İhtimali: </span>
-          <strong>%{pOver25}</strong>
-        </div>
-        <div>
-          <span style={{ color: "var(--text-muted, #888)" }}>3.5 Üst İhtimali: </span>
-          <strong>{pOver35 != null ? `%${pOver35}` : "—"}</strong>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>3.5 Üst İhtimali</span>
+          <span className={styles.geStatValue}>{pOver35 != null ? `%${pOver35}` : "—"}</span>
         </div>
       </div>
     </section>
