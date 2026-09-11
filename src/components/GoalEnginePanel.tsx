@@ -9,6 +9,12 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   BALANCED: "Balanced",
   HARD_UNDER: "Hard Under",
   LOCKED_CORRIDOR: "Locked Corridor (False Open)",
+  LOW_BASELINE_TRAP: "Low Baseline Trap",
+  PHANTOM_BLOWOUT: "Phantom Blowout Trap",
+  REVERSE_TAKEOVER: "Reverse Market Takeover",
+  SUPER_FAV_TRAP: "Super Favourite Resistance",
+  AWAY_CONTROL_LOCK: "Away Control Lock",
+  COLLECTIVE_SURGE: "Collective Surge",
 };
 
 export function GoalEnginePanel({
@@ -43,6 +49,9 @@ export function GoalEnginePanel({
     anomalies = [],
     htVerdict,
     ftVerdict,
+    teamGoalVerdict,
+    moneyFlow1X2,
+    ouFlow,
   } = metrics;
 
     const favoriteLabel =
@@ -77,6 +86,10 @@ export function GoalEnginePanel({
         <div className={styles.geVerdictBox}>
           <span className={styles.geVerdictLabel}>Full Time Verdict</span>
           <span className={styles.geVerdictText}>{ftVerdict || "Normal Tempo"}</span>
+        </div>
+        <div className={styles.geVerdictBox}>
+          <span className={styles.geVerdictLabel}>Team Goal Safety</span>
+          <span className={styles.geVerdictText}>{teamGoalVerdict}</span>
         </div>
       </div>
 
@@ -134,6 +147,14 @@ export function GoalEnginePanel({
         <div className={styles.geStat}>
           <span className={styles.geStatLabel}>Over 3.5 Probability</span>
           <span className={styles.geStatValue}>{pOver35 != null ? `${pOver35}%` : "—"}</span>
+        </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>1X2 Money Flow</span>
+          <span className={styles.geStatValue}>{moneyFlow1X2}</span>
+        </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>2.5 Line Liquidity</span>
+          <span className={styles.geStatValue}>{ouFlow}</span>
         </div>
       </div>
     </section>
