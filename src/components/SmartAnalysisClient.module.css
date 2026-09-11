@@ -538,3 +538,88 @@
     animation: none;
   }
 }
+
+/* --- Goal & Market Anomaly Engine --- */
+.geScoreTag {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--orange-wash);
+  color: var(--orange);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.geVerdictGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem;
+  margin: 0.85rem 0;
+}
+
+.geVerdictBox {
+  padding: 0.8rem 0.95rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange);
+  background: #fafafa;
+}
+
+.geVerdictBox + .geVerdictBox {
+  border-left-color: var(--ink-faint);
+}
+
+.geVerdictLabel {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 0.3rem;
+}
+
+.geVerdictText {
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.geStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.geStat {
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--orange-wash);
+}
+
+.geStatLabel {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 0.25rem;
+}
+
+.geStatValue {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.geStatSub {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  margin-top: 0.1rem;
+}
