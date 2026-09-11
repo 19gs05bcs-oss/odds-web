@@ -10,10 +10,14 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   HARD_UNDER: "Hard Under",
   LOCKED_CORRIDOR: "Locked Corridor (False Open)",
   LOW_BASELINE_TRAP: "Low Baseline Trap",
+  BASELINE_FAV_BREAK: "Baseline Fav Break",
   PHANTOM_BLOWOUT: "Phantom Blowout Trap",
+  SOLO_HOME_BLOWOUT: "Solo Home Blowout",
   REVERSE_TAKEOVER: "Reverse Market Takeover",
+  HIDDEN_FIRE_LEAK: "Hidden Fire Infiltration",
   SUPER_FAV_TRAP: "Super Favourite Resistance",
   AWAY_CONTROL_LOCK: "Away Control Lock",
+  AWAY_SURGE_TRAP: "Away Surge Trap",
   COLLECTIVE_SURGE: "Collective Surge",
 };
 
