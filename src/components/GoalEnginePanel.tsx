@@ -45,43 +45,43 @@ export function GoalEnginePanel({
     ftVerdict,
   } = metrics;
 
-  const favoriteLabel =
+    const favoriteLabel =
     dominanceSide === "NONE"
-      ? "Dengeli (Belirgin favori yok)"
-      : `${dominanceSide === "HOME" ? "Ev Sahibi" : "Deplasman"}${
-          isExtremeDominance ? " (Aşırı Baskın)" : isHeavyFavorite ? " (Ağır Favori)" : ""
+      ? "Balanced (No clear favourite)"
+      : `${dominanceSide === "HOME" ? "Home" : "Away"}${
+          isExtremeDominance ? " (Extreme Dominance)" : isHeavyFavorite ? " (Heavy Favourite)" : ""
         }`;
 
-  return (
+    return (
     <section className={styles.card}>
       <h3>
-        🎯 Gol & Piyasa Anomali Motoru{" "}
+        🎯 Goal & Market Anomaly Engine{" "}
         <span className={styles.muted}>· {SCORE_PROFILE_LABEL[scoreProfile]}</span>
       </h3>
       <p className={styles.cardLead}>
-        Bu maçın kendi 1X2 / Alt-Üst / İlk Yarı oranlarından türetilen skor profili, HT-FT
-        teşhisleri ve piyasa anomalileri. Tek başına kesin bir tahmin değildir.
+        The score profile, HT-FT verdicts, and market anomalies derived from this match's own
+        1X2 / Over-Under / First Half odds. Not a standalone guaranteed prediction.
       </p>
 
       {actualScore ? (
         <p className={styles.subHead}>
-          Biten skor: <span className={styles.geScoreTag}>{actualScore}</span>
+          Final score: <span className={styles.geScoreTag}>{actualScore}</span>
         </p>
       ) : null}
 
       <div className={styles.geVerdictGrid}>
         <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>İlk Yarı Teşhisi</span>
-          <span className={styles.geVerdictText}>{htVerdict || "Dengeli İlk Yarı"}</span>
+          <span className={styles.geVerdictLabel}>First Half Verdict</span>
+          <span className={styles.geVerdictText}>{htVerdict || "Balanced First Half"}</span>
         </div>
         <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>Maç Sonu Teşhisi</span>
+          <span className={styles.geVerdictLabel}>Full Time Verdict</span>
           <span className={styles.geVerdictText}>{ftVerdict || "Normal Tempo"}</span>
         </div>
       </div>
 
       <p className={styles.subHead}>
-        <strong>Tespit Edilen Piyasa Anomalileri</strong>
+        <strong>Detected Market Anomalies</strong>
       </p>
       {anomalies.length > 0 ? (
         <div className={styles.steamAlerts} role="status">
@@ -96,44 +96,44 @@ export function GoalEnginePanel({
         </div>
       ) : (
         <p className={styles.muted}>
-          Belirgin bir oran anomalisi veya sert likidite kayması tespit edilmedi.
+          No significant odds anomaly or sharp liquidity shift detected.
         </p>
       )}
 
-      <p className={styles.subHead}>
-        <strong>Piyasa Göstergeleri</strong>
+            <p className={styles.subHead}>
+        <strong>Market Indicators</strong>
       </p>
       <div className={styles.geStatsGrid}>
         <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Taraf Baskısı</span>
+          <span className={styles.geStatLabel}>Side Pressure</span>
           <span className={styles.geStatValue}>{favoriteLabel}</span>
           {favoriteOdds != null ? (
             <span className={styles.geStatSub}>@{favoriteOdds.toFixed(2)}</span>
           ) : null}
         </div>
         <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>HT 0:0 Oranı</span>
+          <span className={styles.geStatLabel}>HT 0:0 Odds</span>
           <span className={styles.geStatValue}>
             {htZeroZeroOdd != null ? `@${htZeroZeroOdd.toFixed(2)}` : "—"}
           </span>
         </div>
         <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>KG Beklentisi</span>
+          <span className={styles.geStatLabel}>BTTS Expectancy</span>
           <span className={bttsExpectancy ? styles.pos : styles.neg}>
-            {bttsExpectancy ? "Var (Yüksek)" : "Yok (Zayıf)"}
+            {bttsExpectancy ? "Yes (High)" : "No (Low)"}
           </span>
         </div>
         <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Adil Gol Çizgisi</span>
+          <span className={styles.geStatLabel}>Fair Goal Line</span>
           <span className={styles.geStatValue}>{fairGoalLine}</span>
         </div>
         <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>2.5 Üst İhtimali</span>
-          <span className={styles.geStatValue}>%{pOver25}</span>
+          <span className={styles.geStatLabel}>Over 2.5 Probability</span>
+          <span className={styles.geStatValue}>{pOver25}%</span>
         </div>
         <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>3.5 Üst İhtimali</span>
-          <span className={styles.geStatValue}>{pOver35 != null ? `%${pOver35}` : "—"}</span>
+          <span className={styles.geStatLabel}>Over 3.5 Probability</span>
+          <span className={styles.geStatValue}>{pOver35 != null ? `${pOver35}%` : "—"}</span>
         </div>
       </div>
     </section>
