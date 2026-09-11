@@ -19,11 +19,23 @@ export type GoalEngineMetrics = {
   pOver35: number | null;
   pOver45: number | null;
   isUnderLeaking: boolean;
+  // "False Open" koruması: 1.5 ve 2.5 barem O/U oranları açılıştan kapanışa
+  // (neredeyse) hiç kımıldamamışsa true — piyasa hacimsiz/şablon fiyatlıyor
+  // demektir, KG Var/yüksek Üst olasılığı yanıltıcı bir OPEN_EXCHANGE sinyali
+  // üretebilir. Estoril–Arouca (0:0) vakası bu koruma için referans örnek.
+  isFalseOpen: boolean;
 
   // Karar Parametreleri
   fairGoalLine: number;
   bttsExpectancy: boolean;
-  scoreProfile: "EXTREME_BLOWOUT" | "DOMINANT_WIN" | "CONTESTED_FAVORITE" | "OPEN_EXCHANGE" | "BALANCED" | "HARD_UNDER";
+  scoreProfile:
+    | "EXTREME_BLOWOUT"
+    | "DOMINANT_WIN"
+    | "CONTESTED_FAVORITE"
+    | "OPEN_EXCHANGE"
+    | "BALANCED"
+    | "HARD_UNDER"
+    | "LOCKED_CORRIDOR"; // False Open tespit edilince OPEN_EXCHANGE yerine buraya düşer
 
   // Skor Motoru Çarpan Fonksiyonu
   getScoreMultiplier: (homeGoals: number, awayGoals: number) => number;
@@ -49,6 +61,26 @@ function impliedTwo(o: number, u: number): [number, number] {
   const io = 1 / o;
   const iu = 1 / u;
   return [io / (io + iu), iu / (io + iu)];
+}
+
+// False Open koruması: açılış -> kapanış oran değişimi %STATIC_DRIFT_MAX'ın
+// altındaysa o taraf "SABİT" kabul edilir.
+const STATIC_DRIFT_MAX = 0.02;
+
+function driftRatio(current: number[], opening: number[]): number | null {
+  if (!current.length || !opening.length) return null;
+  const c = median(current);
+  const o = median(opening);
+  if (o <= 0) return null;
+  return Math.abs(c - o) / o;
+}
+
+/** true: her iki taraf da SABİT | false: en az biri hareketli | null: açılış verisi yok, karar verilemez */
+function isLineStatic(over: number[], overOp: number[], under: number[], underOp: number[]): boolean | null {
+  const dOver = driftRatio(over, overOp);
+  const dUnder = driftRatio(under, underOp);
+  if (dOver == null || dUnder == null) return null;
+  return dOver <= STATIC_DRIFT_MAX && dUnder <= STATIC_DRIFT_MAX;
 }
 
 export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): GoalEngineMetrics | null {
@@ -164,15 +196,15 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const ht00Drift = medHt00Cur && medHt00Op ? medHt00Op / medHt00Cur : 1.0;
 
   let htVelocity: GoalEngineMetrics["htVelocity"] = "BALANCED";
-  let htVelocityLabel = "Dengeli İlk Yarı";
+  let htVelocityLabel = "Balanced first half";
 
   if (medHt00Cur != null) {
     if (medHt00Cur <= 2.30 && !isHeavyFavorite) {
       htVelocity = "HARD_LOCK";
-      htVelocityLabel = "Sert Kilit (0:0 Beklentisi)";
+      htVelocityLabel = "Hard lock (0:0 expected)";
     } else if (medHt00Cur >= 3.00 || (medHt00Cur >= 2.70 && isHeavyFavorite)) {
       htVelocity = "HIGH_VELOCITY";
-      htVelocityLabel = "Yüksek Hız (Erken Gol)";
+      htVelocityLabel = "High velocity (early goal)";
     }
   }
 
@@ -201,6 +233,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const medBttsYes = bttsYes.length ? median(bttsYes) : 2.0;
   const bttsExpectancy = medBttsYes <= 1.65;
 
+  // 4b. False Open Tespiti: 1.5 ve 2.5 baremlerinin ikisi de açılıştan
+  // kapanışa SABİT kaldıysa piyasada gerçek gol/likidite hareketi yoktur —
+  // KG Var/yüksek Üst rakamları o zaman şablon fiyat, gerçek sinyal değildir.
+  const static15 = isLineStatic(ou["1.5"].o, ou["1.5"].o_op, ou["1.5"].u, ou["1.5"].u_op);
+  const static25 = isLineStatic(ou["2.5"].o, ou["2.5"].o_op, ou["2.5"].u, ou["2.5"].u_op);
+  const isFalseOpen = static15 === true && static25 === true;
+
   // 5. Profil Hiyerarşisi
   let fairGoalLine = 2.5;
   let scoreProfile: GoalEngineMetrics["scoreProfile"] = "BALANCED";
@@ -214,12 +253,18 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   } else if (isHeavyFavorite && !bttsExpectancy) {
     fairGoalLine = pOver25 >= 0.55 ? 3.0 : 2.5;
     scoreProfile = "DOMINANT_WIN";
-  } else if (!isHeavyFavorite && bttsExpectancy && pOver25 >= 0.525) {
+  } else if (!isHeavyFavorite && bttsExpectancy && pOver25 >= 0.525 && !isFalseOpen) {
     fairGoalLine = 2.75;
     scoreProfile = "OPEN_EXCHANGE";
   } else if (!isHeavyFavorite && (pOver15 ?? 1) < 0.70 && pOver25 < 0.48 && !isUnderLeaking && (medHt00Cur ?? 99) <= 2.40) {
     fairGoalLine = 1.5;
     scoreProfile = "HARD_UNDER";
+  } else if (!isHeavyFavorite && isFalseOpen) {
+    // False Open koruması: piyasa hareketsiz olduğu için OPEN_EXCHANGE (ya da
+    // varsayılan BALANCED) yerine "Kısır Koridor"a düşürülür; 0:0 ve 1:1
+    // skorları getScoreMultiplier'da öncelikli ağırlık alır.
+    fairGoalLine = 2.0;
+    scoreProfile = "LOCKED_CORRIDOR";
   }
 
   // 6. Dinamik Skor Ağırlıklandırma
@@ -271,6 +316,16 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       return 0.20;
     }
 
+    // E2. Estoril - Arouca Tipi "False Open" / Kısır Koridor: piyasa hareketsiz,
+    // KG Var/Üst rakamları şablon fiyat — 0:0 ve 1:1 (berabere) öne çıkar.
+    if (scoreProfile === "LOCKED_CORRIDOR") {
+      if (totG === 0) return 1.60; // 0:0
+      if (hG === aG) return 1.55; // 1:1 ve diğer berabere kilit skorları
+      if (totG === 1) return 1.10; // 1:0 / 0:1
+      if (totG === 2) return 0.70;
+      return 0.20;
+    }
+
     // F. BALANCED (Stevenage, Botafogo Kırılmaları Dahil)
     if (totG === 2 || totG === 3 || totG === 4) return 1.25;
     return 0.85;
@@ -290,6 +345,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     pOver35: pOver35 ? Math.round(pOver35 * 1000) / 10 : null,
     pOver45: pOver45 ? Math.round(pOver45 * 1000) / 10 : null,
     isUnderLeaking,
+    isFalseOpen,
     fairGoalLine,
     bttsExpectancy,
     scoreProfile,
