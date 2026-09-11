@@ -8,6 +8,7 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   OPEN_EXCHANGE: "Open exchange",
   BALANCED: "Balanced",
   HARD_UNDER: "Hard under",
+  LOCKED_CORRIDOR: "Locked corridor (false open)",
 };
 
 // getScoreMultiplier tüm (h,a) çiftleri için tanımlı — burada sadece küçük bir
@@ -59,6 +60,7 @@ export function GoalEnginePanel({
     pOver35,
     pOver45,
     isUnderLeaking,
+    isFalseOpen,
     fairGoalLine,
     bttsExpectancy,
     scoreProfile,
@@ -82,6 +84,14 @@ export function GoalEnginePanel({
         Rule-based goal-expectancy profile from the 1X2, Draw-No-Bet, HT Correct Score and
         Over/Under markets — used to weight likely final scorelines. Not a prediction.
       </p>
+
+      {isFalseOpen ? (
+        <p className={styles.hint}>
+          Over/Under 1.5 and 2.5 lines have barely moved since opening — this looks like a static,
+          low-liquidity price rather than a real goal-expectancy signal. Classified as a locked
+          corridor instead of Open Exchange; 0:0 and 1:1 are weighted up.
+        </p>
+      ) : null}
 
       {isUnderLeaking ? (
         <p className={styles.hint}>
@@ -107,17 +117,23 @@ export function GoalEnginePanel({
         <strong>{pOver45 != null ? `${pOver45}%` : "—"}</strong>
       </p>
 
-      <div className={styles.simGrid}>
+      <div
+        className={styles.simGrid}
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(4.5rem, 5.5rem))", gap: "0.5rem" }}
+      >
         {ranked.map((row) => (
-          <div key={row.score} className={styles.simCard}>
-            <div className={styles.simLabel}>Weight ×{row.multiplier}</div>
-            <div className={styles.simVal}>
+          <div key={row.score} className={styles.simCard} style={{ padding: "0.55rem 0.65rem" }}>
+            <div className={styles.simVal} style={{ fontSize: "1.05rem", margin: 0 }}>
               {row.score}
               {actualScore === row.score ? <span className={styles.pos}> ←</span> : null}
             </div>
           </div>
         ))}
       </div>
+      <p className={styles.hint}>
+        *Note: these are the scorelines favoured by the Goal Engine&rsquo;s goal-expectancy
+        multipliers, not a prediction.
+      </p>
 
       {actualScore ? (
         <p className={styles.cardLead}>
