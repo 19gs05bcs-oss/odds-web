@@ -18,12 +18,12 @@ export function GoalEnginePanel({
   metrics: GoalEngineMetrics | null;
   actualScore?: string | null;
 }) {
-  if (!metrics) {
+    if (!metrics) {
     return (
       <section className={styles.card}>
-        <h3>🎯 Gol & Piyasa Anomali Motoru</h3>
+        <h3>🎯 Goal & Market Anomaly Engine</h3>
         <p className={styles.empty}>
-          Bu maç için yeterli 1X2 / Alt-Üst / HT oran verisi bulunamadı.
+          Not enough 1X2 / Over-Under / HT odds data was found for this match.
         </p>
       </section>
     );
