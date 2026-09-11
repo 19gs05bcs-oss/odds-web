@@ -264,16 +264,21 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     }
   }
 
-  // 4c. False Open (Estoril Protection)
-  const static15 = isLineStatic(ou["1.5"].o, ou["1.5"].o_op, ou["1.5"].u, ou["1.5"].u_op);
+    const static15 = isLineStatic(ou["1.5"].o, ou["1.5"].o_op, ou["1.5"].u, ou["1.5"].u_op);
   const static25 = isLineStatic(ou["2.5"].o, ou["2.5"].o_op, ou["2.5"].u, ou["2.5"].u_op);
-  const isFalseOpen = static15 && static25 && !isUnderLeaking && handicapSmashCount === 0;
-  if (isFalseOpen) {
-    anomalies.push("DEAD/STATIC MARKET: Zero movement in the line odds. The Over pattern is misleading, lock risk is at its peak!");
-  }
 
   const medBttsYes = bttsYes.length ? median(bttsYes) : 2.0;
   const bttsExpectancy = medBttsYes <= 1.68;
+
+  // FALSE OPEN artık yalnızca piyasa doğal olarak OPEN_EXCHANGE karakterindeyken
+  // (yüksek Üst 2.5 ihtimali + düşük KG Var) barem hiç oynamamışsa tetiklenir.
+  // Aksi halde zaten dengeli/düşük tempolu (BALANCED) bir maç yapay şekilde
+  // LOCKED_CORRIDOR'a hapsediliyordu (Farul vakası: P2.5=%46.4, KG=@1.78, statik baremler).
+  const wouldBeOpenExchange = pOver25 >= 0.525 && medBttsYes <= 1.65;
+  const isFalseOpen = static15 && static25 && !isUnderLeaking && handicapSmashCount === 0 && wouldBeOpenExchange;
+  if (isFalseOpen) {
+    anomalies.push("DEAD/STATIC MARKET: Zero movement despite Open-Exchange-level Over/BTTS pricing. Locked corridor risk is at its peak!");
+  }
 
   // 5. Profile Hierarchy (Synthesis of All Edge Cases)
   let fairGoalLine = 2.5;
