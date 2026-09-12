@@ -37,6 +37,7 @@ export type ScoreProfile =
   | "KERRY_AWAY_LOW_TEMPO_LOCK"
   | "CIENCIANO_HANDICAP_STEAMROLLER"
   | "JAGUARES_LOW_BASELINE_DUEL"
+  | "ATHLETICO_FAKE_UNDER_STORM"
   | "HIDDEN_FIRE_LEAK";
 
 export type GoalEngineMetrics = {
@@ -852,7 +853,29 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   let isLowBaselineTrap = false;
   let isBaselineFavBreak = false;
   if (!matchedCase && !isReverseTakeover && p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38) {
-    if (
+    // NOTE: ported verbatim from the reference model, including its own quirk — like Jaguares,
+    // it checks the *low*-score drop set for scores ("1:3", "2:4", etc.) that can only ever land
+    // in the high-score set, so hasStormDrops (and this Athletico branch) is effectively dormant
+    // today, exactly as in the Python reference.
+    const hasStormDrops = ["1:3", "2:3", "3:3", "2:4", "1:4", "0:3"].some((s) => lowScoreDrops.has(s));
+    const isFakeUnderStorm =
+      (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
+      (hasFavHandicapSmash || (rawFavSide === "A" && msADrift <= 0.93)) &&
+      hasStormDrops;
+
+    if (isFakeUnderStorm) {
+      matchedCase = {
+        name: "ATHLETICO MODEL (Fake Under Goal Storm)",
+        desc: "The baseline is shown below 48% to set an Under trap, but the 2.5 Under line is being abandoned, the away side's minus handicap has seen a massive institutional entry, and duel scorelines have been swept! The barren display is fake — the match explodes straight into an open goal duel.",
+        ht: "🔥 FIRST HALF TEMPO / GOAL DUEL (High HT 0.5 & 1.5 Over)",
+        ft: "💣 BARREN-MASKED GOAL STORM (2-2 / 2-3 / 3-3 Corridor — Over 3.5 / BTTS Yes)",
+        team: "✅ BTTS Yes & Over 2.5 / Away Over 1.5 (avoid the 0-0 / 0-1 barren trap)",
+        profile: "ATHLETICO_FAKE_UNDER_STORM",
+      };
+      // The Section-5 case-memory banner insertion already ran before this Section-6 block, so
+      // (like the Python reference's later insert) we add this one's banner ourselves.
+      anomalies.unshift(`🧠 MEMORY MATCH: ${matchedCase.name} -> ${matchedCase.desc}`);
+    } else if (
       (rawFavSide === "H" && msHDrift <= 0.85 && hasFavHandicapSmash) ||
       (rawFavSide === "A" && msADrift <= 0.85 && hasFavHandicapSmash)
     ) {
@@ -987,6 +1010,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       KERRY_AWAY_LOW_TEMPO_LOCK: 1.75,
       CIENCIANO_HANDICAP_STEAMROLLER: 2.75,
       JAGUARES_LOW_BASELINE_DUEL: 3.0,
+      ATHLETICO_FAKE_UNDER_STORM: 3.25,
       HIDDEN_FIRE_LEAK: 3.25,
     };
     fairGoalLine = CASE_FAIR_LINES[matchedCase.profile] ?? 2.5;
@@ -1140,7 +1164,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       if (totG === 3) return 0.4;
       return 0.15;
     }
-    if (scoreProfile === "PISA_SYSTEMIC_FLIP" || scoreProfile === "QADSIAH_FIRE_CLASH" || scoreProfile === "JAGUARES_LOW_BASELINE_DUEL") {
+    if (scoreProfile === "PISA_SYSTEMIC_FLIP" || scoreProfile === "QADSIAH_FIRE_CLASH" || scoreProfile === "JAGUARES_LOW_BASELINE_DUEL" || scoreProfile === "ATHLETICO_FAKE_UNDER_STORM") {
       if (hG > 0 && aG > 0 && totG >= 4) return 1.7;
       if (hG > 0 && aG > 0) return 1.25;
       return 0.3;
