@@ -18,7 +18,6 @@ export type ScoreProfile =
   | "AWAY_CONTROL_LOCK"
   | "AWAY_SURGE_TRAP"
   | "COLLECTIVE_SURGE"
-  // --- Case-memory library (ported from the latest goal_anomaly_cli.py) ---
   | "POLONIA_FAKE_DOG_TAKEOVER"
   | "DROGHEDA_FAKEOUT_SURGE"
   | "SHELBOURNE_HOLLOW_SURGE_TRAP"
@@ -38,50 +37,40 @@ export type ScoreProfile =
   | "CIENCIANO_HANDICAP_STEAMROLLER"
   | "JAGUARES_LOW_BASELINE_DUEL"
   | "ATHLETICO_FAKE_UNDER_STORM"
-  | "HIDDEN_FIRE_LEAK";
+  | "HIDDEN_FIRE_LEAK"
+  | "UNDERDOG_MIRAGE"
+  | "FAKE_HOME_PUSZCZA"
+  | "REAL_POTOSI_TEMPO"
+  | "STATIC_OVER_TRAP"
+  | "UNDER_INFLOW_TRAP";
 
 export type GoalEngineMetrics = {
-  // 1. Dominance & Power Distribution
   dominanceSide: "HOME" | "AWAY" | "NONE";
   isHeavyFavorite: boolean;
   isExtremeDominance: boolean;
   favoriteOdds: number | null;
-
-  // 2. First Half Velocity (HT Velocity)
   htVelocity: "HARD_LOCK" | "BALANCED" | "HIGH_VELOCITY";
   htVelocityLabel: string;
   htZeroZeroOdd: number | null;
   htZeroZeroDrift: number;
-
-  // 3. Line Probabilities
   pOver15: number | null;
   pOver25: number;
   pOver35: number | null;
   pOver45: number | null;
-
-  // 4. Market Anomalies & Liquidity Signals
   isUnderLeaking: boolean;
   isFalseOpen: boolean;
   handicapSmashCount: number;
   anomalies: string[];
-
-  // 4b. Money-flow / liquidity direction (new)
   moneyFlow1X2: string;
   ouFlow: string;
   hasFavHandicapSmash: boolean;
   hasDogHandicapSupport: boolean;
-
-  // 5. Decision Parameters & Clear Verdicts
   fairGoalLine: number;
   bttsExpectancy: boolean;
   scoreProfile: ScoreProfile;
-
   htVerdict: string;
   ftVerdict: string;
-  /** Whether a single-team goal-line bet is safe to back on top of the total-goals read. */
   teamGoalVerdict: string;
-
-  // 6. Score Engine Multiplier Function
   getScoreMultiplier: (homeGoals: number, awayGoals: number) => number;
 };
 
@@ -107,7 +96,6 @@ function impliedTwo(o: number, u: number): [number, number] {
   return [io / (io + iu), iu / (io + iu)];
 }
 
-/** Parses "score:1:0" / "1:0" / "1-0" style correct-score selection tokens into a canonical "H:A" key. */
 function parseScoreToken(sideTok: string): { key: string; h: number; a: number } | null {
   const stripped = sideTok.toLowerCase().startsWith("score:") ? sideTok.slice(6) : sideTok;
   const parts = stripped.replace("-", ":").split(":");
@@ -118,7 +106,7 @@ function parseScoreToken(sideTok: string): { key: string; h: number; a: number }
   return { key: `${h}:${a}`, h, a };
 }
 
-const STATIC_DRIFT_MAX = 0.025; // movement under 2.5% is considered a static market
+const STATIC_DRIFT_MAX = 0.025;
 
 function driftRatio(current: number[], opening: number[]): number | null {
   if (!current.length || !opening.length) return null;
@@ -135,7 +123,6 @@ function isLineStatic(over: number[], overOp: number[], under: number[], underOp
   return dOver <= STATIC_DRIFT_MAX && dUnder <= STATIC_DRIFT_MAX;
 }
 
-/** open/cur price pool for a single market selection. */
 type PricePool = { open: number[]; cur: number[] };
 function newPool(): PricePool {
   return { open: [], cur: [] };
@@ -144,13 +131,11 @@ function pushPool(p: PricePool, op: number | null, cur: number | null) {
   if (op != null) p.open.push(op);
   if (cur != null) p.cur.push(cur);
 }
-/** Effective (display) price: current if we have it, else opening. */
 function effOf(p: PricePool): number | null {
   if (p.cur.length) return median(p.cur);
   if (p.open.length) return median(p.open);
   return null;
 }
-/** current/opening ratio; 1.0 (neutral) when we can't compute one. */
 function driftOf(p: PricePool): number {
   if (p.open.length && p.cur.length) {
     const mo = median(p.open);
@@ -171,9 +156,9 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const ms: Record<"H" | "D" | "A", PricePool> = { H: newPool(), D: newPool(), A: newPool() };
   const dnb: Record<"H" | "A", PricePool> = { H: newPool(), A: newPool() };
 
-  const htCorrectScore = new Map<string, PricePool>(); // CORRECT_SCORE [FIRST_HALF]
-  const ftCorrectScore = new Map<string, PricePool>(); // CORRECT_SCORE [FULL_TIME]
-  const htOu05 = newPool(); // OVER_UNDER [FIRST_HALF] OVER:0.5
+  const htCorrectScore = new Map<string, PricePool>();
+  const ftCorrectScore = new Map<string, PricePool>();
+  const htOu05 = newPool();
 
   const ou: Record<OuLine, { over: PricePool; under: PricePool }> = {
     "1.5": { over: newPool(), under: newPool() },
@@ -183,8 +168,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   };
 
   const btts: Record<"YES" | "NO", PricePool> = { YES: newPool(), NO: newPool() };
-
-  // Asian Handicap FULL_TIME, keyed by raw side token e.g. "H:-1.0" / "A:0.75"
   const ah = new Map<string, PricePool>();
 
   for (const row of odds) {
@@ -203,9 +186,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     const isFullTime = scp === "FULL_TIME" || !scp.includes("HALF");
     const isFirstHalf = scp === "FIRST_HALF" || scp.includes("1ST") || scp.includes("HT1");
 
-    // Market types are a fixed, exact set (see fixtureMarkets.ts / labels.ts), so we match
-    // on equality rather than substring — CORRECT_SCORE vs BOTH_TEAMS_TO_SCORE both contain
-    // "SCORE" and would otherwise collide now that each branch `continue`s.
     switch (type) {
       case "HOME_DRAW_AWAY": {
         if (!isFullTime) continue;
@@ -265,9 +245,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     }
   }
 
-  // ---------------------------------------------------------------------
-  // 1. Dominance / Asymmetry Analysis
-  // ---------------------------------------------------------------------
   const medH = effOf(ms.H);
   const medA = effOf(ms.A);
   const medDnbH = effOf(dnb.H);
@@ -293,15 +270,10 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   if (minMs <= 1.20 || minDnb <= 1.08) isExtremeDominance = true;
   if (!isHeavyFavorite) dominanceSide = "NONE";
 
-  // Raw favourite (independent of the heavy-favourite gate above) — this is what the
-  // new pattern hierarchy keys off, matching the reference model.
   const rawFavSide: "H" | "A" | null = medH != null && (medA == null || medH < medA) ? "H" : medA != null ? "A" : null;
   const rawDogSide: "H" | "A" | null = rawFavSide === "H" ? "A" : rawFavSide === "A" ? "H" : null;
   const rawFavOdds = rawFavSide === "H" ? medH : rawFavSide === "A" ? medA : null;
 
-  // ---------------------------------------------------------------------
-  // 2. First Half Velocity (HT Velocity)
-  // ---------------------------------------------------------------------
   const medHt00 = effOf(htCorrectScore.get("0:0") ?? newPool());
   const ht00Drift = driftOf(htCorrectScore.get("0:0") ?? newPool());
   const medHtOu05 = effOf(htOu05);
@@ -319,9 +291,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     }
   }
 
-  // ---------------------------------------------------------------------
-  // 3. Line Probabilities
-  // ---------------------------------------------------------------------
   const calcP = (line: OuLine): number | null => {
     const o = ou[line].over;
     const u = ou[line].under;
@@ -338,12 +307,8 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const pOver35 = calcP("3.5");
   const pOver45 = calcP("4.5");
 
-  // ---------------------------------------------------------------------
-  // 4. Anomalies & Liquidity Signals
-  // ---------------------------------------------------------------------
   const anomalies: string[] = [];
 
-  // 4a. Under Leakage (2.5 line)
   const ou25UnderDrift = driftOf(ou["2.5"].under);
   const ou25OverDrift = driftOf(ou["2.5"].over);
   let isUnderLeaking = false;
@@ -356,7 +321,11 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     );
   }
 
-  // 4b. 1X2 money-flow direction
+  const isUnderInflow = (ou25OverDrift >= 1.04) || (ou25UnderDrift <= 0.94);
+  if (isUnderInflow && pOver25 >= 0.50) {
+    anomalies.push(`⚠️ UNDER INFLOW: Vitrin üst gösteriyor ama 2.5 Alt fonlanıyor, Üst terk ediliyor (Alt: x${ou25UnderDrift.toFixed(2)}, Üst: x${ou25OverDrift.toFixed(2)})!`);
+  }
+
   const msHDrift = driftOf(ms.H);
   const msDDrift = driftOf(ms.D);
   const msADrift = driftOf(ms.A);
@@ -365,7 +334,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   else if (msADrift <= 0.94) moneyFlow1X2 = `AWAY MONEY FLOW (x${msADrift.toFixed(2)}) ⬇️`;
   else if (msDDrift <= 0.94) moneyFlow1X2 = `DRAW MONEY FLOW (x${msDDrift.toFixed(2)}) ⬇️`;
 
-  // 4c. Over/Under 2.5 liquidity direction
   let ouFlow = "STABLE";
   if (ou25UnderDrift >= 1.05 && ou25OverDrift <= 0.96) {
     ouFlow = "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️";
@@ -373,8 +341,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     ouFlow = "AGGRESSIVE UNDER FLOW (market locking) ⬇️";
   }
 
-  // 4d. Asian Handicap smash (favourite side) / support (underdog side)
-  // Line sets & thresholds synced with the latest goal_anomaly_cli.py reference model.
   let handicapSmashCount = 0;
   let hasFavHandicapSmash = false;
   let hasDogHandicapSupport = false;
@@ -412,15 +378,14 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     anomalies.push("DEAD/STATIC MARKET: Zero movement despite Open-Exchange-level Over/BTTS pricing. Locked corridor risk is at its peak!");
   }
 
-  // 4e. Correct-score collapses (feeds the case-memory library & standard patterns below)
-  let sc01: number | null = null; // "0:1" (away wins 1-0)
-  let sc02: number | null = null; // "0:2"
-  let sc10: number | null = null; // "1:0" (home wins 1-0)
-  let sc11: number | null = null; // "1:1"
-  let sc12: number | null = null; // "1:2"
-  let sc21: number | null = null; // "2:1"
-  const highScoreDrops = new Set<string>(); // collapsed scores outside the low-score set, e.g. "3:3", "4:2"
-  const lowScoreDrops = new Set<string>(); // collapsed scores within the low-score set, e.g. "1:0", "2:0"
+  let sc01: number | null = null;
+  let sc02: number | null = null;
+  let sc10: number | null = null;
+  let sc11: number | null = null;
+  let sc12: number | null = null;
+  let sc21: number | null = null;
+  const highScoreDrops = new Set<string>();
+  const lowScoreDrops = new Set<string>();
   for (const [key, pool] of ftCorrectScore.entries()) {
     if (key === "0:1") sc01 = effOf(pool);
     if (key === "0:2") sc02 = effOf(pool);
@@ -438,13 +403,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   }
   const highScoreDropCount = highScoreDrops.size;
 
-  // ---------------------------------------------------------------------
-  // 5. Case-Memory Library (ported 1:1 from the latest goal_anomaly_cli.py)
-  //    Each signature is independent — rules don't chain off each other and
-  //    don't break older ones. Checked in the exact order of the reference
-  //    model; later unguarded checks may still override an earlier match,
-  //    exactly like the Python "if" (not "elif") chain they came from.
-  // ---------------------------------------------------------------------
   const p25 = pOver25;
   const AGGRESSIVE_OVER_FLOW = "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️";
   const AGGRESSIVE_UNDER_FLOW = "AGGRESSIVE UNDER FLOW (market locking) ⬇️";
@@ -459,7 +417,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   };
   let matchedCase: MatchedCase | null = null;
 
-  // ALARM / PRIORITY FILTER: Polonia Model (Fake Under-Dog Takeover)
   if (
     rawFavSide === "H" &&
     rawFavOdds != null &&
@@ -478,7 +435,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 1-4: Drogheda / Shelbourne / Pisa / Benevento chain — only one of these fires.
   if (
     rawFavSide === "H" &&
     rawFavOdds != null &&
@@ -486,7 +442,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     rawFavOdds <= 2.05 &&
     hasDogHandicapSupport
   ) {
-    // VAKA 1: Drogheda Model (Fakeout Dog Surge)
     if ((ou25OverDrift >= 1.03 || ouFlow === AGGRESSIVE_UNDER_FLOW) && msHDrift >= 1.05) {
       matchedCase = {
         name: "DROGHEDA MODEL (Fakeout Dog Surge)",
@@ -501,7 +456,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
     moneyFlow1X2 === "BALANCED"
   ) {
-    // VAKA 2: Shelbourne Model (Hollow Surge Trap)
     if (!hasFavHandicapSmash && !hasDogHandicapSupport && medHtOu05 != null && medHtOu05 >= 1.33) {
       matchedCase = {
         name: "SHELBOURNE MODEL (Hollow Surge Trap)",
@@ -513,7 +467,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       };
     }
   } else if (ouFlow === AGGRESSIVE_OVER_FLOW && isUnderLeaking && hasDogHandicapSupport) {
-    // VAKA 3: Pisa Model (Systemic Market Flip)
     if (highScoreDropCount >= 4 && (ht00Drift >= 1.03 || (medHtOu05 != null && medHtOu05 <= 0.98))) {
       matchedCase = {
         name: "PISA MODEL (Systemic Market Flip)",
@@ -532,7 +485,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     hasDogHandicapSupport &&
     (msHDrift <= 0.90 || moneyFlow1X2.startsWith("HOME"))
   ) {
-    // VAKA 4: Benevento Model (Home Dog Reverse Takeover)
     matchedCase = {
       name: "BENEVENTO MODEL (Home Dog Reverse Takeover)",
       desc: "The away side is shown as favourite on paper, but institutional money has piled onto the home win and home handicap.",
@@ -543,7 +495,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.5: Galway Model (Solo Away Blowout)
   const hasAwayBlowoutScores =
     ["0:3", "0:4", "1:4", "0:5", "1:5", "0:6", "1:6", "2:3", "2:4"].filter((s) => highScoreDrops.has(s)).length >= 2;
   if (
@@ -564,7 +515,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.8: Cork City Model (Heavy Fav Underdog Takeover)
   const hasCorkDogScores = ["1:3", "2:3", "2:4", "0:3"].some((s) => highScoreDrops.has(s));
   if (
     !matchedCase &&
@@ -585,7 +535,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.9: Wexford Model (Super Fav Blindspot)
   if (
     !matchedCase &&
     rawFavSide === "H" &&
@@ -605,7 +554,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.95: Qadsiah Model (Super Fav Fire Clash)
   const hasFireClashScores = ["3:3", "4:4", "4:3", "3:4", "2:4", "5:3"].some((s) => highScoreDrops.has(s));
   if (
     !matchedCase &&
@@ -626,7 +574,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.96: Al-Ahli Model (Solo Home Blowout)
   const hasAhliHomeScores = ["2:0", "3:0", "4:0", "5:0", "5:1", "6:1", "4:1", "3:1"].some((s) => highScoreDrops.has(s));
   if (
     !matchedCase &&
@@ -646,7 +593,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.97: Rakow Model (High Ceiling Fakeout Takeover) — unguarded, may override the above.
   if (
     rawFavSide === "H" &&
     rawFavOdds != null &&
@@ -666,7 +612,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.98: Wisla Model (Fake Collective Surge) — unguarded, may override the above.
   if (
     (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
     moneyFlow1X2 === "BALANCED" &&
@@ -684,7 +629,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.99: Jazz Pori Model (Super Fakeout Blowout) — unguarded, may override the above.
   if (
     rawFavSide === "H" &&
     rawFavOdds != null &&
@@ -702,7 +646,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.995: Neptunas Model (Clean Sheet Home Suffocation) — unguarded, may override the above.
   const hasCleanSheetScores =
     (lowScoreDrops.has("1:0") || lowScoreDrops.has("2:0")) && (highScoreDrops.has("3:0") || highScoreDrops.has("4:0"));
   if (
@@ -724,7 +667,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.997: Puszcza Model (Low Baseline Anchor Progression) — unguarded, may override the above.
   const isAnchor12 =
     sc11 != null && sc11 <= 6.50 && ((sc12 != null && sc12 <= 8.50) || (sc21 != null && sc21 <= 8.50));
   if (p25 < 0.48 && isAnchor12) {
@@ -759,7 +701,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.998: Kerry Model (Away Low-Tempo Lock) — unguarded, may override the above.
   const isAwayLockScores = sc01 != null && sc01 <= 10.50 && sc02 != null && sc02 <= 12.50;
   const isHomeScoreSuppressed = sc10 == null || sc10 >= 10.00;
   if (
@@ -783,7 +724,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.999: Cienciano Model (Heavy Fav Handicap Steamroller) — unguarded, may override the above.
   const hasHeavyCleanSheet =
     lowScoreDrops.has("1:0") || lowScoreDrops.has("2:0") || highScoreDrops.has("3:0") || highScoreDrops.has("4:0");
   if (
@@ -803,10 +743,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 4.9975: Jaguares Model (Low Baseline Duel) — unguarded, may override the above.
-  // NOTE: ported verbatim from the reference model, including its own quirk — it checks the
-  // *low*-score drop set for scores like "2:3"/"3:3"/"1:4" that can only ever land in the
-  // high-score set, so (as in the reference CLI) this branch is effectively dormant today.
   const hasDuelScoreDrops = ["2:3", "3:3", "1:4"].some((s) => lowScoreDrops.has(s));
   if (p25 <= 0.42 && hasDuelScoreDrops) {
     matchedCase = {
@@ -819,7 +755,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  // VAKA 5: Farul Model (Hidden Fire Infiltration) — falls back into place only if nothing else matched.
   const EXTREME_SCORES = ["3:3", "4:3", "4:2", "5:2"];
   const hasExtremeScoreDrop = EXTREME_SCORES.some((s) => highScoreDrops.has(s));
   if (!matchedCase && hasExtremeScoreDrop && !hasDogHandicapSupport && moneyFlow1X2 === "BALANCED" && p25 < 0.50) {
@@ -837,9 +772,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     anomalies.unshift(`🧠 MEMORY MATCH: ${matchedCase.name} -> ${matchedCase.desc}`);
   }
 
-  // ---------------------------------------------------------------------
-  // 6. Standard Patterns (only kick in when no case-memory match fired)
-  // ---------------------------------------------------------------------
   const isReverseTakeover =
     !matchedCase &&
     rawFavSide === "H" &&
@@ -853,10 +785,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   let isLowBaselineTrap = false;
   let isBaselineFavBreak = false;
   if (!matchedCase && !isReverseTakeover && p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38) {
-    // NOTE: ported verbatim from the reference model, including its own quirk — like Jaguares,
-    // it checks the *low*-score drop set for scores ("1:3", "2:4", etc.) that can only ever land
-    // in the high-score set, so hasStormDrops (and this Athletico branch) is effectively dormant
-    // today, exactly as in the Python reference.
     const hasStormDrops = ["1:3", "2:3", "3:3", "2:4", "1:4", "0:3"].some((s) => lowScoreDrops.has(s));
     const isFakeUnderStorm =
       (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
@@ -872,8 +800,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
         team: "✅ BTTS Yes & Over 2.5 / Away Over 1.5 (avoid the 0-0 / 0-1 barren trap)",
         profile: "ATHLETICO_FAKE_UNDER_STORM",
       };
-      // The Section-5 case-memory banner insertion already ran before this Section-6 block, so
-      // (like the Python reference's later insert) we add this one's banner ourselves.
       anomalies.unshift(`🧠 MEMORY MATCH: ${matchedCase.name} -> ${matchedCase.desc}`);
     } else if (
       (rawFavSide === "H" && msHDrift <= 0.85 && hasFavHandicapSmash) ||
@@ -979,14 +905,47 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     );
   }
 
-  // ---------------------------------------------------------------------
-  // 7. Profile Hierarchy (Synthesis of All Edge Cases)
-  //    Case-memory matches take priority; falls back to the standard hierarchy.
-  // ---------------------------------------------------------------------
   let fairGoalLine = 2.5;
   let scoreProfile: ScoreProfile = "BALANCED";
   let teamGoalVerdict = "⛔ Single-team goal line is risky — prefer the overall total-goals line.";
   const favLabel = rawFavSide === "H" ? "Home" : "Away";
+
+  // --- CLI YENİ ANOMALİ VAKALARI ---
+  const isFakeHomePuszcza = (
+    p25 < 0.48 &&
+    (medH != null && medH >= 2.15) &&
+    (medDnbH != null && medDnbH >= 1.55) &&
+    (medBttsYes != null && medBttsYes >= 1.75) &&
+    !isUnderLeaking
+  );
+
+  const isUnderdogMirage = (
+    ((medA != null && medH != null && medA < medH && medA <= 2.30) || (medDnbA != null && medDnbH != null && medDnbA < medDnbH && medDnbA <= 1.65)) &&
+    handicapSmashCount >= 1 &&
+    hasDogHandicapSupport
+  );
+
+  const isUnderInflowTrap = (
+    p25 >= 0.50 &&
+    isUnderInflow &&
+    !isUnderLeaking
+  );
+
+  const isPotosiModel = (
+    ((favoriteOdds != null && favoriteOdds <= 1.65) || minDnb <= 1.28) &&
+    (p25 >= 0.58) &&
+    (medHt00 != null && medHt00 >= 3.20) &&
+    (medBttsYes <= 1.65)
+  );
+
+  const isStaticOverTrap = (
+    p25 >= 0.51 &&
+    medBttsYes <= 1.68 &&
+    !isUnderLeaking &&
+    handicapSmashCount === 0 &&
+    ou25OverDrift >= 0.97 &&
+    !isPotosiModel
+  );
 
   if (matchedCase) {
     scoreProfile = matchedCase.profile;
@@ -1014,6 +973,26 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       HIDDEN_FIRE_LEAK: 3.25,
     };
     fairGoalLine = CASE_FAIR_LINES[matchedCase.profile] ?? 2.5;
+  } else if (isUnderdogMirage) {
+    fairGoalLine = 2.75;
+    scoreProfile = "UNDERDOG_MIRAGE";
+    teamGoalVerdict = "✅ Double Chance X2 / Away Over 1.5 & BTTS Yes";
+  } else if (isFakeHomePuszcza) {
+    fairGoalLine = 1.75;
+    scoreProfile = "FAKE_HOME_PUSZCZA";
+    teamGoalVerdict = "✅ Double Chance X2 & 2-3 Gol Aralığı (Ev sahibi 1.5 Üst tuzağına düşme)";
+  } else if (isUnderInflowTrap) {
+    fairGoalLine = 2.0;
+    scoreProfile = "UNDER_INFLOW_TRAP";
+    teamGoalVerdict = "✅ Total Under 3.5 / Double Chance 1X & Under 3.5";
+  } else if (isPotosiModel) {
+    fairGoalLine = 3.0;
+    scoreProfile = "REAL_POTOSI_TEMPO";
+    teamGoalVerdict = "✅ Favori Galibiyeti & Favori 1.5/2.0 Üst";
+  } else if (isStaticOverTrap) {
+    fairGoalLine = 1.75;
+    scoreProfile = "STATIC_OVER_TRAP";
+    teamGoalVerdict = "❌ Over 2.5 ve BTTS Yes oynanmaz (Kurumsal akışsız sahte vitrin)";
   } else if (isReverseTakeover) {
     fairGoalLine = 2.0;
     scoreProfile = "REVERSE_TAKEOVER";
@@ -1050,9 +1029,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     fairGoalLine = 3.5;
     scoreProfile = "COLLECTIVE_SURGE";
     teamGoalVerdict = "✅ Total-goals / BTTS-focused (both sides contribute to the scoreline).";
-  }
-  // --- Original fallback hierarchy (unchanged, used when nothing above fires) ---
-  else if (isExtremeDominance && (pOver35 ?? 0) >= 0.50) {
+  } else if (isExtremeDominance && (pOver35 ?? 0) >= 0.50) {
     fairGoalLine = 4.5;
     scoreProfile = "EXTREME_BLOWOUT";
     teamGoalVerdict = "✅ Favourite's team-goal line is supported — the dominant side can cover it alone.";
@@ -1090,11 +1067,10 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     scoreProfile = "HARD_UNDER";
   }
 
-  // ---------------------------------------------------------------------
-  // 8. Clear HT / FT Verdict Texts
-  // ---------------------------------------------------------------------
   let htVerdict = "BALANCED FIRST HALF (0-1 Goal Expectation)";
-  if (htVelocity === "HIGH_VELOCITY" || (medHtOu05 != null && medHtOu05 <= 1.30)) {
+  if ((pOver25 < 0.48) && (medHtOu05 != null && medHtOu05 <= 1.42) && (medHt00 != null && medHt00 >= 2.60)) {
+    htVerdict = "⚡ İLK YARI ERKEN DARBE (Zeledon Modeli: HT 0.5 & 1.5 Üst Canlı / Erken Goller Sonrası Maç Kilitlenir!)";
+  } else if (htVelocity === "HIGH_VELOCITY" || (medHtOu05 != null && medHtOu05 <= 1.30)) {
     htVerdict = "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 & 1.5 Over Potential)";
   } else if (htVelocity === "HARD_LOCK" || (isFalseOpen && (medHtOu05 == null || medHtOu05 >= 1.35))) {
     htVerdict = "🔒 FIRST HALF HARD LOCK (0:0 Risk at Peak)";
@@ -1104,6 +1080,16 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   if (matchedCase) {
     htVerdict = matchedCase.ht;
     ftVerdict = matchedCase.ft;
+  } else if (scoreProfile === "UNDERDOG_MIRAGE") {
+    ftVerdict = "🚀 DEPLASMAN FAVORİ DARBESİ (Pachuca / Vålerenga Modeli - Deplasman 2+ Fark & Üst Riski)";
+  } else if (scoreProfile === "FAKE_HOME_PUSZCZA") {
+    ftVerdict = "🛡️ YALANCI EV SAHİBİ TUZAĞI (Zeledon Modeli: Kısır Baremde Sahte 1X2 Akışı / Deplasman Çifte Şans X2 & 0-1, 0-2 Skoru Canlı)";
+  } else if (scoreProfile === "UNDER_INFLOW_TRAP") {
+    ftVerdict = "🧊 VİTRİN ÜST İLLÜZYONU (Bochum Modeli - Para Kısırlığa Akmış / 0-1, 1-0, 1-1 Kilit Riski!)";
+  } else if (scoreProfile === "REAL_POTOSI_TEMPO") {
+    ftVerdict = "🔥 FAVORİ TEMPOSU & DOĞAL BAREM (Real Potosi Modeli - Vitrin Tuzağı Değil / Favori Galibiyeti & 2-1, 3-1, 2-0 Koridoru)";
+  } else if (scoreProfile === "STATIC_OVER_TRAP") {
+    ftVerdict = "🧊 STATİK VİTRİN TUZAĞI (Tijuana Modeli - Kurumsal Akışsız Sahte Yüksek Barem / 0-1, 1-0 Kilit Riski!)";
   } else if (scoreProfile === "BASELINE_FAV_BREAK") {
     ftVerdict = "⚖️ CONTROLLED FAVOURITE DOMINANCE (First Half Locked / FT 2-0, 2-1 Corridor)";
   } else if (scoreProfile === "PHANTOM_BLOWOUT") {
@@ -1136,9 +1122,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     ftVerdict = "⚖️ CONTROLLED LOW TEMPO (Maximum 2 Goals / 1-0, 0-1, 1-1)";
   }
 
-  // ---------------------------------------------------------------------
-  // 9. Dynamic Score Weighting
-  // ---------------------------------------------------------------------
   const getScoreMultiplier = (hG: number, aG: number): number => {
     const totG = hG + aG;
     const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
@@ -1147,14 +1130,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     const rawFavGoals = rawFavSide === "H" ? hG : aG;
     const rawDogGoals = rawFavSide === "H" ? aG : hG;
 
-    // --- Case-memory profiles ---
     if (scoreProfile === "POLONIA_FAKE_DOG_TAKEOVER" || scoreProfile === "CORK_CITY_UNDERDOG_TAKEOVER" || scoreProfile === "WEXFORD_SUPER_FAV_BLINDSPOT") {
-      if (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 4) return 1.6; // 1-2, 2-2, 1-3
+      if (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 4) return 1.6;
       if (rawDogGoals === 0) return 0.35;
       return 0.85;
     }
     if (scoreProfile === "DROGHEDA_FAKEOUT_SURGE" || scoreProfile === "BENEVENTO_HOME_DOG_REVERSE" || scoreProfile === "RAKOW_HIGH_CEILING_TAKEOVER") {
-      if (rawFavGoals >= 2 && rawDogGoals <= 1 && totG <= 4) return 1.55; // 2-0, 2-1, 3-1
+      if (rawFavGoals >= 2 && rawDogGoals <= 1 && totG <= 4) return 1.55;
       if (rawFavGoals === 0) return 0.3;
       return 0.85;
     }
@@ -1188,27 +1170,47 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       return 0.85;
     }
     if (scoreProfile === "KERRY_AWAY_LOW_TEMPO_LOCK") {
-      if (rawFavGoals >= 1 && rawDogGoals === 0 && rawFavGoals <= 2) return 1.6; // 0-1, 0-2
+      if (rawFavGoals >= 1 && rawDogGoals === 0 && rawFavGoals <= 2) return 1.6;
       if (rawFavGoals >= 3) return 0.4;
       if (hG === aG) return 0.6;
       return 0.55;
     }
     if (scoreProfile === "HIDDEN_FIRE_LEAK") {
-      if (hG > 0 && aG > 0 && totG >= 5) return 1.75; // 3-3, 4-3-style outcomes
+      if (hG > 0 && aG > 0 && totG >= 5) return 1.75;
       if (hG > 0 && aG > 0 && totG >= 3) return 1.35;
       if (totG <= 1) return 0.4;
       return 0.9;
     }
+    if (scoreProfile === "UNDERDOG_MIRAGE") {
+      if (rawDogGoals >= 1 && totG >= 3) return 1.65;
+      if (rawFavGoals >= 2 && rawDogGoals === 0) return 0.3;
+      return 0.85;
+    }
+    if (scoreProfile === "FAKE_HOME_PUSZCZA") {
+      if (hG === 0 && (aG === 1 || aG === 2)) return 1.6;
+      if (totG === 2 || totG === 3) return 1.25;
+      if (hG >= 2) return 0.3;
+      return 0.75;
+    }
+    if (scoreProfile === "UNDER_INFLOW_TRAP" || scoreProfile === "STATIC_OVER_TRAP") {
+      if (totG <= 2) return 1.5;
+      if (totG >= 4) return 0.2;
+      return 0.8;
+    }
+    if (scoreProfile === "REAL_POTOSI_TEMPO") {
+      if (rawFavGoals >= 2 && totG >= 3) return 1.6;
+      if (totG <= 1) return 0.3;
+      return 0.85;
+    }
 
-    // --- Standard patterns ---
     if (scoreProfile === "PHANTOM_BLOWOUT") {
-      if (rawDogGoals >= 1 && totG <= 3) return 1.55; // 1-1, 1-2, 2-1
+      if (rawDogGoals >= 1 && totG <= 3) return 1.55;
       if (rawFavGoals >= 3) return 0.30;
       return 0.75;
     }
     if (scoreProfile === "REVERSE_TAKEOVER") {
-      if (rawDogGoals >= 1 && rawFavGoals === 0) return 1.6; // 0-1, 0-2
-      if (hG === aG) return 1.3; // 1-1
+      if (rawDogGoals >= 1 && rawFavGoals === 0) return 1.6;
+      if (hG === aG) return 1.3;
       if (rawFavGoals >= 1) return 0.35;
       return 0.9;
     }
@@ -1219,13 +1221,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       return 0.15;
     }
     if (scoreProfile === "SUPER_FAV_TRAP") {
-      if (hG === aG) return 1.5; // 1-1
-      if (rawDogGoals >= 1 && totG <= 3) return 1.35; // 2-1
-      if (rawDogGoals === 0 && rawFavGoals >= 2) return 0.55; // clean blowout penalised
+      if (hG === aG) return 1.5;
+      if (rawDogGoals >= 1 && totG <= 3) return 1.35;
+      if (rawDogGoals === 0 && rawFavGoals >= 2) return 0.55;
       return 0.9;
     }
     if (scoreProfile === "AWAY_CONTROL_LOCK") {
-      if (rawFavGoals >= 1 && rawDogGoals === 0 && rawFavGoals <= 2) return 1.6; // 0-1, 0-2
+      if (rawFavGoals >= 1 && rawDogGoals === 0 && rawFavGoals <= 2) return 1.6;
       if (rawFavGoals >= 3) return 0.4;
       if (hG === aG) return 0.7;
       return 0.6;
@@ -1236,77 +1238,63 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       return 0.3;
     }
     if (scoreProfile === "BASELINE_FAV_BREAK") {
-      if (rawFavGoals === 2 && rawDogGoals <= 1) return 1.6; // 2-0, 2-1
+      if (rawFavGoals === 2 && rawDogGoals <= 1) return 1.6;
       if (rawFavGoals >= 3) return 0.7;
-      if (rawDogGoals === 0 && rawFavGoals <= 1) return 1.1; // 1-0
+      if (rawDogGoals === 0 && rawFavGoals <= 1) return 1.1;
       if (rawFavGoals === 0) return 0.3;
       return 0.75;
     }
     if (scoreProfile === "SOLO_HOME_BLOWOUT") {
-      if (rawFavGoals >= 2 && rawDogGoals === 0) return 1.6; // 2-0, 3-0
+      if (rawFavGoals >= 2 && rawDogGoals === 0) return 1.6;
       if (rawFavGoals >= 3) return 1.35;
       if (rawFavGoals === 0) return 0.15;
       return 0.7;
     }
     if (scoreProfile === "AWAY_SURGE_TRAP") {
-      if (hG === aG || (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 3)) return 1.5; // 1-1, 1-2
+      if (hG === aG || (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 3)) return 1.5;
       if (totG >= 4) return 0.4;
       return 0.85;
     }
 
-    // A. EXTREME_BLOWOUT
     if (scoreProfile === "EXTREME_BLOWOUT") {
       if (totG <= 2) return 0.20;
       if (totG === 3 && isCleanSheet) return 1.20;
       if (totG >= 4 && isCleanSheet) return 1.65;
       return 0.80;
     }
-
-    // B. CONTESTED_FAVORITE
     if (scoreProfile === "CONTESTED_FAVORITE") {
       if (hG === 1 && aG === 1) return 1.60;
       if (favGoals >= 2 && dogGoals >= 1 && totG <= 4) return 1.50;
       if (isCleanSheet) return 0.50;
       return 0.85;
     }
-
-    // C. DOMINANT_WIN (includes Panathinaikos / Palermo 3-1 safety net)
     if (scoreProfile === "DOMINANT_WIN") {
-      if (isCleanSheet && (totG === 2 || totG === 3)) return 1.45; // 2:0, 3:0
-      if (isCleanSheet && totG >= 4) return 1.25;                  // 4:0
-      if (favGoals >= 2 && dogGoals === 1 && totG <= 4) return 1.35; // 2:1, 3:1
+      if (isCleanSheet && (totG === 2 || totG === 3)) return 1.45;
+      if (isCleanSheet && totG >= 4) return 1.25;
+      if (favGoals >= 2 && dogGoals === 1 && totG <= 4) return 1.35;
       if (!isCleanSheet && totG <= 2) return 0.50;
       return 0.90;
     }
-
-    // D. OPEN_EXCHANGE
     if (scoreProfile === "OPEN_EXCHANGE") {
       if (hG > 0 && aG > 0) {
-        if (totG >= 3) return 1.55; // 2:1, 1:2, 2:2, 2:3, 3:2
-        return 1.15; // 1:1
+        if (totG >= 3) return 1.55;
+        return 1.15;
       }
-      return 0.35; // Block low-scoring one-sided scorelines
+      return 0.35;
     }
-
-    // E. HARD_UNDER
     if (scoreProfile === "HARD_UNDER") {
       if (totG === 0) return 1.70;
       if (totG === 1) return 1.50;
       if (totG === 2) return 0.85;
       return 0.20;
     }
-
-    // E2. LOCKED_CORRIDOR (Estoril Protection)
     if (scoreProfile === "LOCKED_CORRIDOR") {
-      if (totG === 0) return 1.65; // 0:0
-      if (hG === aG) return 1.50;  // 1:1
-      if (totG === 1) return 1.15; // 1:0, 0:1
+      if (totG === 0) return 1.65;
+      if (hG === aG) return 1.50;
+      if (totG === 1) return 1.15;
       if (totG === 2) return 0.70;
       return 0.20;
     }
-
-    // F. BALANCED (Cagliari / Vila Nova Correction)
-    // If BTTS Yes is dead (@1.95+) and the line is low, boost 1:0 and 2:0 favorite scorelines:
     if (medBttsYes >= 1.95 && pOver25 < 0.45) {
       if ((hG === 1 && aG === 0) || (hG === 2 && aG === 0)) return 1.35;
       if ((aG === 1 && hG === 0) || (aG === 2 && hG === 0)) return 1.35;
