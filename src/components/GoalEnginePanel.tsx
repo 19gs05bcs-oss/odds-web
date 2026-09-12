@@ -39,6 +39,12 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   JAGUARES_LOW_BASELINE_DUEL: "Jaguares (Low Baseline Duel)",
   ATHLETICO_FAKE_UNDER_STORM: "Athletico (Fake Under Goal Storm)",
   HIDDEN_FIRE_LEAK: "Farul (Hidden Fire Infiltration)",
+  // CLI Modelleri
+  UNDERDOG_MIRAGE: "Underdog Mirage (Pachuca / Vålerenga Model)",
+  FAKE_HOME_PUSZCZA: "Zeledon Model (Barren False Home Trap)",
+  REAL_POTOSI_TEMPO: "Real Potosi (Heavy Fav Natural Baseline)",
+  STATIC_OVER_TRAP: "Tijuana Model (Static Retail Bait)",
+  UNDER_INFLOW_TRAP: "Under Inflow Trap (Bochum / Necaxa Model)",
 };
 
 export function GoalEnginePanel({
@@ -48,7 +54,7 @@ export function GoalEnginePanel({
   metrics: GoalEngineMetrics | null;
   actualScore?: string | null;
 }) {
-    if (!metrics) {
+  if (!metrics) {
     return (
       <section className={styles.card}>
         <h3>🎯 Goal & Market Anomaly Engine</h3>
@@ -78,14 +84,14 @@ export function GoalEnginePanel({
     ouFlow,
   } = metrics;
 
-    const favoriteLabel =
+  const favoriteLabel =
     dominanceSide === "NONE"
       ? "Balanced (No clear favourite)"
       : `${dominanceSide === "HOME" ? "Home" : "Away"}${
           isExtremeDominance ? " (Extreme Dominance)" : isHeavyFavorite ? " (Heavy Favourite)" : ""
         }`;
 
-    return (
+  return (
     <section className={styles.card}>
       <h3>
         🎯 Goal & Market Anomaly Engine{" "}
@@ -137,7 +143,7 @@ export function GoalEnginePanel({
         </p>
       )}
 
-            <p className={styles.subHead}>
+      <p className={styles.subHead}>
         <strong>Market Indicators</strong>
       </p>
       <div className={styles.geStatsGrid}>
