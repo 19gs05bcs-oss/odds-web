@@ -17,7 +17,27 @@ export type ScoreProfile =
   | "SUPER_FAV_TRAP"
   | "AWAY_CONTROL_LOCK"
   | "AWAY_SURGE_TRAP"
-  | "COLLECTIVE_SURGE";
+  | "COLLECTIVE_SURGE"
+  // --- Case-memory library (ported from the latest goal_anomaly_cli.py) ---
+  | "POLONIA_FAKE_DOG_TAKEOVER"
+  | "DROGHEDA_FAKEOUT_SURGE"
+  | "SHELBOURNE_HOLLOW_SURGE_TRAP"
+  | "PISA_SYSTEMIC_FLIP"
+  | "BENEVENTO_HOME_DOG_REVERSE"
+  | "GALWAY_SOLO_AWAY_BLOWOUT"
+  | "CORK_CITY_UNDERDOG_TAKEOVER"
+  | "WEXFORD_SUPER_FAV_BLINDSPOT"
+  | "QADSIAH_FIRE_CLASH"
+  | "AL_AHLI_SOLO_HOME_BLOWOUT"
+  | "RAKOW_HIGH_CEILING_TAKEOVER"
+  | "WISLA_FAKE_COLLECTIVE_SURGE"
+  | "JAZZ_PORI_SUPER_FAKEOUT_BLOWOUT"
+  | "NEPTUNAS_CLEAN_SHEET_SUFFOCATION"
+  | "PUSZCZA_LOW_BASELINE_ANCHOR"
+  | "KERRY_AWAY_LOW_TEMPO_LOCK"
+  | "CIENCIANO_HANDICAP_STEAMROLLER"
+  | "JAGUARES_LOW_BASELINE_DUEL"
+  | "HIDDEN_FIRE_LEAK";
 
 export type GoalEngineMetrics = {
   // 1. Dominance & Power Distribution
@@ -353,28 +373,26 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   }
 
   // 4d. Asian Handicap smash (favourite side) / support (underdog side)
+  // Line sets & thresholds synced with the latest goal_anomaly_cli.py reference model.
   let handicapSmashCount = 0;
   let hasFavHandicapSmash = false;
   let hasDogHandicapSupport = false;
-  const FAV_MINUS_LINES = ["-0.75", "-1.0", "-1.25", "-1.5"];
-  const DOG_PLUS_LINES = ["0.5", "0.75", "1.0", "1.25"];
+  const FAV_MINUS_LINES = ["-0.75", "-1.0", "-1.25", "-1.5", "-1.75", "-2.0", "-2.5", "-2.75"];
+  const DOG_PLUS_LINES = ["0.5", "0.75", "1.0", "1.25", "-0.5", "-0.75", "-1.0"];
 
   for (const [key, pool] of ah.entries()) {
     if (!pool.open.length || !pool.cur.length) continue;
     const op = median(pool.open);
     const cur = median(pool.cur);
+    if (op <= 0) continue;
     const drift = cur / op;
 
-    // Global smash counter (either side, kept for backward compatibility with prior behaviour)
-    if (FAV_MINUS_LINES.some((l) => key.includes(l)) && drift <= 0.86) {
+    if (rawFavSide && key.startsWith(`${rawFavSide}:`) && FAV_MINUS_LINES.some((l) => key.includes(l)) && drift <= 0.88) {
       handicapSmashCount++;
-    }
-
-    if (rawFavSide && key.startsWith(`${rawFavSide}:`) && FAV_MINUS_LINES.some((l) => key.endsWith(l)) && drift <= 0.86) {
       hasFavHandicapSmash = true;
       anomalies.push(`🚀 HANDICAP SMASH: ${key} collapsed (@${op.toFixed(2)} -> @${cur.toFixed(2)})!`);
     }
-    if (rawDogSide && key.startsWith(`${rawDogSide}:`) && DOG_PLUS_LINES.some((l) => key.endsWith(l)) && drift <= 0.94) {
+    if (rawDogSide && key.startsWith(`${rawDogSide}:`) && DOG_PLUS_LINES.some((l) => key.includes(l)) && drift <= 0.94) {
       hasDogHandicapSupport = true;
       anomalies.push(`🛡️ DOG HANDICAP SUPPORT: ${key} is being backed (@${op.toFixed(2)} -> @${cur.toFixed(2)})!`);
     }
@@ -384,6 +402,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const static25 = isLineStatic(ou["2.5"].over.cur, ou["2.5"].over.open, ou["2.5"].under.cur, ou["2.5"].under.open);
 
   const medBttsYes = effOf(btts.YES) ?? 2.0;
+  const bttsDrift = driftOf(btts.YES);
   const bttsExpectancy = medBttsYes <= 1.68;
 
   const wouldBeOpenExchange = pOver25 >= 0.525 && medBttsYes <= 1.65;
@@ -392,61 +411,463 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     anomalies.push("DEAD/STATIC MARKET: Zero movement despite Open-Exchange-level Over/BTTS pricing. Locked corridor risk is at its peak!");
   }
 
-  // 4e. Correct-score collapses (for Phantom Blowout / Hidden Fire / Collective Surge thresholds)
+  // 4e. Correct-score collapses (feeds the case-memory library & standard patterns below)
   let sc01: number | null = null; // "0:1" (away wins 1-0)
+  let sc02: number | null = null; // "0:2"
   let sc10: number | null = null; // "1:0" (home wins 1-0)
+  let sc11: number | null = null; // "1:1"
+  let sc12: number | null = null; // "1:2"
+  let sc21: number | null = null; // "2:1"
   const highScoreDrops = new Set<string>(); // collapsed scores outside the low-score set, e.g. "3:3", "4:2"
+  const lowScoreDrops = new Set<string>(); // collapsed scores within the low-score set, e.g. "1:0", "2:0"
   for (const [key, pool] of ftCorrectScore.entries()) {
     if (key === "0:1") sc01 = effOf(pool);
+    if (key === "0:2") sc02 = effOf(pool);
     if (key === "1:0") sc10 = effOf(pool);
+    if (key === "1:1") sc11 = effOf(pool);
+    if (key === "1:2") sc12 = effOf(pool);
+    if (key === "2:1") sc21 = effOf(pool);
     if (!pool.open.length || !pool.cur.length) continue;
     const op = median(pool.open);
     const cur = median(pool.cur);
-    if (op > 0 && cur / op <= 0.88 && !LOW_SCORES.has(key)) {
-      highScoreDrops.add(key);
+    if (op > 0 && cur / op <= 0.88) {
+      if (LOW_SCORES.has(key)) lowScoreDrops.add(key);
+      else highScoreDrops.add(key);
     }
   }
   const highScoreDropCount = highScoreDrops.size;
-  const EXTREME_SCORES = ["3:3", "4:3", "4:2", "5:2"];
-  const hasExtremeScoreDrop = EXTREME_SCORES.some((s) => highScoreDrops.has(s));
 
   // ---------------------------------------------------------------------
-  // 5. New Pattern Hierarchy (ported from the latest anomaly-detection model)
-  //    Checked in priority order; the first match wins.
+  // 5. Case-Memory Library (ported 1:1 from the latest goal_anomaly_cli.py)
+  //    Each signature is independent — rules don't chain off each other and
+  //    don't break older ones. Checked in the exact order of the reference
+  //    model; later unguarded checks may still override an earlier match,
+  //    exactly like the Python "if" (not "elif") chain they came from.
   // ---------------------------------------------------------------------
   const p25 = pOver25;
   const AGGRESSIVE_OVER_FLOW = "AGGRESSIVE OVER FLOW (Under being abandoned) ⬆️";
+  const AGGRESSIVE_UNDER_FLOW = "AGGRESSIVE UNDER FLOW (market locking) ⬇️";
 
-  // A. Reverse Market Takeover — HIGHEST PRIORITY. Widened range (1.55–2.45).
+  type MatchedCase = {
+    name: string;
+    desc: string;
+    ht: string;
+    ft: string;
+    team: string;
+    profile: ScoreProfile;
+  };
+  let matchedCase: MatchedCase | null = null;
+
+  // ALARM / PRIORITY FILTER: Polonia Model (Fake Under-Dog Takeover)
+  if (
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.95 &&
+    msHDrift >= 1.10 &&
+    hasDogHandicapSupport &&
+    (moneyFlow1X2.startsWith("AWAY") || msADrift <= 0.88)
+  ) {
+    matchedCase = {
+      name: "POLONIA MODEL (Fake Under-Dog Takeover Alarm)",
+      desc: "The under-line has been swept to create a barren-lock illusion, but the home favourite has collapsed from short odds to drift, and the away handicaps (-0.75 / +0.5) have seen a massive institutional entry! The barren display is fake — expect away points and goals at both ends.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 HOME COLLAPSE & AWAY RESISTANCE (1-2 / 2-2 / 1-3 Corridor — BTTS)",
+      team: "✅ Double Chance X2 & BTTS Yes (watch the 1-0 / 2-0 home trap)",
+      profile: "POLONIA_FAKE_DOG_TAKEOVER",
+    };
+  }
+
+  // VAKA 1-4: Drogheda / Shelbourne / Pisa / Benevento chain — only one of these fires.
+  if (
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.70 &&
+    rawFavOdds <= 2.05 &&
+    hasDogHandicapSupport
+  ) {
+    // VAKA 1: Drogheda Model (Fakeout Dog Surge)
+    if ((ou25OverDrift >= 1.03 || ouFlow === AGGRESSIVE_UNDER_FLOW) && msHDrift >= 1.05) {
+      matchedCase = {
+        name: "DROGHEDA MODEL (Fakeout Dog Surge)",
+        desc: "Away handicaps have been swept but the line is closing upward (under flow)! The home favourite has taken an opening correction but won't let go of the match.",
+        ht: "BALANCED FIRST HALF (0-1 Goal Range)",
+        ft: "🎯 CONTROLLED HOME DOMINANCE (1-0 / 2-0 Corridor — Away Trap)",
+        team: "✅ Home Over 1.5 / Home Double Chance (the away surprise is fake)",
+        profile: "DROGHEDA_FAKEOUT_SURGE",
+      };
+    }
+  } else if (
+    (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
+    moneyFlow1X2 === "BALANCED"
+  ) {
+    // VAKA 2: Shelbourne Model (Hollow Surge Trap)
+    if (!hasFavHandicapSmash && !hasDogHandicapSupport && medHtOu05 != null && medHtOu05 >= 1.33) {
+      matchedCase = {
+        name: "SHELBOURNE MODEL (Hollow Surge Trap)",
+        desc: "Lines have been pumped toward Over but the Asian Handicap and 1X2 are completely inert! Side support is zero — the match is tactically locked.",
+        ht: "BALANCED FIRST HALF (0-1 Goal Range)",
+        ft: "🧊 HOLLOW OVER BALLOON (Max 1-2 Goals / 0-1, 1-0 Lock Risk)",
+        team: "❌ Over 2.5 should NOT be backed (zero handicap support)",
+        profile: "SHELBOURNE_HOLLOW_SURGE_TRAP",
+      };
+    }
+  } else if (ouFlow === AGGRESSIVE_OVER_FLOW && isUnderLeaking && hasDogHandicapSupport) {
+    // VAKA 3: Pisa Model (Systemic Market Flip)
+    if (highScoreDropCount >= 4 && (ht00Drift >= 1.03 || (medHtOu05 != null && medHtOu05 <= 0.98))) {
+      matchedCase = {
+        name: "PISA MODEL (Systemic Market Flip)",
+        desc: "The opening line was barren, but the market has flipped top-to-bottom toward Over! The away side is coming with both a handicap edge and goals.",
+        ht: "🔥 FIRST HALF ANOMALOUS PRESSURE (HT 0:0 Abandoned / Early Goals)",
+        ft: "💣 INSTITUTIONAL LINE TAKEOVER & SURPRISE OVER (1-2 / 1-3 / 1-4 Corridor)",
+        team: "✅ Double Chance X2 & Over 2.5 / Away Over 1.5",
+        profile: "PISA_SYSTEMIC_FLIP",
+      };
+    }
+  } else if (
+    rawFavSide === "A" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.55 &&
+    rawFavOdds <= 2.55 &&
+    hasDogHandicapSupport &&
+    (msHDrift <= 0.90 || moneyFlow1X2.startsWith("HOME"))
+  ) {
+    // VAKA 4: Benevento Model (Home Dog Reverse Takeover)
+    matchedCase = {
+      name: "BENEVENTO MODEL (Home Dog Reverse Takeover)",
+      desc: "The away side is shown as favourite on paper, but institutional money has piled onto the home win and home handicap.",
+      ht: "BALANCED FIRST HALF (0-1 Goal Range)",
+      ft: "🎯 HOME DOMINANCE & REVERSE LIQUIDITY (2-1 / 3-1 Win Corridor)",
+      team: "✅ Home Double Chance 1X / Home Over 1.5 (the away favourite tag is misleading)",
+      profile: "BENEVENTO_HOME_DOG_REVERSE",
+    };
+  }
+
+  // VAKA 4.5: Galway Model (Solo Away Blowout)
+  const hasAwayBlowoutScores =
+    ["0:3", "0:4", "1:4", "0:5", "1:5", "0:6", "1:6", "2:3", "2:4"].filter((s) => highScoreDrops.has(s)).length >= 2;
+  if (
+    !matchedCase &&
+    rawFavSide === "A" &&
+    rawFavOdds != null &&
+    rawFavOdds <= 1.85 &&
+    (hasFavHandicapSmash || msADrift <= 0.92) &&
+    hasAwayBlowoutScores
+  ) {
+    matchedCase = {
+      name: "GALWAY MODEL (Solo Away Blowout)",
+      desc: "The overall line looks calm, but the away handicaps (-1.0 / -1.5) and a batch of blowout scorelines have been swept! The away side breaks the line on its own.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 AWAY OFFENSIVE EXPLOSION & OVER (1-3 / 2-3 / 0-4 Corridor — 3.5 Over Threat)",
+      team: "✅ Away Over 1.5 / 2.0 and Away Win",
+      profile: "GALWAY_SOLO_AWAY_BLOWOUT",
+    };
+  }
+
+  // VAKA 4.8: Cork City Model (Heavy Fav Underdog Takeover)
+  const hasCorkDogScores = ["1:3", "2:3", "2:4", "0:3"].some((s) => highScoreDrops.has(s));
+  if (
+    !matchedCase &&
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.30 &&
+    rawFavOdds <= 1.50 &&
+    hasDogHandicapSupport &&
+    (moneyFlow1X2.startsWith("AWAY") || msADrift <= 0.94 || hasCorkDogScores)
+  ) {
+    matchedCase = {
+      name: "CORK CITY MODEL (Heavy Fav Underdog Takeover)",
+      desc: "The home side is priced as a heavy @1.30-@1.50 favourite, but institutional money has piled onto the away +1.0 / +1.25 handicap and surprise win scorelines (1:3, 2:3)!",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 HEAVY FAVOURITE COLLAPSE & SURPRISE OVER (1-2 / 1-3 / 2-3 Away Shock)",
+      team: "✅ Away Handicap (+1.5 A) / Double Chance X2 / BTTS Yes",
+      profile: "CORK_CITY_UNDERDOG_TAKEOVER",
+    };
+  }
+
+  // VAKA 4.9: Wexford Model (Super Fav Blindspot)
+  if (
+    !matchedCase &&
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds <= 1.38 &&
+    p25 >= 0.58 &&
+    !hasFavHandicapSmash &&
+    ht00Drift >= 1.04
+  ) {
+    matchedCase = {
+      name: "WEXFORD MODEL (Super Fav Blindspot)",
+      desc: "The home side is a heavy @1.35-band favourite but handicap support is zero and HT 0:0 is rising! Public complacency in the favourite, with surprise away goals and upset risk.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 HEAVY FAVOURITE UPSET & SURPRISE DUEL (1-2 / 1-3 / 2-2 Corridor)",
+      team: "✅ Away +1.5 / +2.0 Handicap / BTTS Yes",
+      profile: "WEXFORD_SUPER_FAV_BLINDSPOT",
+    };
+  }
+
+  // VAKA 4.95: Qadsiah Model (Super Fav Fire Clash)
+  const hasFireClashScores = ["3:3", "4:4", "4:3", "3:4", "2:4", "5:3"].some((s) => highScoreDrops.has(s));
+  if (
+    !matchedCase &&
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds <= 1.30 &&
+    hasDogHandicapSupport &&
+    p25 >= 0.65 &&
+    (isUnderLeaking || ouFlow === AGGRESSIVE_OVER_FLOW || hasFireClashScores)
+  ) {
+    matchedCase = {
+      name: "QADSIAH MODEL (Super Fav Fire Clash)",
+      desc: "The home side is inflated to @1.25 and the opponent's handicap is strong; but the top of the line (65%+ Over) is on fire! This won't be a barren upset — expect a huge mutual-goal duel like 3:3 / 2:3.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 SUPER FAVOURITE UPSET & BIG DUEL (2-2 / 3-3 / 3.5 Over Explosion)",
+      team: "✅ Away +1.5 / +2.0 Handicap & BTTS Yes & Over 3.5",
+      profile: "QADSIAH_FIRE_CLASH",
+    };
+  }
+
+  // VAKA 4.96: Al-Ahli Model (Solo Home Blowout)
+  const hasAhliHomeScores = ["2:0", "3:0", "4:0", "5:0", "5:1", "6:1", "4:1", "3:1"].some((s) => highScoreDrops.has(s));
+  if (
+    !matchedCase &&
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds <= 1.30 &&
+    !hasDogHandicapSupport &&
+    (hasAhliHomeScores || hasFavHandicapSmash || p25 >= 0.60)
+  ) {
+    matchedCase = {
+      name: "AL-AHLI MODEL (Solo Home Blowout)",
+      desc: "General lines don't look Over and Under is pressed, but the home side's -1.0 / -2.5 handicaps and blowout scorelines (3:0, 4:0, 6:1) have been swept! The home side breaks the match alone.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 ONE-SIDED HOME BLOWOUT & OVER (3-0 / 3-1 / 4-0 Corridor — 3.5 Over Threat)",
+      team: "✅ Home Over 2.0 / 2.5 and Home Handicap Win (-1.5 H)",
+      profile: "AL_AHLI_SOLO_HOME_BLOWOUT",
+    };
+  }
+
+  // VAKA 4.97: Rakow Model (High Ceiling Fakeout Takeover) — unguarded, may override the above.
+  if (
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.70 &&
+    rawFavOdds <= 1.95 &&
+    hasDogHandicapSupport &&
+    p25 >= 0.58 &&
+    (isUnderLeaking || (medBttsYes != null && medBttsYes <= 1.55))
+  ) {
+    matchedCase = {
+      name: "RAKOW MODEL (High Ceiling Fakeout Takeover)",
+      desc: "Away handicaps have been swept, but the top of the line (58%+ Over & BTTS Yes) is on fire and the home side is holding firm below @1.90! The away surprise is fake — the match is locked toward a 2-1 / 3-1 home win.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "🎯 HOME RESISTANCE & GOAL-FILLED WIN (2-1 / 3-1 Corridor — BTTS & Over 2.5)",
+      team: "✅ BTTS Yes & Over 2.5 / Home Win (Double Chance X2 is a trap)",
+      profile: "RAKOW_HIGH_CEILING_TAKEOVER",
+    };
+  }
+
+  // VAKA 4.98: Wisla Model (Fake Collective Surge) — unguarded, may override the above.
+  if (
+    (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
+    moneyFlow1X2 === "BALANCED" &&
+    !hasFavHandicapSmash &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.85
+  ) {
+    matchedCase = {
+      name: "WISLA MODEL (Fake Collective Surge)",
+      desc: "Lines and BTTS Yes have been pumped wildly toward Over, but 1X2 is balanced and neither side has minus-handicap support! There's zero institutional conviction on who scores — the match locks into a controlled 2-0 / 1-1 corridor.",
+      ht: "BALANCED FIRST HALF (0-1 Goal Range)",
+      ft: "🧊 HOLLOW FIRE BALLOON (Max 2 Goals / 2-0, 1-1 Lock — 3.5 Over Trap)",
+      team: "❌ Over 3.5 / BTTS Yes are a trap (max 2-3 goal corridor)",
+      profile: "WISLA_FAKE_COLLECTIVE_SURGE",
+    };
+  }
+
+  // VAKA 4.99: Jazz Pori Model (Super Fakeout Blowout) — unguarded, may override the above.
+  if (
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds <= 1.65 &&
+    hasDogHandicapSupport &&
+    (p25 >= 0.68 || (pOver35 != null && pOver35 >= 0.50))
+  ) {
+    matchedCase = {
+      name: "JAZZ PORI MODEL (Super Fakeout Blowout)",
+      desc: "Huge flow has been shown onto the away handicap and win, but the top of the line (68%+ Over) is on fire and the home side is standing firm below @1.65! The away surprise is entirely fake — the home side blows the match out alone.",
+      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+      ft: "💣 HOME OFFENSIVE EXPLOSION (3-0 / 3-1 / 4-1 Corridor — Home Over 2.5 & 3.5 Threat)",
+      team: "✅ Home Over 2.0 / 2.5 and Home Win (avoid the Double-Chance-X2 trap)",
+      profile: "JAZZ_PORI_SUPER_FAKEOUT_BLOWOUT",
+    };
+  }
+
+  // VAKA 4.995: Neptunas Model (Clean Sheet Home Suffocation) — unguarded, may override the above.
+  const hasCleanSheetScores =
+    (lowScoreDrops.has("1:0") || lowScoreDrops.has("2:0")) && (highScoreDrops.has("3:0") || highScoreDrops.has("4:0"));
+  if (
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.50 &&
+    rawFavOdds <= 1.85 &&
+    msHDrift <= 0.95 &&
+    hasCleanSheetScores &&
+    (bttsDrift >= 1.05 || ou25OverDrift >= 1.04)
+  ) {
+    matchedCase = {
+      name: "NEPTUNAS MODEL (Clean Sheet Home Suffocation)",
+      desc: "There's clear flow toward the home side, but the line is locked toward Over (BTTS No has been backed). The 1:0, 2:0, 3:0 scorelines have been swept one-sidedly! The home side smothers the match without conceding.",
+      ht: "BALANCED FIRST HALF (1-0 / 0-0 Corridor)",
+      ft: "🎯 CONTROLLED HOME WIN (2-0 / 3-0 Corridor — Clean Sheet Win)",
+      team: "✅ Home Win & Home Over 1.5 (BTTS No focus)",
+      profile: "NEPTUNAS_CLEAN_SHEET_SUFFOCATION",
+    };
+  }
+
+  // VAKA 4.997: Puszcza Model (Low Baseline Anchor Progression) — unguarded, may override the above.
+  const isAnchor12 =
+    sc11 != null && sc11 <= 6.50 && ((sc12 != null && sc12 <= 8.50) || (sc21 != null && sc21 <= 8.50));
+  if (p25 < 0.48 && isAnchor12) {
+    const isCleanSheetBias = (medBttsYes != null && medBttsYes >= 1.85) || bttsDrift >= 1.03;
+    let targetScoreCorridor: string;
+    let targetTeam: string;
+    let descDetail: string;
+    if (isCleanSheetBias) {
+      targetScoreCorridor =
+        rawFavSide === "A" ? "0-2 / 0-1 Away (Clean Sheet)" : "2-0 / 1-0 Home (Clean Sheet)";
+      targetTeam =
+        rawFavSide === "A"
+          ? "✅ Away Over 1.5 & Away Win (BTTS No focus)"
+          : "✅ Home Over 1.5 & Home Win (BTTS No focus)";
+      descDetail = "The baseline is barren, but the 2-0 / 1-0 anchors sit at the bottom and BTTS No is priced in. The favourite closes it out by two without conceding.";
+    } else {
+      targetScoreCorridor =
+        rawFavSide === "A" ? "1-2 / 1-1 Away (Mutual Goals)" : "2-1 / 1-1 Home (Mutual Goals)";
+      targetTeam =
+        rawFavSide === "A"
+          ? "✅ Double Chance X2 / Away Over 1.5 & BTTS Yes"
+          : "✅ Double Chance 1X / Home Over 1.5 & BTTS Yes";
+      descDetail = "The baseline looks barren, but the 1:1 and 1:2 anchor scores sit at the bottom and BTTS Yes stays alive. Expect a 1-2 / 2-1 duel.";
+    }
+    matchedCase = {
+      name: "PUSZCZA MODEL (Low Baseline Anchor Progression)",
+      desc: `Barren-baseline trap (below 48%)! ${descDetail}`,
+      ht: "BALANCED FIRST HALF (0-1 / 1-0 Corridor)",
+      ft: `⚖️ CONTROLLED FAVOURITE CORRIDOR (${targetScoreCorridor})`,
+      team: `${targetTeam} (avoid the 0-0 / 0-1 barren trap)`,
+      profile: "PUSZCZA_LOW_BASELINE_ANCHOR",
+    };
+  }
+
+  // VAKA 4.998: Kerry Model (Away Low-Tempo Lock) — unguarded, may override the above.
+  const isAwayLockScores = sc01 != null && sc01 <= 10.50 && sc02 != null && sc02 <= 12.50;
+  const isHomeScoreSuppressed = sc10 == null || sc10 >= 10.00;
+  if (
+    rawFavSide === "A" &&
+    rawFavOdds != null &&
+    rawFavOdds >= 1.90 &&
+    rawFavOdds <= 2.35 &&
+    moneyFlow1X2 === "BALANCED" &&
+    ouFlow === "STABLE" &&
+    isAwayLockScores &&
+    isHomeScoreSuppressed &&
+    !hasDogHandicapSupport
+  ) {
+    matchedCase = {
+      name: "KERRY MODEL (Away Low-Tempo Lock)",
+      desc: "The away side sits in the balanced favourite band (@2.10-@2.30) and market flow looks stable, but 0:1 and 0:2 sit at the bottom of the correct-score board! The away side tends to grab an early goal and lock the match at a single-goal margin.",
+      ht: "BALANCED FIRST HALF (0-1 Away / 0-0 Lock)",
+      ft: "🛡️ CONTROLLED AWAY LOCK (0-1 / 0-2 Corridor — The Line Is Misleading)",
+      team: "✅ Away Double Chance X2 & Away Over 0.5/1.5 (single-goal away win)",
+      profile: "KERRY_AWAY_LOW_TEMPO_LOCK",
+    };
+  }
+
+  // VAKA 4.999: Cienciano Model (Heavy Fav Handicap Steamroller) — unguarded, may override the above.
+  const hasHeavyCleanSheet =
+    lowScoreDrops.has("1:0") || lowScoreDrops.has("2:0") || highScoreDrops.has("3:0") || highScoreDrops.has("4:0");
+  if (
+    rawFavSide === "H" &&
+    rawFavOdds != null &&
+    rawFavOdds <= 1.55 &&
+    hasFavHandicapSmash &&
+    (hasHeavyCleanSheet || moneyFlow1X2.startsWith("HOME"))
+  ) {
+    matchedCase = {
+      name: "CIENCIANO MODEL (Heavy Fav Handicap Steamroller)",
+      desc: "The home side is a heavy favourite below @1.55 and institutional money has smashed its minus handicaps (-1.0, -1.25, -2.0)! Clean-sheet blowout scores (1:0, 2:0, 3:0) have piled up. The home side wins alone by at least two goals.",
+      ht: "🔥 FIRST HALF HOME PRESSURE (HT 1X / HT Home)",
+      ft: "🚀 HOME HANDICAP STEAMROLLER (2-0 / 3-0 Corridor — Clean Sheet Win)",
+      team: "✅ Home -1.0 / -1.5 Asian Handicap & Home Over 1.5 (BTTS No focus)",
+      profile: "CIENCIANO_HANDICAP_STEAMROLLER",
+    };
+  }
+
+  // VAKA 4.9975: Jaguares Model (Low Baseline Duel) — unguarded, may override the above.
+  // NOTE: ported verbatim from the reference model, including its own quirk — it checks the
+  // *low*-score drop set for scores like "2:3"/"3:3"/"1:4" that can only ever land in the
+  // high-score set, so (as in the reference CLI) this branch is effectively dormant today.
+  const hasDuelScoreDrops = ["2:3", "3:3", "1:4"].some((s) => lowScoreDrops.has(s));
+  if (p25 <= 0.42 && hasDuelScoreDrops) {
+    matchedCase = {
+      name: "JAGUARES MODEL (Low Baseline Duel)",
+      desc: "The baseline is shown as extremely barren (~40%), setting an Under trap, but the correct-score market has backed high-duel scores like 2:3, 3:3, 1:4! The barren display is fake — expect mutual goals in a 2-2 / 1-2 corridor.",
+      ht: "🔥 FIRST HALF GOAL DUEL (HT 0.5 Over & Away Goal)",
+      ft: "💣 BARREN-MASKED GOAL DUEL (1-2 / 2-2 Corridor — BTTS Yes)",
+      team: "✅ BTTS Yes & Double Chance X2 (avoid the 0-0 / 0-1 barren trap)",
+      profile: "JAGUARES_LOW_BASELINE_DUEL",
+    };
+  }
+
+  // VAKA 5: Farul Model (Hidden Fire Infiltration) — falls back into place only if nothing else matched.
+  const EXTREME_SCORES = ["3:3", "4:3", "4:2", "5:2"];
+  const hasExtremeScoreDrop = EXTREME_SCORES.some((s) => highScoreDrops.has(s));
+  if (!matchedCase && hasExtremeScoreDrop && !hasDogHandicapSupport && moneyFlow1X2 === "BALANCED" && p25 < 0.50) {
+    matchedCase = {
+      name: "FARUL MODEL (Hidden Fire Infiltration)",
+      desc: "1X2 is balanced and the line is shown as barren, but money has been staked on extreme scores like 3:3 / 4:3! Off-baseline fire risk.",
+      ht: "🔒 FIRST HALF LOCK (0:0 Risk at Peak)",
+      ft: "💣 HIDDEN FIRE INFILTRATION (3:3 / 4:3 Signal — Off-Baseline Mutual Goals)",
+      team: "✅ BTTS Yes / Over 2.5 as a surprise (the barren display is misleading)",
+      profile: "HIDDEN_FIRE_LEAK",
+    };
+  }
+
+  if (matchedCase) {
+    anomalies.unshift(`🧠 MEMORY MATCH: ${matchedCase.name} -> ${matchedCase.desc}`);
+  }
+
+  // ---------------------------------------------------------------------
+  // 6. Standard Patterns (only kick in when no case-memory match fired)
+  // ---------------------------------------------------------------------
   const isReverseTakeover =
+    !matchedCase &&
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.55 &&
-    rawFavOdds <= 2.45 &&
+    rawFavOdds <= 2.55 &&
     hasDogHandicapSupport &&
     (msADrift <= 0.90 || moneyFlow1X2.startsWith("AWAY")) &&
     ouFlow !== AGGRESSIVE_OVER_FLOW;
 
-  // B. Hidden Fire Infiltration — only considered when Reverse Takeover hasn't fired.
-  const isHiddenFireLeak =
-    !isReverseTakeover && hasExtremeScoreDrop && !hasDogHandicapSupport && moneyFlow1X2 === "BALANCED";
-
-  // C. Low Baseline Trap / Baseline Fav Break
   let isLowBaselineTrap = false;
   let isBaselineFavBreak = false;
-  if (p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38 && !isHiddenFireLeak && !isReverseTakeover) {
+  if (!matchedCase && !isReverseTakeover && p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38) {
     if (
       (rawFavSide === "H" && msHDrift <= 0.85 && hasFavHandicapSmash) ||
       (rawFavSide === "A" && msADrift <= 0.85 && hasFavHandicapSmash)
     ) {
       isBaselineFavBreak = true;
+      anomalies.push(
+        "🎯 PATTERN: BASELINE FAV BREAK: The goal baseline opened thin, but heavy institutional money has hit the favourite (drift below x0.85). First half locked, 2-0 / 2-1 favourite corridor expected."
+      );
     } else {
       isLowBaselineTrap = true;
+      anomalies.push("⚠️ LOW BASELINE TRAP: Goal baseline is thin (Over 2.5 under 48%) and HT tempo is slow. High risk of a barren lock.");
     }
   }
 
-  // D. Phantom Blowout Trap
   const isPhantomBlowout =
+    !matchedCase &&
     rawFavSide === "A" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.35 &&
@@ -455,21 +876,35 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     ouFlow === "STABLE" &&
     !isUnderLeaking &&
     highScoreDropCount >= 4;
+  if (isPhantomBlowout) {
+    anomalies.push(
+      "⚠️ PATTERN: PHANTOM BLOWOUT TRAP: Extreme-margin scorelines are being backed but the Over/Under line hasn't moved at all! Templated favourite balloon — 1-1 / 1-2 upset-corridor risk."
+    );
+  }
 
-  // E. Solo Home Blowout
   const isSoloHomeBlowout =
+    !matchedCase &&
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds <= 1.35 &&
     !hasDogHandicapSupport &&
     isUnderLeaking &&
     ouFlow === AGGRESSIVE_OVER_FLOW;
+  if (isSoloHomeBlowout) {
+    anomalies.push(
+      "🎯 PATTERN: SOLO HOME BLOWOUT: The home favourite is breaking the line alone! Under-leakage and high-scoring correct scores confirm a one-sided goal rush (3+ goals / Home Over 2.5)."
+    );
+  }
 
-  // F. Super Favourite Resistance
-  const isSuperFavTrap = rawFavOdds != null && rawFavOdds <= 1.30 && hasDogHandicapSupport;
+  const isSuperFavTrap = !matchedCase && rawFavOdds != null && rawFavOdds <= 1.30 && hasDogHandicapSupport;
+  if (isSuperFavTrap) {
+    anomalies.push(
+      "🎯 PATTERN: SUPER FAVOURITE RESISTANCE: Favourite looks artificially short, the underdog's handicap line is well supported (1-1 / 2-0 / 2-1 upset risk)."
+    );
+  }
 
-  // G. Away Control Lock
   const isAwayControlLock =
+    !matchedCase &&
     rawFavSide === "A" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.55 &&
@@ -482,11 +917,16 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     sc10 != null &&
     sc10 >= 12.0 &&
     ouFlow !== AGGRESSIVE_OVER_FLOW;
+  if (isAwayControlLock) {
+    anomalies.push(
+      "🎯 PATTERN: AWAY CONTROL LOCK: Away favourite is priced to win by a single goal only. The Over/Under line is misleading — 0-1 / 0-2 corridor!"
+    );
+  }
 
-  // H. Collective Surge / Away Surge Trap
   let isCollectiveSurge = false;
   let isAwaySurgeTrap = false;
   if (
+    !matchedCase &&
     !isAwayControlLock &&
     !isPhantomBlowout &&
     !isReverseTakeover &&
@@ -499,8 +939,14 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   ) {
     if (rawFavSide === "A" && medHtOu05 != null && medHtOu05 >= 1.30) {
       isAwaySurgeTrap = true;
+      anomalies.push(
+        "⚠️ PATTERN: AWAY SURGE TRAP: The line is flowing Over, but the favourite is away and HT tempo is controlled. A 4+ explosion is unlikely — expect a controlled 1-1 / 1-2 contest."
+      );
     } else {
       isCollectiveSurge = true;
+      anomalies.push(
+        "🎯 PATTERN: COLLECTIVE SURGE: 1X2 + HT tempo + Under-leakage + BTTS are all pointing the same direction (3.5 Over threat)."
+      );
     }
   }
 
@@ -509,67 +955,45 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       "🎯 PATTERN: REVERSE MARKET TAKEOVER: The paper favourite is being dumped — sharp money has piled onto the underdog's points and handicap (0-1 / 1-1 / 0-2 corridor)."
     );
   }
-  if (isHiddenFireLeak) {
-    anomalies.push(
-      "💣 PATTERN: HIDDEN FIRE INFILTRATION: 1X2 looks balanced, but money has quietly backed extreme scorelines like 3-3 / 4-3! The barren-lock read is void — surge/upset risk."
-    );
-  }
-  if (isBaselineFavBreak) {
-    anomalies.push(
-      "🎯 PATTERN: BASELINE FAV BREAK: The goal baseline opened thin, but heavy institutional money has hit the favourite (drift below x0.85). First half locked, 2-0 / 2-1 favourite corridor expected."
-    );
-  }
-  if (isLowBaselineTrap) {
-    anomalies.push("⚠️ LOW BASELINE TRAP: Goal baseline is thin (Over 2.5 under 48%) and HT tempo is slow. High risk of a barren lock.");
-  }
-  if (isPhantomBlowout) {
-    anomalies.push(
-      "⚠️ PATTERN: PHANTOM BLOWOUT TRAP: Extreme-margin scorelines are being backed but the Over/Under line hasn't moved at all! Templated favourite balloon — 1-1 / 1-2 upset-corridor risk."
-    );
-  }
-  if (isSoloHomeBlowout) {
-    anomalies.push(
-      "🎯 PATTERN: SOLO HOME BLOWOUT: The home favourite is breaking the line alone! Under-leakage and high-scoring correct scores confirm a one-sided goal rush (3+ goals / Home Over 2.5)."
-    );
-  }
-  if (isSuperFavTrap) {
-    anomalies.push(
-      "🎯 PATTERN: SUPER FAVOURITE RESISTANCE: Favourite looks artificially short, the underdog's handicap line is well supported (1-1 / 2-0 / 2-1 upset risk)."
-    );
-  }
-  if (isAwayControlLock) {
-    anomalies.push(
-      "🎯 PATTERN: AWAY CONTROL LOCK: Away favourite is priced to win by a single goal only. The Over/Under line is misleading — 0-1 / 0-2 corridor!"
-    );
-  }
-  if (isAwaySurgeTrap) {
-    anomalies.push(
-      "⚠️ PATTERN: AWAY SURGE TRAP: The line is flowing Over, but the favourite is away and HT tempo is controlled. A 4+ explosion is unlikely — expect a controlled 1-1 / 1-2 contest."
-    );
-  }
-  if (isCollectiveSurge) {
-    anomalies.push(
-      "🎯 PATTERN: COLLECTIVE SURGE: 1X2 + HT tempo + Under-leakage + BTTS are all pointing the same direction (3.5 Over threat)."
-    );
-  }
 
   // ---------------------------------------------------------------------
-  // 6. Profile Hierarchy (Synthesis of All Edge Cases)
-  //    New patterns take priority; falls back to the original hierarchy.
+  // 7. Profile Hierarchy (Synthesis of All Edge Cases)
+  //    Case-memory matches take priority; falls back to the standard hierarchy.
   // ---------------------------------------------------------------------
   let fairGoalLine = 2.5;
   let scoreProfile: ScoreProfile = "BALANCED";
   let teamGoalVerdict = "⛔ Single-team goal line is risky — prefer the overall total-goals line.";
   const favLabel = rawFavSide === "H" ? "Home" : "Away";
 
-  if (isReverseTakeover) {
+  if (matchedCase) {
+    scoreProfile = matchedCase.profile;
+    teamGoalVerdict = matchedCase.team;
+    const CASE_FAIR_LINES: Partial<Record<ScoreProfile, number>> = {
+      POLONIA_FAKE_DOG_TAKEOVER: 3.25,
+      DROGHEDA_FAKEOUT_SURGE: 2.25,
+      SHELBOURNE_HOLLOW_SURGE_TRAP: 1.75,
+      PISA_SYSTEMIC_FLIP: 3.25,
+      BENEVENTO_HOME_DOG_REVERSE: 2.75,
+      GALWAY_SOLO_AWAY_BLOWOUT: 3.5,
+      CORK_CITY_UNDERDOG_TAKEOVER: 3.0,
+      WEXFORD_SUPER_FAV_BLINDSPOT: 2.75,
+      QADSIAH_FIRE_CLASH: 3.75,
+      AL_AHLI_SOLO_HOME_BLOWOUT: 3.5,
+      RAKOW_HIGH_CEILING_TAKEOVER: 3.0,
+      WISLA_FAKE_COLLECTIVE_SURGE: 1.75,
+      JAZZ_PORI_SUPER_FAKEOUT_BLOWOUT: 3.5,
+      NEPTUNAS_CLEAN_SHEET_SUFFOCATION: 2.25,
+      PUSZCZA_LOW_BASELINE_ANCHOR: 2.25,
+      KERRY_AWAY_LOW_TEMPO_LOCK: 1.75,
+      CIENCIANO_HANDICAP_STEAMROLLER: 2.75,
+      JAGUARES_LOW_BASELINE_DUEL: 3.0,
+      HIDDEN_FIRE_LEAK: 3.25,
+    };
+    fairGoalLine = CASE_FAIR_LINES[matchedCase.profile] ?? 2.5;
+  } else if (isReverseTakeover) {
     fairGoalLine = 2.0;
     scoreProfile = "REVERSE_TAKEOVER";
     teamGoalVerdict = "✅ Double Chance X2 / Away Over 0.5 (stay away from the home side).";
-  } else if (isHiddenFireLeak) {
-    fairGoalLine = 3.0;
-    scoreProfile = "HIDDEN_FIRE_LEAK";
-    teamGoalVerdict = "✅ BTTS / Over 2.5 as a surprise play — the balanced-looking board is masking mutual goals.";
   } else if (isBaselineFavBreak) {
     fairGoalLine = 2.25;
     scoreProfile = "BASELINE_FAV_BREAK";
@@ -603,7 +1027,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     scoreProfile = "COLLECTIVE_SURGE";
     teamGoalVerdict = "✅ Total-goals / BTTS-focused (both sides contribute to the scoreline).";
   }
-  // --- Original hierarchy (unchanged, used when no new pattern fires) ---
+  // --- Original fallback hierarchy (unchanged, used when nothing above fires) ---
   else if (isExtremeDominance && (pOver35 ?? 0) >= 0.50) {
     fairGoalLine = 4.5;
     scoreProfile = "EXTREME_BLOWOUT";
@@ -643,7 +1067,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   }
 
   // ---------------------------------------------------------------------
-  // 7. Clear HT / FT Verdict Texts
+  // 8. Clear HT / FT Verdict Texts
   // ---------------------------------------------------------------------
   let htVerdict = "BALANCED FIRST HALF (0-1 Goal Expectation)";
   if (htVelocity === "HIGH_VELOCITY" || (medHtOu05 != null && medHtOu05 <= 1.30)) {
@@ -653,10 +1077,9 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   }
 
   let ftVerdict = "BALANCED CORRIDOR (2-3 Goal Expectation)";
-  if (scoreProfile === "REVERSE_TAKEOVER") {
-    ftVerdict = "🛡️ REVERSE LIQUIDITY RESISTANCE (0-1 / 1-1 / 0-2 — Away Points, Home Has Collapsed)";
-  } else if (scoreProfile === "HIDDEN_FIRE_LEAK") {
-    ftVerdict = "💣 HIDDEN FIRE INFILTRATION (3-3 / 4-3 Signal — Off-Baseline Mutual Goals)";
+  if (matchedCase) {
+    htVerdict = matchedCase.ht;
+    ftVerdict = matchedCase.ft;
   } else if (scoreProfile === "BASELINE_FAV_BREAK") {
     ftVerdict = "⚖️ CONTROLLED FAVOURITE DOMINANCE (First Half Locked / FT 2-0, 2-1 Corridor)";
   } else if (scoreProfile === "PHANTOM_BLOWOUT") {
@@ -673,6 +1096,8 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     ftVerdict = "⚖️ CONTROLLED MUTUAL CONTEST (1-1 / 1-2 Corridor — 3.5 Over Is Misleading)";
   } else if (scoreProfile === "COLLECTIVE_SURGE") {
     ftVerdict = "💣 ANOMALOUS OPEN FIRE (Mutual Goals & 3.5 Over / 4+ Goal Threat)";
+  } else if (scoreProfile === "REVERSE_TAKEOVER") {
+    ftVerdict = "🛡️ REVERSE LIQUIDITY RESISTANCE (0-1 / 1-1 / 0-2 — Away Points, Home Has Collapsed)";
   } else if (scoreProfile === "LOCKED_CORRIDOR") {
     ftVerdict = "🧊 FAKE OVER TRAP (Dead Market / 0-0 or 1-1 Lock Score Risk)";
   } else if (isUnderLeaking && handicapSmashCount >= 1) {
@@ -688,7 +1113,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   }
 
   // ---------------------------------------------------------------------
-  // 8. Dynamic Score Weighting
+  // 9. Dynamic Score Weighting
   // ---------------------------------------------------------------------
   const getScoreMultiplier = (hG: number, aG: number): number => {
     const totG = hG + aG;
@@ -698,15 +1123,66 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     const rawFavGoals = rawFavSide === "H" ? hG : aG;
     const rawDogGoals = rawFavSide === "H" ? aG : hG;
 
-    // New patterns
+    // --- Case-memory profiles ---
+    if (scoreProfile === "POLONIA_FAKE_DOG_TAKEOVER" || scoreProfile === "CORK_CITY_UNDERDOG_TAKEOVER" || scoreProfile === "WEXFORD_SUPER_FAV_BLINDSPOT") {
+      if (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 4) return 1.6; // 1-2, 2-2, 1-3
+      if (rawDogGoals === 0) return 0.35;
+      return 0.85;
+    }
+    if (scoreProfile === "DROGHEDA_FAKEOUT_SURGE" || scoreProfile === "BENEVENTO_HOME_DOG_REVERSE" || scoreProfile === "RAKOW_HIGH_CEILING_TAKEOVER") {
+      if (rawFavGoals >= 2 && rawDogGoals <= 1 && totG <= 4) return 1.55; // 2-0, 2-1, 3-1
+      if (rawFavGoals === 0) return 0.3;
+      return 0.85;
+    }
+    if (scoreProfile === "SHELBOURNE_HOLLOW_SURGE_TRAP" || scoreProfile === "WISLA_FAKE_COLLECTIVE_SURGE") {
+      if (totG <= 1) return 1.5;
+      if (totG === 2) return 1.15;
+      if (totG === 3) return 0.4;
+      return 0.15;
+    }
+    if (scoreProfile === "PISA_SYSTEMIC_FLIP" || scoreProfile === "QADSIAH_FIRE_CLASH" || scoreProfile === "JAGUARES_LOW_BASELINE_DUEL") {
+      if (hG > 0 && aG > 0 && totG >= 4) return 1.7;
+      if (hG > 0 && aG > 0) return 1.25;
+      return 0.3;
+    }
+    if (scoreProfile === "GALWAY_SOLO_AWAY_BLOWOUT" || scoreProfile === "JAZZ_PORI_SUPER_FAKEOUT_BLOWOUT" || scoreProfile === "AL_AHLI_SOLO_HOME_BLOWOUT" || scoreProfile === "CIENCIANO_HANDICAP_STEAMROLLER") {
+      if (rawFavGoals >= 2 && rawDogGoals === 0) return 1.6;
+      if (rawFavGoals >= 3) return 1.35;
+      if (rawFavGoals === 0) return 0.15;
+      return 0.6;
+    }
+    if (scoreProfile === "NEPTUNAS_CLEAN_SHEET_SUFFOCATION") {
+      if (rawFavGoals >= 2 && rawDogGoals === 0) return 1.55;
+      if (rawDogGoals >= 1) return 0.35;
+      return 0.9;
+    }
+    if (scoreProfile === "PUSZCZA_LOW_BASELINE_ANCHOR") {
+      if (hG === 1 && aG === 1) return 1.5;
+      if ((rawFavGoals === 2 && rawDogGoals <= 1) || (rawFavGoals === 1 && rawDogGoals === 2)) return 1.3;
+      if (totG === 0) return 0.6;
+      if (totG >= 5) return 0.2;
+      return 0.85;
+    }
+    if (scoreProfile === "KERRY_AWAY_LOW_TEMPO_LOCK") {
+      if (rawFavGoals >= 1 && rawDogGoals === 0 && rawFavGoals <= 2) return 1.6; // 0-1, 0-2
+      if (rawFavGoals >= 3) return 0.4;
+      if (hG === aG) return 0.6;
+      return 0.55;
+    }
+    if (scoreProfile === "HIDDEN_FIRE_LEAK") {
+      if (hG > 0 && aG > 0 && totG >= 5) return 1.75; // 3-3, 4-3-style outcomes
+      if (hG > 0 && aG > 0 && totG >= 3) return 1.35;
+      if (totG <= 1) return 0.4;
+      return 0.9;
+    }
+
+    // --- Standard patterns ---
     if (scoreProfile === "PHANTOM_BLOWOUT") {
-      // Templated blowout balloon: real result skews to a narrow dog corridor.
       if (rawDogGoals >= 1 && totG <= 3) return 1.55; // 1-1, 1-2, 2-1
       if (rawFavGoals >= 3) return 0.30;
       return 0.75;
     }
     if (scoreProfile === "REVERSE_TAKEOVER") {
-      // Away side (the "dog" on paper) is favoured by sharp money.
       if (rawDogGoals >= 1 && rawFavGoals === 0) return 1.6; // 0-1, 0-2
       if (hG === aG) return 1.3; // 1-1
       if (rawFavGoals >= 1) return 0.35;
@@ -735,15 +1211,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       if (hG > 0 && aG > 0) return 1.2;
       return 0.3;
     }
-    if (scoreProfile === "HIDDEN_FIRE_LEAK") {
-      // Balanced-looking board masking an extreme mutual-scoring outcome.
-      if (hG > 0 && aG > 0 && totG >= 5) return 1.75; // 3-3, 4-3-style outcomes
-      if (hG > 0 && aG > 0 && totG >= 3) return 1.35;
-      if (totG <= 1) return 0.4;
-      return 0.9;
-    }
     if (scoreProfile === "BASELINE_FAV_BREAK") {
-      // Favourite controls the match behind a locked first half.
       if (rawFavGoals === 2 && rawDogGoals <= 1) return 1.6; // 2-0, 2-1
       if (rawFavGoals >= 3) return 0.7;
       if (rawDogGoals === 0 && rawFavGoals <= 1) return 1.1; // 1-0
