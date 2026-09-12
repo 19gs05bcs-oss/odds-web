@@ -37,6 +37,7 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   KERRY_AWAY_LOW_TEMPO_LOCK: "Kerry (Away Low-Tempo Lock)",
   CIENCIANO_HANDICAP_STEAMROLLER: "Cienciano (Heavy Fav Handicap Steamroller)",
   JAGUARES_LOW_BASELINE_DUEL: "Jaguares (Low Baseline Duel)",
+  ATHLETICO_FAKE_UNDER_STORM: "Athletico (Fake Under Goal Storm)",
   HIDDEN_FIRE_LEAK: "Farul (Hidden Fire Infiltration)",
 };
 
