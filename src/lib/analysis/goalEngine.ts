@@ -934,7 +934,7 @@ export function computeGoalEngine(
 
   let isLowBaselineTrap = false;
   let isBaselineFavBreak = false;
-  if (!matchedCase && !isReverseTakeover && p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38) {
+  if (!matchedCase && !isReverseTakeover && !isUnderLeaking && p25 < 0.48 && medHtOu05 != null && medHtOu05 >= 1.38) {
     const hasStormDrops = ["1:3", "2:3", "3:3", "2:4", "1:4", "0:3"].some((s) => lowScoreDrops.has(s));
     const isFakeUnderStorm =
       (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
