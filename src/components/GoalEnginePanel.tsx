@@ -20,6 +20,9 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   COLLECTIVE_SURGE: "Collective Surge",
   // Case-memory library
   POLONIA_FAKE_DOG_TAKEOVER: "Polonia (Fake Under-Dog Takeover)",
+  POLONIA_CLEAN_DOG_LOCK: "Polonia-Clean (Away Takeover & Clean-Sheet Lock)",
+  BILBAO_HOME_BALLOON_TRAP: "Bilbao (Home Public Balloon Trap)",
+  DINAMO_ZAGREB_AWAY_BALLOON_TRAP: "Dinamo Zagreb (Away Public Balloon Trap)",
   DROGHEDA_FAKEOUT_SURGE: "Drogheda (Fakeout Dog Surge)",
   SHELBOURNE_HOLLOW_SURGE_TRAP: "Shelbourne (Hollow Surge Trap)",
   PISA_SYSTEMIC_FLIP: "Pisa (Systemic Market Flip)",
