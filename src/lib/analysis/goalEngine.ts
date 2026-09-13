@@ -834,7 +834,8 @@ export function computeGoalEngine(
     rawFavOdds != null && rawFavOdds <= 1.80
   );
 
-  const isHighBaselineOpening = (ou25Eff != null && ou25Eff <= 1.55);
+  const ou25Eff = effOf(ou["2.5"].over);
+  const isHighBaselineOpening = ou25Eff != null && ou25Eff <= 1.55;
   const isYouthOrReserve = /u19|u20|u21|u23|reserve|ii|2|w|women|b/i.test(`${homeTeam} ${awayTeam}`);
   const isNonLeagueOrAmateur = /isthmian|southern league|northern premier|national league|trophy|non league|regional|oberliga|landesliga/i.test(
     `${leagueName} ${homeTeam} ${awayTeam}`
