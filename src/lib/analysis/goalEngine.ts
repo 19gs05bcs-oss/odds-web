@@ -46,6 +46,8 @@ export type ScoreProfile =
   | "STATIC_OVER_TRAP"
   | "UNDER_INFLOW_TRAP"
   | "HIGH_TOTAL_LADDER"
+  | "ASYMMETRIC_CHOKE"
+  | "STATIC_RETAIL_BAIT"
   | "SOLO_HOLLOW_TRAP";
 
 export type GoalEngineMetrics = {
@@ -812,22 +814,56 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-  const LADDER_CS = ["4:3", "3:4", "4:2", "5:4", "5:2"];
-  const ladderCsHits = LADDER_CS.filter((s) => highScoreDrops.has(s)).length;
-  
-  const isLadderBaseOk = Boolean(ou45Eff != null && ou45Eff <= 3.20);
-  const hasLadderUnderLeak = Boolean(ou25UnderDrift >= 1.10);
-  const hasLadder55Steam = Boolean(ou55OverDrift <= 0.88);
-  const hasLadderExotic = ladderCsHits >= 1;
+  // --- 3 ANA PİYASA REJİMİ MOTORU ---
+  const isOrganicLadder = Boolean(
+    ou45Eff != null && ou45Eff <= 2.25 &&
+    (medHt00 != null && medHt00 >= 5.00) &&
+    (medBttsYes != null && medBttsYes <= 1.35) &&
+    (ou25UnderDrift >= 1.15 || ou55OverDrift <= 0.88)
+  );
 
-  if (!matchedCase && isLadderBaseOk && (hasLadderUnderLeak || hasLadder55Steam || hasLadderExotic)) {
+  const isAsymmetricChoke = Boolean(
+    !isOrganicLadder &&
+    handicapSmashCount >= 3 &&
+    medBttsYes != null && medBttsYes >= 1.45 &&
+    rawFavOdds != null && rawFavOdds <= 1.80
+  );
+
+  const isStaticRetailBait = Boolean(
+    !isOrganicLadder &&
+    !isAsymmetricChoke &&
+    p25 >= 0.58 &&
+    (ou45Eff == null || ou45Eff >= 2.50) &&
+    (medHt00 != null && medHt00 <= 4.50) &&
+    (!isUnderLeaking || ou25UnderDrift <= 1.02)
+  );
+
+  if (!matchedCase && isOrganicLadder) {
     matchedCase = {
-      name: "HIGH TOTAL LADDER (6+ / HT Over 2.5 family)",
-      desc: "Over 2.5 is already short so it barely moves. The tell is Over 4.5 / 5.5 shortening plus exotic correct scores (4-3, 3-4, 4-2). First-half Over 2.5 can stay long (4.50+) and the match still explodes.",
-      ht: "FIRST HALF OPENING (2-1 / 3-0 / 2-2 corridor — HT Over 2.5 live even if the HT 2.5 price has not collapsed)",
-      ft: "HIGH TOTAL LADDER (6+ goals — 4-3 / 3-4 / 4-2 / 5-1). Play Over 4.5 / 5.5, not Over 2.5.",
-      team: "Over 4.5 / Over 5.5. Do not treat Over 2.5 or BTTS shortening as the trigger.",
+      name: "ORGANIC HIGH TOTAL LADDER (Doğal 5+ Gol Patlaması)",
+      desc: "Doğal barem zaten 4.5+ seviyesinde ve ilk yarı 0-0 ihtimali tamamen silinmiş. 4.5 / 5.5 Üst doğal koridorda.",
+      ht: "🔥 FIRST HALF TEMPO (Erken Gol Yağmuru / HT 0.5 & 1.5 Over)",
+      ft: "🎯 ORGANIC HIGH TOTAL LADDER (4.5 / 5.5 Üst Diri — 5+ Gol Beklentisi)",
+      team: "✅ 4.5 / 5.5 Üst Doğal Koridor (İki takım da yüksek tempoda)",
       profile: "HIGH_TOTAL_LADDER",
+    };
+  } else if (!matchedCase && isAsymmetricChoke) {
+    matchedCase = {
+      name: "ASYMMETRIC CHOKE TRAP (Heerenveen/PSG Asimetrik Boğma Modeli)",
+      desc: "Favori handikapı çöktü ancak deplasman katkısı piyasadan silinmiş. Favori tek başına açamazsa 0-0, 1-0 kilit riski!",
+      ht: "BALANCED FIRST HALF (0-0 / 1-0 Single-Team Domination)",
+      ft: "⚠️ ASYMMETRIC CHOKE TRAP (Rakip Yok / Kısır Kilit Tehdidi)",
+      team: "⛔ AVOID FULL TIME GENERAL OVER (Deplasman katkısı sıfırlandı; Sadece Favori Galibiyeti)",
+      profile: "ASYMMETRIC_CHOKE",
+    };
+  } else if (!matchedCase && isStaticRetailBait) {
+    matchedCase = {
+      name: "STATIC RETAIL BAIT (Tijuana/Volendam Şablon Vitrin Tuzağı)",
+      desc: "Barem açılışta yüksek şablonla sunulmuş fakat ilk yarı 0-0 diri tutuluyor ve piyasa akışı yok. 0-2 gol riski tavan!",
+      ht: "🔒 FIRST HALF HARD LOCK (0:0 Risk at Peak / Static Bait)",
+      ft: "🧊 STATIC RETAIL BAIT (Doğal Taban Düşük / Sahte 2.5 Üst — 0-2 Gol Riski)",
+      team: "❌ 2.5 Üst ve KG Var Oynanmaz (Statik vitrin, kurumsal akış yok)",
+      profile: "STATIC_RETAIL_BAIT",
     };
   }
 
@@ -1072,6 +1108,8 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       JAGUARES_LOW_BASELINE_DUEL: 3.0,
       ATHLETICO_FAKE_UNDER_STORM: 3.25,
       HIGH_TOTAL_LADDER: 5.5,
+      ASYMMETRIC_CHOKE: 1.75,
+      STATIC_RETAIL_BAIT: 1.75,
       HIDDEN_FIRE_LEAK: 3.25,
       SOLO_HOLLOW_TRAP: 1.75,
     };
@@ -1235,7 +1273,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
 
   const getScoreMultiplier = (hG: number, aG: number): number => {
     const totG = hG + aG;
-    const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
+    if (scoreProfile === "ASYMMETRIC_CHOKE" || scoreProfile === "STATIC_RETAIL_BAIT") {
+      if (totG === 0) return 1.65;
+      if (totG <= 2) return 1.45;
+      if (totG >= 4) return 0.20;
+      return 0.80;
+    }
+        const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
     const favGoals = dominanceSide === "HOME" ? hG : aG;
     const dogGoals = dominanceSide === "HOME" ? aG : hG;
     const rawFavGoals = rawFavSide === "H" ? hG : aG;
@@ -1281,7 +1325,9 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       if (totG === 3) return 0.4;
       return 0.15;
     }
-    if (scoreProfile === "HIGH_TOTAL_LADDER") {
+    if (scoreProfile === "HIGH_TOTAL_LADDER"
+  | "ASYMMETRIC_CHOKE"
+  | "STATIC_RETAIL_BAIT") {
       if (totG >= 6) return 1.7;
       if (totG >= 5) return 1.35;
       if (totG <= 2) return 0.2;
