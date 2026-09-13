@@ -49,6 +49,7 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   STATIC_OVER_TRAP: "Tijuana Model (Static Retail Bait)",
   UNDER_INFLOW_TRAP: "Under Inflow Trap (Bochum / Necaxa Model)",
   HIGH_TOTAL_LADDER: "High Total Ladder (6+ / HT Over 2.5 family)",
+  SOLO_HOLLOW_TRAP: "Heerenveen (Asymmetric Hollow Solo Surge Trap)",
 };
 
 export function GoalEnginePanel({
