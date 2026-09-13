@@ -45,7 +45,8 @@ export type ScoreProfile =
   | "FAKE_HOME_PUSZCZA"
   | "REAL_POTOSI_TEMPO"
   | "STATIC_OVER_TRAP"
-  | "UNDER_INFLOW_TRAP";
+  | "UNDER_INFLOW_TRAP"
+  | "HIGH_TOTAL_LADDER";
 
 export type GoalEngineMetrics = {
   dominanceSide: "HOME" | "AWAY" | "NONE";
@@ -60,6 +61,7 @@ export type GoalEngineMetrics = {
   pOver25: number;
   pOver35: number | null;
   pOver45: number | null;
+  pOver55: number | null;
   isUnderLeaking: boolean;
   isFalseOpen: boolean;
   handicapSmashCount: number;
@@ -148,7 +150,7 @@ function driftOf(p: PricePool): number {
   return 1.0;
 }
 
-const OU_LINES = ["1.5", "2.5", "3.5", "4.5"] as const;
+const OU_LINES = ["1.5", "2.5", "3.5", "4.5", "5.5"] as const;
 type OuLine = (typeof OU_LINES)[number];
 
 const LOW_SCORES = new Set(["0:0", "1:0", "0:1", "1:1", "0:2", "2:0"]);
@@ -168,6 +170,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     "2.5": { over: newPool(), under: newPool() },
     "3.5": { over: newPool(), under: newPool() },
     "4.5": { over: newPool(), under: newPool() },
+    "5.5": { over: newPool(), under: newPool() },
   };
 
   const btts: Record<"YES" | "NO", PricePool> = { YES: newPool(), NO: newPool() };
@@ -310,6 +313,11 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   const pOver25 = calcP("2.5") ?? 0.5;
   const pOver35 = calcP("3.5");
   const pOver45 = calcP("4.5");
+  const pOver55 = calcP("5.5");
+  const ou45OverDrift = driftOf(ou["4.5"].over);
+  const ou55OverDrift = driftOf(ou["5.5"].over);
+  const ou45Eff = effOf(ou["4.5"].over);
+  const ou55Eff = effOf(ou["5.5"].over);
 
   const anomalies: string[] = [];
 
@@ -327,7 +335,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
 
   const isUnderInflow = (ou25OverDrift >= 1.04) || (ou25UnderDrift <= 0.94);
   if (isUnderInflow && pOver25 >= 0.50) {
-    anomalies.push(`⚠️ UNDER INFLOW: Vitrin üst gösteriyor ama 2.5 Alt fonlanıyor, Üst terk ediliyor (Alt: x${ou25UnderDrift.toFixed(2)}, Üst: x${ou25OverDrift.toFixed(2)})!`);
+    anomalies.push(`UNDER INFLOW: The board still shows Over, but 2.5 Under is being funded and Over is being abandoned (Under x${ou25UnderDrift.toFixed(2)}, Over x${ou25OverDrift.toFixed(2)}).`);
   }
 
   const msHDrift = driftOf(ms.H);
@@ -804,6 +812,24 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
+
+  const LADDER_CS = ["4:3", "3:4", "4:2", "5:4", "5:2"];
+  const ladderCsHits = LADDER_CS.filter((s) => highScoreDrops.has(s)).length;
+  const ladderFlags =
+    Number(ou45OverDrift <= 0.92 || (ou45Eff != null && ou45Eff <= 4.0)) +
+    Number(ou55OverDrift <= 0.90) +
+    Number(ladderCsHits >= 1);
+  if (!matchedCase && ladderFlags >= 2) {
+    matchedCase = {
+      name: "HIGH TOTAL LADDER (6+ / HT Over 2.5 family)",
+      desc: "Over 2.5 is already short so it barely moves. The tell is Over 4.5 / 5.5 shortening plus exotic correct scores (4-3, 3-4, 4-2). First-half Over 2.5 can stay long (4.50+) and the match still explodes.",
+      ht: "FIRST HALF OPENING (2-1 / 3-0 / 2-2 corridor — HT Over 2.5 live even if the HT 2.5 price has not collapsed)",
+      ft: "HIGH TOTAL LADDER (6+ goals — 4-3 / 3-4 / 4-2 / 5-1). Play Over 4.5 / 5.5, not Over 2.5.",
+      team: "Over 4.5 / Over 5.5. Do not treat Over 2.5 or BTTS shortening as the trigger.",
+      profile: "HIGH_TOTAL_LADDER",
+    };
+  }
+
   const EXTREME_SCORES = ["3:3", "4:3", "4:2", "5:2"];
   const hasExtremeScoreDrop = EXTREME_SCORES.some((s) => highScoreDrops.has(s));
   if (!matchedCase && hasExtremeScoreDrop && !hasDogHandicapSupport && moneyFlow1X2 === "BALANCED" && p25 < 0.50) {
@@ -1022,6 +1048,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       CIENCIANO_HANDICAP_STEAMROLLER: 2.75,
       JAGUARES_LOW_BASELINE_DUEL: 3.0,
       ATHLETICO_FAKE_UNDER_STORM: 3.25,
+      HIGH_TOTAL_LADDER: 5.5,
       HIDDEN_FIRE_LEAK: 3.25,
     };
     fairGoalLine = CASE_FAIR_LINES[matchedCase.profile] ?? 2.5;
@@ -1032,7 +1059,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   } else if (isFakeHomePuszcza) {
     fairGoalLine = 1.75;
     scoreProfile = "FAKE_HOME_PUSZCZA";
-    teamGoalVerdict = "✅ Double Chance X2 & 2-3 Gol Aralığı (Ev sahibi 1.5 Üst tuzağına düşme)";
+    teamGoalVerdict = "✅ Double Chance X2 and a 2-3 goal corridor (do not back Home Over 1.5).";
   } else if (isUnderInflowTrap) {
     fairGoalLine = 2.0;
     scoreProfile = "UNDER_INFLOW_TRAP";
@@ -1040,11 +1067,11 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   } else if (isPotosiModel) {
     fairGoalLine = 3.0;
     scoreProfile = "REAL_POTOSI_TEMPO";
-    teamGoalVerdict = "✅ Favori Galibiyeti & Favori 1.5/2.0 Üst";
+    teamGoalVerdict = "✅ Favourite to win and Favourite Over 1.5 / 2.0.";
   } else if (isStaticOverTrap) {
     fairGoalLine = 1.75;
     scoreProfile = "STATIC_OVER_TRAP";
-    teamGoalVerdict = "❌ Over 2.5 ve BTTS Yes oynanmaz (Kurumsal akışsız sahte vitrin)";
+    teamGoalVerdict = "❌ Do not back Over 2.5 or BTTS Yes (static retail board, no institutional flow).";
   } else if (isReverseTakeover) {
     fairGoalLine = 2.0;
     scoreProfile = "REVERSE_TAKEOVER";
@@ -1121,7 +1148,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
 
   let htVerdict = "BALANCED FIRST HALF (0-1 Goal Expectation)";
   if ((pOver25 < 0.48) && (medHtOu05 != null && medHtOu05 <= 1.42) && (medHt00 != null && medHt00 >= 2.60)) {
-    htVerdict = "⚡ İLK YARI ERKEN DARBE (Zeledon Modeli: HT 0.5 & 1.5 Üst Canlı / Erken Goller Sonrası Maç Kilitlenir!)";
+    htVerdict = "Early first-half strike (Zeledon: HT Over 0.5 / 1.5 live, then the match locks).";
   } else if (htVelocity === "HIGH_VELOCITY" || (medHtOu05 != null && medHtOu05 <= 1.30)) {
     htVerdict = "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 & 1.5 Over Potential)";
   } else if (htVelocity === "HARD_LOCK" || (isFalseOpen && (medHtOu05 == null || medHtOu05 >= 1.35))) {
@@ -1133,15 +1160,15 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     htVerdict = matchedCase.ht;
     ftVerdict = matchedCase.ft;
   } else if (scoreProfile === "UNDERDOG_MIRAGE") {
-    ftVerdict = "🚀 DEPLASMAN FAVORİ DARBESİ (Pachuca / Vålerenga Modeli - Deplasman 2+ Fark & Üst Riski)";
+    ftVerdict = "Away favourite strike (Pachuca / Valerenga — away wins by 2+ and Over is live).";
   } else if (scoreProfile === "FAKE_HOME_PUSZCZA") {
-    ftVerdict = "🛡️ YALANCI EV SAHİBİ TUZAĞI (Zeledon Modeli: Kısır Baremde Sahte 1X2 Akışı / Deplasman Çifte Şans X2 & 0-1, 0-2 Skoru Canlı)";
+    ftVerdict = "Fake home trap (Zeledon: barren line with fake 1X2 flow — Double Chance X2, 0-1 / 0-2 live).";
   } else if (scoreProfile === "UNDER_INFLOW_TRAP") {
-    ftVerdict = "🧊 VİTRİN ÜST İLLÜZYONU (Bochum Modeli - Para Kısırlığa Akmış / 0-1, 1-0, 1-1 Kilit Riski!)";
+    ftVerdict = "Display Over illusion (Bochum — money has gone to the Under; 0-1 / 1-0 / 1-1 lock risk).";
   } else if (scoreProfile === "REAL_POTOSI_TEMPO") {
-    ftVerdict = "🔥 FAVORİ TEMPOSU & DOĞAL BAREM (Real Potosi Modeli - Vitrin Tuzağı Değil / Favori Galibiyeti & 2-1, 3-1, 2-0 Koridoru)";
+    ftVerdict = "Favourite tempo and natural line (Real Potosi — not a display trap; favourite win, 2-1 / 3-1 / 2-0).";
   } else if (scoreProfile === "STATIC_OVER_TRAP") {
-    ftVerdict = "🧊 STATİK VİTRİN TUZAĞI (Tijuana Modeli - Kurumsal Akışsız Sahte Yüksek Barem / 0-1, 1-0 Kilit Riski!)";
+    ftVerdict = "Static display trap (Tijuana — high line with no institutional flow; 0-1 / 1-0 lock risk).";
   } else if (scoreProfile === "BASELINE_FAV_BREAK") {
     ftVerdict = "⚖️ CONTROLLED FAVOURITE DOMINANCE (First Half Locked / FT 2-0, 2-1 Corridor)";
   } else if (scoreProfile === "PHANTOM_BLOWOUT") {
@@ -1212,6 +1239,12 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       if (totG === 2) return 1.15;
       if (totG === 3) return 0.4;
       return 0.15;
+    }
+    if (scoreProfile === "HIGH_TOTAL_LADDER") {
+      if (totG >= 6) return 1.7;
+      if (totG >= 5) return 1.35;
+      if (totG <= 2) return 0.2;
+      return 0.7;
     }
     if (scoreProfile === "PISA_SYSTEMIC_FLIP" || scoreProfile === "QADSIAH_FIRE_CLASH" || scoreProfile === "JAGUARES_LOW_BASELINE_DUEL" || scoreProfile === "ATHLETICO_FAKE_UNDER_STORM") {
       if (hG > 0 && aG > 0 && totG >= 4) return 1.7;
@@ -1386,6 +1419,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     pOver25: Math.round(pOver25 * 1000) / 10,
     pOver35: pOver35 ? Math.round(pOver35 * 1000) / 10 : null,
     pOver45: pOver45 ? Math.round(pOver45 * 1000) / 10 : null,
+    pOver55: pOver55 ? Math.round(pOver55 * 1000) / 10 : null,
     isUnderLeaking,
     isFalseOpen,
     handicapSmashCount,
