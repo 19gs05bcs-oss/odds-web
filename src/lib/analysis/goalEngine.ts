@@ -814,11 +814,13 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
 
   const LADDER_CS = ["4:3", "3:4", "4:2", "5:4", "5:2"];
   const ladderCsHits = LADDER_CS.filter((s) => highScoreDrops.has(s)).length;
-  const ladderFlags =
-    Number(ou45OverDrift <= 0.92 || (ou45Eff != null && ou45Eff <= 4.0)) +
-    Number(ou55OverDrift <= 0.90) +
-    Number(ladderCsHits >= 1);
-  if (!matchedCase && ladderFlags >= 2) {
+  
+  const isLadderBaseOk = Boolean(ou45Eff != null && ou45Eff <= 3.20);
+  const hasLadderUnderLeak = Boolean(ou25UnderDrift >= 1.10);
+  const hasLadder55Steam = Boolean(ou55OverDrift <= 0.88);
+  const hasLadderExotic = ladderCsHits >= 1;
+
+  if (!matchedCase && isLadderBaseOk && (hasLadderUnderLeak || hasLadder55Steam || hasLadderExotic)) {
     matchedCase = {
       name: "HIGH TOTAL LADDER (6+ / HT Over 2.5 family)",
       desc: "Over 2.5 is already short so it barely moves. The tell is Over 4.5 / 5.5 shortening plus exotic correct scores (4-3, 3-4, 4-2). First-half Over 2.5 can stay long (4.50+) and the match still explodes.",
