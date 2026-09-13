@@ -40,13 +40,13 @@ export type ScoreProfile =
   | "CIENCIANO_HANDICAP_STEAMROLLER"
   | "JAGUARES_LOW_BASELINE_DUEL"
   | "ATHLETICO_FAKE_UNDER_STORM"
-  | "HIDDEN_FIRE_LEAK"
   | "UNDERDOG_MIRAGE"
   | "FAKE_HOME_PUSZCZA"
   | "REAL_POTOSI_TEMPO"
   | "STATIC_OVER_TRAP"
   | "UNDER_INFLOW_TRAP"
-  | "HIGH_TOTAL_LADDER";
+  | "HIGH_TOTAL_LADDER"
+  | "SOLO_HOLLOW_TRAP";
 
 export type GoalEngineMetrics = {
   dominanceSide: "HOME" | "AWAY" | "NONE";
@@ -812,7 +812,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     };
   }
 
-
   const LADDER_CS = ["4:3", "3:4", "4:2", "5:4", "5:2"];
   const ladderCsHits = LADDER_CS.filter((s) => highScoreDrops.has(s)).length;
   const ladderFlags =
@@ -840,6 +839,29 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       ft: "💣 HIDDEN FIRE INFILTRATION (3:3 / 4:3 Signal — Off-Baseline Mutual Goals)",
       team: "✅ BTTS Yes / Over 2.5 as a surprise (the barren display is misleading)",
       profile: "HIDDEN_FIRE_LEAK",
+    };
+  }
+
+  // --- VAKA: SOLO HOLLOW TRAP (Heerenveen Asymmetric Model) ---
+  const isSoloHollowTrap = Boolean(
+    !matchedCase &&
+    rawFavSide === "H" &&
+    p25 >= 0.62 &&
+    (isUnderLeaking || hasFavHandicapSmash) &&
+    bttsDrift >= 0.97 &&
+    !hasDogHandicapSupport &&
+    (sc01 == null || sc01 >= 14.0) &&
+    (sc02 == null || sc02 >= 20.0)
+  );
+
+  if (isSoloHollowTrap) {
+    matchedCase = {
+      name: "HEERENVEEN MODEL (Asymmetric Hollow Solo Surge Trap)",
+      desc: "Total Over line looks heavily backed and favorite handicap collapsed, but the opponent's attacking output is completely dead in the market! High risk of an asymmetric 0-0 or 1-0 lock if the favorite struggles.",
+      ht: "BALANCED FIRST HALF (0-0 / 1-0 Single-Team Domination)",
+      ft: "⚠️ ASYMMETRIC ONE-SIDED PRESSURE (Hollow Over Trap / 0-0 Lock Threat If Unconverted)",
+      team: "⛔ AVOID FULL TIME GENERAL OVER (Opponent contribution dead; Home Win / Home Solo Over 1.5 only)",
+      profile: "SOLO_HOLLOW_TRAP",
     };
   }
 
@@ -985,7 +1007,6 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   let teamGoalVerdict = "⛔ Single-team goal line is risky — prefer the overall total-goals line.";
   const favLabel = rawFavSide === "H" ? "Home" : "Away";
 
-  // --- CLI YENİ ANOMALİ VAKALARI ---
   const isFakeHomePuszcza = (
     p25 < 0.48 &&
     (medH != null && medH >= 2.15) &&
@@ -1050,6 +1071,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
       ATHLETICO_FAKE_UNDER_STORM: 3.25,
       HIGH_TOTAL_LADDER: 5.5,
       HIDDEN_FIRE_LEAK: 3.25,
+      SOLO_HOLLOW_TRAP: 1.75,
     };
     fairGoalLine = CASE_FAIR_LINES[matchedCase.profile] ?? 2.5;
   } else if (isUnderdogMirage) {
@@ -1208,6 +1230,15 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     const dogGoals = dominanceSide === "HOME" ? aG : hG;
     const rawFavGoals = rawFavSide === "H" ? hG : aG;
     const rawDogGoals = rawFavSide === "H" ? aG : hG;
+
+    if (scoreProfile === "SOLO_HOLLOW_TRAP") {
+      if (totG === 0) return 1.65;
+      if (rawFavGoals === 1 && rawDogGoals === 0) return 1.5;
+      if (rawFavGoals === 2 && rawDogGoals === 0) return 1.35;
+      if (rawDogGoals >= 1) return 0.25;
+      if (totG >= 4) return 0.2;
+      return 0.75;
+    }
 
     if (
       scoreProfile === "POLONIA_FAKE_DOG_TAKEOVER" ||
