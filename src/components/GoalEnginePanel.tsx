@@ -48,6 +48,7 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   REAL_POTOSI_TEMPO: "Real Potosi (Heavy Fav Natural Baseline)",
   STATIC_OVER_TRAP: "Tijuana Model (Static Retail Bait)",
   UNDER_INFLOW_TRAP: "Under Inflow Trap (Bochum / Necaxa Model)",
+  HIGH_TOTAL_LADDER: "High Total Ladder (6+ / HT Over 2.5 family)",
 };
 
 export function GoalEnginePanel({
@@ -76,6 +77,8 @@ export function GoalEnginePanel({
     htZeroZeroOdd,
     pOver25,
     pOver35,
+    pOver45,
+    pOver55,
     fairGoalLine,
     bttsExpectancy,
     scoreProfile,
@@ -180,6 +183,14 @@ export function GoalEnginePanel({
         <div className={styles.geStat}>
           <span className={styles.geStatLabel}>Over 3.5 Probability</span>
           <span className={styles.geStatValue}>{pOver35 != null ? `${pOver35}%` : "—"}</span>
+        </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>Over 4.5 Probability</span>
+          <span className={styles.geStatValue}>{pOver45 != null ? `${pOver45}%` : "—"}</span>
+        </div>
+        <div className={styles.geStat}>
+          <span className={styles.geStatLabel}>Over 5.5 Probability</span>
+          <span className={styles.geStatValue}>{pOver55 != null ? `${pOver55}%` : "—"}</span>
         </div>
         <div className={styles.geStat}>
           <span className={styles.geStatLabel}>1X2 Money Flow</span>
