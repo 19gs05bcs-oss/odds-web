@@ -157,7 +157,12 @@ type OuLine = (typeof OU_LINES)[number];
 
 const LOW_SCORES = new Set(["0:0", "1:0", "0:1", "1:1", "0:2", "2:0"]);
 
-export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): GoalEngineMetrics | null {
+export function computeGoalEngine(
+  odds: CompactOddsRow[] | null | undefined,
+  homeTeam = "",
+  awayTeam = "",
+  leagueName = ""
+): GoalEngineMetrics | null {
   if (!odds?.length) return null;
 
   const ms: Record<"H" | "D" | "A", PricePool> = { H: newPool(), D: newPool(), A: newPool() };
@@ -830,6 +835,10 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   );
 
   const isHighBaselineOpening = (ou25Eff != null && ou25Eff <= 1.55);
+  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
+  const isNonLeagueOrAmateur = /isthmian|southern league|northern premier|national league|trophy|non league|regional|oberliga|landesliga/i.test(
+    `${leagueName} ${homeTeam} ${awayTeam}`
+  );
   const isYouthOrReserve = /u19|u20|u21|u23|reserve|ii|2|w|women|b/i.test(`${homeTeam} ${awayTeam}`);
 
   const isStaticRetailBait = Boolean(
@@ -1264,7 +1273,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     ftVerdict = "🛡️ REVERSE LIQUIDITY RESISTANCE (0-1 / 1-1 / 0-2 — Away Points, Home Has Collapsed)";
   } else if (scoreProfile === "LOCKED_CORRIDOR") {
     ftVerdict = "🧊 FAKE OVER TRAP (Dead Market / 0-0 or 1-1 Lock Score Risk)";
-  } else if (isUnderLeaking && handicapSmashCount >= 1) {
+  } else if (!matchedCase && isUnderLeaking && handicapSmashCount >= 1) {
     ftVerdict = "💣 ANOMALOUS OVER EXPLOSION (Even If Lines Look Low, The Match Will Explode to 3+ / 4+ Goals!)";
   } else if (scoreProfile === "OPEN_EXCHANGE") {
     ftVerdict = "💣 FULL-TIME GOAL RUSH (Mutual Exchange & 3+ / 4+ Goals)";
