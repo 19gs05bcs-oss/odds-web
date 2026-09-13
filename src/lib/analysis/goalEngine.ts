@@ -325,6 +325,7 @@ export function computeGoalEngine(
   const ou55OverDrift = driftOf(ou["5.5"].over);
   const ou45Eff = effOf(ou["4.5"].over);
   const ou55Eff = effOf(ou["5.5"].over);
+  const ou25Eff = effOf(ou["2.5"].over);
 
   const anomalies: string[] = [];
 
@@ -834,9 +835,8 @@ export function computeGoalEngine(
     rawFavOdds != null && rawFavOdds <= 1.80
   );
 
-  const ou25Eff = effOf(ou["2.5"].over);
   const isHighBaselineOpening = ou25Eff != null && ou25Eff <= 1.55;
-  const isYouthOrReserve = /u19|u20|u21|u23|reserve|ii|2|w|women|b/i.test(`${homeTeam} ${awayTeam}`);
+  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
   const isNonLeagueOrAmateur = /isthmian|southern league|northern premier|national league|trophy|non league|regional|oberliga|landesliga/i.test(
     `${leagueName} ${homeTeam} ${awayTeam}`
   );
@@ -846,6 +846,7 @@ export function computeGoalEngine(
     !isAsymmetricChoke &&
     !isHighBaselineOpening &&
     !isYouthOrReserve &&
+    !isNonLeagueOrAmateur &&
     p25 >= 0.58 &&
     (ou45Eff == null || ou45Eff >= 2.50) &&
     (medHt00 != null && medHt00 <= 4.50) &&
@@ -1293,7 +1294,8 @@ export function computeGoalEngine(
       if (totG >= 4) return 0.20;
       return 0.80;
     }
-        const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
+
+    const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
     const favGoals = dominanceSide === "HOME" ? hG : aG;
     const dogGoals = dominanceSide === "HOME" ? aG : hG;
     const rawFavGoals = rawFavSide === "H" ? hG : aG;
@@ -1339,20 +1341,28 @@ export function computeGoalEngine(
       if (totG === 3) return 0.4;
       return 0.15;
     }
-    if (scoreProfile === "HIGH_TOTAL_LADDER"
-  | "ASYMMETRIC_CHOKE"
-  | "STATIC_RETAIL_BAIT") {
+    if (scoreProfile === "HIGH_TOTAL_LADDER") {
       if (totG >= 6) return 1.7;
       if (totG >= 5) return 1.35;
       if (totG <= 2) return 0.2;
       return 0.7;
     }
-    if (scoreProfile === "PISA_SYSTEMIC_FLIP" || scoreProfile === "QADSIAH_FIRE_CLASH" || scoreProfile === "JAGUARES_LOW_BASELINE_DUEL" || scoreProfile === "ATHLETICO_FAKE_UNDER_STORM") {
+    if (
+      scoreProfile === "PISA_SYSTEMIC_FLIP" ||
+      scoreProfile === "QADSIAH_FIRE_CLASH" ||
+      scoreProfile === "JAGUARES_LOW_BASELINE_DUEL" ||
+      scoreProfile === "ATHLETICO_FAKE_UNDER_STORM"
+    ) {
       if (hG > 0 && aG > 0 && totG >= 4) return 1.7;
       if (hG > 0 && aG > 0) return 1.25;
       return 0.3;
     }
-    if (scoreProfile === "GALWAY_SOLO_AWAY_BLOWOUT" || scoreProfile === "JAZZ_PORI_SUPER_FAKEOUT_BLOWOUT" || scoreProfile === "AL_AHLI_SOLO_HOME_BLOWOUT" || scoreProfile === "CIENCIANO_HANDICAP_STEAMROLLER") {
+    if (
+      scoreProfile === "GALWAY_SOLO_AWAY_BLOWOUT" ||
+      scoreProfile === "JAZZ_PORI_SUPER_FAKEOUT_BLOWOUT" ||
+      scoreProfile === "AL_AHLI_SOLO_HOME_BLOWOUT" ||
+      scoreProfile === "CIENCIANO_HANDICAP_STEAMROLLER"
+    ) {
       if (rawFavGoals >= 2 && rawDogGoals === 0) return 1.6;
       if (rawFavGoals >= 3) return 1.35;
       if (rawFavGoals === 0) return 0.15;
