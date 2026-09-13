@@ -52,6 +52,8 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   SOLO_HOLLOW_TRAP: "Heerenveen (Asymmetric Hollow Solo Surge Trap)",
   ASYMMETRIC_CHOKE: "Asymmetric Choke Trap",
   STATIC_RETAIL_BAIT: "Static Retail Bait",
+  ELITE_BLOWOUT: "Elite Blowout",
+  ASYMMETRIC_BARREN_TRAP: "Asymmetric Barren Trap",
 };
 
 export function GoalEnginePanel({

@@ -48,7 +48,9 @@ export type ScoreProfile =
   | "HIGH_TOTAL_LADDER"
   | "ASYMMETRIC_CHOKE"
   | "STATIC_RETAIL_BAIT"
-  | "SOLO_HOLLOW_TRAP";
+  | "SOLO_HOLLOW_TRAP"
+  | "ELITE_BLOWOUT"
+  | "ASYMMETRIC_BARREN_TRAP";
 
 export type GoalEngineMetrics = {
   dominanceSide: "HOME" | "AWAY" | "NONE";
@@ -820,6 +822,43 @@ export function computeGoalEngine(
     };
   }
 
+    // --- HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI ---
+  const isTrueEliteBlowout = Boolean(
+    rawFavOdds != null && rawFavOdds <= 1.45 &&
+    ou35Eff != null && ou35Eff <= 2.05 &&
+    medHt00 != null && medHt00 >= 3.80 &&
+    (ou25UnderDrift >= 1.05 || (ou45Eff != null && ou45Eff <= 2.80))
+  );
+
+  const isAsymmetricBarrenTrap = Boolean(
+    !isTrueEliteBlowout &&
+    rawFavOdds != null && rawFavOdds <= 1.45 &&
+    ou25Eff != null && ou25Eff <= 1.55 &&
+    medBttsYes != null && medBttsYes >= 1.72 &&
+    (ou35Eff == null || ou35Eff >= 2.10) &&
+    (medHt00 != null && medHt00 <= 3.80)
+  );
+
+  if (!matchedCase && isTrueEliteBlowout) {
+    matchedCase = {
+      name: "ELITE BLOWOUT (Feyenoord / Barcelona Hegemonya Patlaması)",
+      desc: "Ağır favorinin 3.5 Üst baremi diri (@2.05 altı) ve ilk yarı 0-0 barajı tamamen yıkılmış. Tek taraflı 4+ / 5+ gol fırtınası.",
+      ht: "🔥 FIRST HALF TEMPO (Erken Gol Yağmuru / HT 0.5 & 1.5 Over)",
+      ft: "🚀 ELITE BLOWOUT (3.5 Üst & 4+ Gol Beklentisi / Favori Yıkımı)",
+      team: "✅ Favori Kazanır & Favori Üst Baremleri (3.5 Üst / Handikap)",
+      profile: "ELITE_BLOWOUT",
+    };
+  } else if (!matchedCase && isAsymmetricBarrenTrap) {
+    matchedCase = {
+      name: "ASYMMETRIC BARREN TRAP (Hammarby / Genk W Sahte Vitrin Tuzağı)",
+      desc: "Favori ve 2.5 Üst vitrinde çok düşük fakat rakibin gol katkısı piyasadan tamamen silinmiş (KG Var @1.72+). 3.5 baremi boşlukta, 1-0 / 2-0 kilit riski!",
+      ht: "🔒 FIRST HALF CONTROL (0-0 / 1-0 Kilit)",
+      ft: "🛡️ ASYMMETRIC BARREN LOCK (Maksimum 1-2 Gol / 1-0, 2-0 Koridoru)",
+      team: "⛔ GENEL ÜST OYNANMAZ (Deplasman katkısı yok; Sadece Favori Tek Fark / 2.5-3.5 Alt)",
+      profile: "ASYMMETRIC_BARREN_TRAP",
+    };
+  }
+
   // --- 3 ANA PİYASA REJİMİ MOTORU ---
   const isOrganicLadder = Boolean(
     ou45Eff != null && ou45Eff <= 2.25 &&
@@ -1123,6 +1162,8 @@ export function computeGoalEngine(
       JAGUARES_LOW_BASELINE_DUEL: 3.0,
       ATHLETICO_FAKE_UNDER_STORM: 3.25,
       HIGH_TOTAL_LADDER: 5.5,
+      ELITE_BLOWOUT: 4.25,
+      ASYMMETRIC_BARREN_TRAP: 1.75,
       ASYMMETRIC_CHOKE: 1.75,
       STATIC_RETAIL_BAIT: 1.75,
       HIDDEN_FIRE_LEAK: 3.25,
@@ -1288,6 +1329,18 @@ export function computeGoalEngine(
 
   const getScoreMultiplier = (hG: number, aG: number): number => {
     const totG = hG + aG;
+    if (scoreProfile === "ELITE_BLOWOUT") {
+      if (totG >= 5) return 1.80;
+      if (totG >= 4) return 1.45;
+      if (totG <= 2) return 0.20;
+      return 0.85;
+    }
+    if (scoreProfile === "ASYMMETRIC_BARREN_TRAP") {
+      if (totG <= 2 && rawFavGoals >= 1) return 1.65;
+      if (totG === 0) return 1.40;
+      if (totG >= 3) return 0.25;
+      return 0.80;
+    }
     if (scoreProfile === "ASYMMETRIC_CHOKE" || scoreProfile === "STATIC_RETAIL_BAIT") {
       if (totG === 0) return 1.65;
       if (totG <= 2) return 1.45;
