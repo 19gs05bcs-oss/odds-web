@@ -835,11 +835,10 @@ export function computeGoalEngine(
   );
 
   const isHighBaselineOpening = (ou25Eff != null && ou25Eff <= 1.55);
-  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
+  const isYouthOrReserve = /u19|u20|u21|u23|reserve|ii|2|w|women|b/i.test(`${homeTeam} ${awayTeam}`);
   const isNonLeagueOrAmateur = /isthmian|southern league|northern premier|national league|trophy|non league|regional|oberliga|landesliga/i.test(
     `${leagueName} ${homeTeam} ${awayTeam}`
   );
-  const isYouthOrReserve = /u19|u20|u21|u23|reserve|ii|2|w|women|b/i.test(`${homeTeam} ${awayTeam}`);
 
   const isStaticRetailBait = Boolean(
     !isOrganicLadder &&
