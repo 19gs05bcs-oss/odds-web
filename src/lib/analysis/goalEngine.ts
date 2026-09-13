@@ -829,9 +829,14 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     rawFavOdds != null && rawFavOdds <= 1.80
   );
 
+  const isHighBaselineOpening = (ou25Eff != null && ou25Eff <= 1.55);
+  const isYouthOrReserve = /u19|u20|u21|u23|reserve|ii|2|w|women|b/i.test(`${homeTeam} ${awayTeam}`);
+
   const isStaticRetailBait = Boolean(
     !isOrganicLadder &&
     !isAsymmetricChoke &&
+    !isHighBaselineOpening &&
+    !isYouthOrReserve &&
     p25 >= 0.58 &&
     (ou45Eff == null || ou45Eff >= 2.50) &&
     (medHt00 != null && medHt00 <= 4.50) &&
