@@ -328,6 +328,7 @@ export function computeGoalEngine(
   const ou45Eff = effOf(ou["4.5"].over);
   const ou55Eff = effOf(ou["5.5"].over);
   const ou25Eff = effOf(ou["2.5"].over);
+  const ou35Eff = effOf(ou["3.5"].over);
 
   const anomalies: string[] = [];
 
@@ -502,13 +503,13 @@ export function computeGoalEngine(
     }
   }
 
-  if (
+  if (!matchedCase && (
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.70 &&
     rawFavOdds <= 2.05 &&
     hasDogHandicapSupport
-  ) {
+  )) {
     if ((ou25OverDrift >= 1.03 || ouFlow === AGGRESSIVE_UNDER_FLOW) && msHDrift >= 1.05) {
       matchedCase = {
         name: "DROGHEDA MODEL (Fakeout Dog Surge)",
@@ -519,10 +520,10 @@ export function computeGoalEngine(
         profile: "DROGHEDA_FAKEOUT_SURGE",
       };
     }
-  } else if (
+  } else if (!matchedCase && (
     (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
     moneyFlow1X2 === "BALANCED"
-  ) {
+  )) {
     if (!hasFavHandicapSmash && !hasDogHandicapSupport && medHtOu05 != null && medHtOu05 >= 1.33) {
       matchedCase = {
         name: "SHELBOURNE MODEL (Hollow Surge Trap)",
@@ -533,7 +534,7 @@ export function computeGoalEngine(
         profile: "SHELBOURNE_HOLLOW_SURGE_TRAP",
       };
     }
-  } else if (ouFlow === AGGRESSIVE_OVER_FLOW && isUnderLeaking && hasDogHandicapSupport) {
+  } else if (!matchedCase && ouFlow === AGGRESSIVE_OVER_FLOW && isUnderLeaking && hasDogHandicapSupport) {
     if (highScoreDropCount >= 4 && (ht00Drift >= 1.03 || (medHtOu05 != null && medHtOu05 <= 0.98))) {
       matchedCase = {
         name: "PISA MODEL (Systemic Market Flip)",
@@ -544,14 +545,14 @@ export function computeGoalEngine(
         profile: "PISA_SYSTEMIC_FLIP",
       };
     }
-  } else if (
+  } else if (!matchedCase && (
     rawFavSide === "A" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.55 &&
     rawFavOdds <= 2.55 &&
     hasDogHandicapSupport &&
     (msHDrift <= 0.90 || moneyFlow1X2.startsWith("HOME"))
-  ) {
+  )) {
     matchedCase = {
       name: "BENEVENTO MODEL (Home Dog Reverse Takeover)",
       desc: "The away side is shown as favourite on paper, but institutional money has piled onto the home win and home handicap.",
@@ -660,7 +661,7 @@ export function computeGoalEngine(
     };
   }
 
-  if (
+  if (!matchedCase && (
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.70 &&
@@ -668,7 +669,7 @@ export function computeGoalEngine(
     hasDogHandicapSupport &&
     p25 >= 0.58 &&
     (isUnderLeaking || (medBttsYes != null && medBttsYes <= 1.55))
-  ) {
+  )) {
     matchedCase = {
       name: "RAKOW MODEL (High Ceiling Fakeout Takeover)",
       desc: "Away handicaps have been swept, but the top of the line (58%+ Over & BTTS Yes) is on fire and the home side is holding firm below @1.90! The away surprise is fake — the match is locked toward a 2-1 / 3-1 home win.",
@@ -679,13 +680,13 @@ export function computeGoalEngine(
     };
   }
 
-  if (
+  if (!matchedCase && (
     (ouFlow === AGGRESSIVE_OVER_FLOW || isUnderLeaking) &&
     moneyFlow1X2 === "BALANCED" &&
     !hasFavHandicapSmash &&
     rawFavOdds != null &&
     rawFavOdds >= 1.85
-  ) {
+  )) {
     matchedCase = {
       name: "WISLA MODEL (Fake Collective Surge)",
       desc: "Lines and BTTS Yes have been pumped wildly toward Over, but 1X2 is balanced and neither side has minus-handicap support! There's zero institutional conviction on who scores — the match locks into a controlled 2-0 / 1-1 corridor.",
@@ -696,13 +697,13 @@ export function computeGoalEngine(
     };
   }
 
-  if (
+  if (!matchedCase && (
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds <= 1.65 &&
     hasDogHandicapSupport &&
     (p25 >= 0.68 || (pOver35 != null && pOver35 >= 0.50))
-  ) {
+  )) {
     matchedCase = {
       name: "JAZZ PORI MODEL (Super Fakeout Blowout)",
       desc: "Huge flow has been shown onto the away handicap and win, but the top of the line (68%+ Over) is on fire and the home side is standing firm below @1.65! The away surprise is entirely fake — the home side blows the match out alone.",
@@ -715,7 +716,7 @@ export function computeGoalEngine(
 
   const hasCleanSheetScores =
     (lowScoreDrops.has("1:0") || lowScoreDrops.has("2:0")) && (highScoreDrops.has("3:0") || highScoreDrops.has("4:0"));
-  if (
+  if (!matchedCase && (
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.50 &&
@@ -723,7 +724,7 @@ export function computeGoalEngine(
     msHDrift <= 0.95 &&
     hasCleanSheetScores &&
     (bttsDrift >= 1.05 || ou25OverDrift >= 1.04)
-  ) {
+  )) {
     matchedCase = {
       name: "NEPTUNAS MODEL (Clean Sheet Home Suffocation)",
       desc: "There's clear flow toward the home side, but the line is locked toward Over (BTTS No has been backed). The 1:0, 2:0, 3:0 scorelines have been swept one-sidedly! The home side smothers the match without conceding.",
@@ -736,7 +737,7 @@ export function computeGoalEngine(
 
   const isAnchor12 =
     sc11 != null && sc11 <= 6.50 && ((sc12 != null && sc12 <= 8.50) || (sc21 != null && sc21 <= 8.50));
-  if (p25 < 0.48 && isAnchor12) {
+  if (!matchedCase && p25 < 0.48 && isAnchor12) {
     const isCleanSheetBias = (medBttsYes != null && medBttsYes >= 1.85) || bttsDrift >= 1.03;
     let targetScoreCorridor: string;
     let targetTeam: string;
@@ -770,7 +771,7 @@ export function computeGoalEngine(
 
   const isAwayLockScores = sc01 != null && sc01 <= 10.50 && sc02 != null && sc02 <= 12.50;
   const isHomeScoreSuppressed = sc10 == null || sc10 >= 10.00;
-  if (
+  if (!matchedCase && (
     rawFavSide === "A" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.90 &&
@@ -780,7 +781,7 @@ export function computeGoalEngine(
     isAwayLockScores &&
     isHomeScoreSuppressed &&
     !hasDogHandicapSupport
-  ) {
+  )) {
     matchedCase = {
       name: "KERRY MODEL (Away Low-Tempo Lock)",
       desc: "The away side sits in the balanced favourite band (@2.10-@2.30) and market flow looks stable, but 0:1 and 0:2 sit at the bottom of the correct-score board! The away side tends to grab an early goal and lock the match at a single-goal margin.",
@@ -793,13 +794,13 @@ export function computeGoalEngine(
 
   const hasHeavyCleanSheet =
     lowScoreDrops.has("1:0") || lowScoreDrops.has("2:0") || highScoreDrops.has("3:0") || highScoreDrops.has("4:0");
-  if (
+  if (!matchedCase && (
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds <= 1.55 &&
     hasFavHandicapSmash &&
     (hasHeavyCleanSheet || moneyFlow1X2.startsWith("HOME"))
-  ) {
+  )) {
     matchedCase = {
       name: "CIENCIANO MODEL (Heavy Fav Handicap Steamroller)",
       desc: "The home side is a heavy favourite below @1.55 and institutional money has smashed its minus handicaps (-1.0, -1.25, -2.0)! Clean-sheet blowout scores (1:0, 2:0, 3:0) have piled up. The home side wins alone by at least two goals.",
@@ -811,7 +812,7 @@ export function computeGoalEngine(
   }
 
   const hasDuelScoreDrops = ["2:3", "3:3", "1:4"].some((s) => lowScoreDrops.has(s));
-  if (p25 <= 0.42 && hasDuelScoreDrops) {
+  if (!matchedCase && p25 <= 0.42 && hasDuelScoreDrops) {
     matchedCase = {
       name: "JAGUARES MODEL (Low Baseline Duel)",
       desc: "The baseline is shown as extremely barren (~40%), setting an Under trap, but the correct-score market has backed high-duel scores like 2:3, 3:3, 1:4! The barren display is fake — expect mutual goals in a 2-2 / 1-2 corridor.",
@@ -1329,6 +1330,12 @@ export function computeGoalEngine(
 
   const getScoreMultiplier = (hG: number, aG: number): number => {
     const totG = hG + aG;
+    const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
+    const favGoals = dominanceSide === "HOME" ? hG : aG;
+    const dogGoals = dominanceSide === "HOME" ? aG : hG;
+    const rawFavGoals = rawFavSide === "H" ? hG : aG;
+    const rawDogGoals = rawFavSide === "H" ? aG : hG;
+
     if (scoreProfile === "ELITE_BLOWOUT") {
       if (totG >= 5) return 1.80;
       if (totG >= 4) return 1.45;
@@ -1347,12 +1354,6 @@ export function computeGoalEngine(
       if (totG >= 4) return 0.20;
       return 0.80;
     }
-
-    const isCleanSheet = (dominanceSide === "HOME" && aG === 0) || (dominanceSide === "AWAY" && hG === 0);
-    const favGoals = dominanceSide === "HOME" ? hG : aG;
-    const dogGoals = dominanceSide === "HOME" ? aG : hG;
-    const rawFavGoals = rawFavSide === "H" ? hG : aG;
-    const rawDogGoals = rawFavSide === "H" ? aG : hG;
 
     if (scoreProfile === "SOLO_HOLLOW_TRAP") {
       if (totG === 0) return 1.65;
