@@ -19,6 +19,9 @@ export type ScoreProfile =
   | "AWAY_SURGE_TRAP"
   | "COLLECTIVE_SURGE"
   | "POLONIA_FAKE_DOG_TAKEOVER"
+  | "POLONIA_CLEAN_DOG_LOCK"
+  | "BILBAO_HOME_BALLOON_TRAP"
+  | "DINAMO_ZAGREB_AWAY_BALLOON_TRAP"
   | "DROGHEDA_FAKEOUT_SURGE"
   | "SHELBOURNE_HOLLOW_SURGE_TRAP"
   | "PISA_SYSTEMIC_FLIP"
@@ -247,6 +250,7 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
 
   const medH = effOf(ms.H);
   const medA = effOf(ms.A);
+  const medD = effOf(ms.D);
   const medDnbH = effOf(dnb.H);
   const medDnbA = effOf(dnb.A);
 
@@ -418,6 +422,39 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
   let matchedCase: MatchedCase | null = null;
 
   if (
+    ((medH != null && medH <= 1.55) || minDnb <= 1.25) &&
+    rawFavSide === "H" &&
+    handicapSmashCount >= 1 &&
+    medBttsYes != null &&
+    medBttsYes >= 1.75 &&
+    ((medA != null && medA >= 5.00) || (medD != null && medD >= 4.20))
+  ) {
+    matchedCase = {
+      name: "BILBAO MODEL (Home Public Balloon Trap)",
+      desc: "The home side has been dressed up as a showcase favourite in the @1.40-@1.55 band and the public has piled onto its handicap; but the draw (@4.20+) and the away side have been inflated sky-high while BTTS Yes has been left for dead! Expect an away surprise point and a 1-1 / 2-1 lock risk.",
+      ht: "🔒 FIRST HALF LOCK (0-0 / 0-1 Corridor)",
+      ft: "💣 PUBLIC HOME BALLOON (Bilbao Model: Fake Handicap Pile-Up / Away Resistance & 1-1, 2-1 Lock Risk!)",
+      team: "✅ Away +1.5 / +2.0 Asian Handicap (don't fall for the Home -1.5 trap)",
+      profile: "BILBAO_HOME_BALLOON_TRAP",
+    };
+  } else if (
+    ((medA != null && medA <= 1.55) || minDnb <= 1.25) &&
+    rawFavSide === "A" &&
+    handicapSmashCount >= 1 &&
+    ((medH != null && medH >= 4.00) || (medD != null && medD >= 4.00))
+  ) {
+    matchedCase = {
+      name: "DINAMO ZAGREB MODEL (Away Public Balloon Trap)",
+      desc: "The away side, a league hegemon, has been squeezed into the @1.40-@1.55 band and its handicaps crushed; but the home side has been inflated sky-high and BTTS Yes hasn't been kept alive! A home shock and a 3-1 / 2-1 scoreline are live.",
+      ht: "BALANCED FIRST HALF (0-1 Goal Range)",
+      ft: "💣 PUBLIC AWAY BALLOON (Dinamo Zagreb Model: Fake Handicap Pile-Up / Home Surprise & 3-1, 2-1 Corridor)",
+      team: "✅ Home +1.5 Handicap / Home Double Chance 1X",
+      profile: "DINAMO_ZAGREB_AWAY_BALLOON_TRAP",
+    };
+  }
+
+  if (
+    !matchedCase &&
     rawFavSide === "H" &&
     rawFavOdds != null &&
     rawFavOdds >= 1.95 &&
@@ -425,14 +462,26 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     hasDogHandicapSupport &&
     (moneyFlow1X2.startsWith("AWAY") || msADrift <= 0.88)
   ) {
-    matchedCase = {
-      name: "POLONIA MODEL (Fake Under-Dog Takeover Alarm)",
-      desc: "The under-line has been swept to create a barren-lock illusion, but the home favourite has collapsed from short odds to drift, and the away handicaps (-0.75 / +0.5) have seen a massive institutional entry! The barren display is fake — expect away points and goals at both ends.",
-      ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
-      ft: "💣 HOME COLLAPSE & AWAY RESISTANCE (1-2 / 2-2 / 1-3 Corridor — BTTS)",
-      team: "✅ Double Chance X2 & BTTS Yes (watch the 1-0 / 2-0 home trap)",
-      profile: "POLONIA_FAKE_DOG_TAKEOVER",
-    };
+    const isUnderContracting = ou25OverDrift >= 1.03 || ou25UnderDrift <= 0.97;
+    if (isUnderContracting) {
+      matchedCase = {
+        name: "POLONIA-CLEAN MODEL (Away Takeover & Clean-Sheet Lock)",
+        desc: "The home side has collapsed from short odds to drift and a huge wave of money has gone onto the away side, but the baseline is NOT climbing toward Over (2.5 Over is being abandoned)! The away side tends to close the match out under control at 0-1 / 0-2, without conceding.",
+        ht: "BALANCED FIRST HALF (0-1 Away / 0-0)",
+        ft: "🛡️ CONTROLLED AWAY WIN (0-1 / 0-2 Corridor — Home Side Fails to Score)",
+        team: "✅ Double Chance X2 & Away Over 0.5/1.5 (BTTS No focus)",
+        profile: "POLONIA_CLEAN_DOG_LOCK",
+      };
+    } else {
+      matchedCase = {
+        name: "POLONIA MODEL (Fake Under-Dog Takeover Alarm)",
+        desc: "The under-line has been swept to create a barren-lock illusion, but the home favourite has collapsed from short odds to drift, and the away handicaps (-0.75 / +0.5) have seen a massive institutional entry! The barren display is fake — expect away points and goals at both ends.",
+        ht: "🔥 FIRST HALF TEMPO / EARLY GOAL (High HT 0.5 Over)",
+        ft: "💣 HOME COLLAPSE & AWAY RESISTANCE (1-2 / 2-2 / 1-3 Corridor — BTTS)",
+        team: "✅ Double Chance X2 & BTTS Yes (watch the 1-0 / 2-0 home trap)",
+        profile: "POLONIA_FAKE_DOG_TAKEOVER",
+      };
+    }
   }
 
   if (
@@ -952,6 +1001,9 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     teamGoalVerdict = matchedCase.team;
     const CASE_FAIR_LINES: Partial<Record<ScoreProfile, number>> = {
       POLONIA_FAKE_DOG_TAKEOVER: 3.25,
+      POLONIA_CLEAN_DOG_LOCK: 1.75,
+      BILBAO_HOME_BALLOON_TRAP: 1.75,
+      DINAMO_ZAGREB_AWAY_BALLOON_TRAP: 2.75,
       DROGHEDA_FAKEOUT_SURGE: 2.25,
       SHELBOURNE_HOLLOW_SURGE_TRAP: 1.75,
       PISA_SYSTEMIC_FLIP: 3.25,
@@ -1130,12 +1182,27 @@ export function computeGoalEngine(odds: CompactOddsRow[] | null | undefined): Go
     const rawFavGoals = rawFavSide === "H" ? hG : aG;
     const rawDogGoals = rawFavSide === "H" ? aG : hG;
 
-    if (scoreProfile === "POLONIA_FAKE_DOG_TAKEOVER" || scoreProfile === "CORK_CITY_UNDERDOG_TAKEOVER" || scoreProfile === "WEXFORD_SUPER_FAV_BLINDSPOT") {
+    if (
+      scoreProfile === "POLONIA_FAKE_DOG_TAKEOVER" ||
+      scoreProfile === "CORK_CITY_UNDERDOG_TAKEOVER" ||
+      scoreProfile === "WEXFORD_SUPER_FAV_BLINDSPOT" ||
+      scoreProfile === "BILBAO_HOME_BALLOON_TRAP"
+    ) {
       if (rawDogGoals >= 1 && rawFavGoals >= 1 && totG <= 4) return 1.6;
       if (rawDogGoals === 0) return 0.35;
       return 0.85;
     }
-    if (scoreProfile === "DROGHEDA_FAKEOUT_SURGE" || scoreProfile === "BENEVENTO_HOME_DOG_REVERSE" || scoreProfile === "RAKOW_HIGH_CEILING_TAKEOVER") {
+    if (scoreProfile === "POLONIA_CLEAN_DOG_LOCK") {
+      if (rawDogGoals >= 1 && rawFavGoals === 0 && totG <= 2) return 1.6;
+      if (rawFavGoals >= 1) return 0.35;
+      return 0.8;
+    }
+    if (
+      scoreProfile === "DROGHEDA_FAKEOUT_SURGE" ||
+      scoreProfile === "BENEVENTO_HOME_DOG_REVERSE" ||
+      scoreProfile === "RAKOW_HIGH_CEILING_TAKEOVER" ||
+      scoreProfile === "DINAMO_ZAGREB_AWAY_BALLOON_TRAP"
+    ) {
       if (rawFavGoals >= 2 && rawDogGoals <= 1 && totG <= 4) return 1.55;
       if (rawFavGoals === 0) return 0.3;
       return 0.85;
