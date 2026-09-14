@@ -438,9 +438,48 @@ export function computeGoalEngine(
     team: string;
     profile: ScoreProfile;
   };
-  let matchedCase: MatchedCase | null = null;
+    let matchedCase: MatchedCase | null = null;
+
+  // --- ÖNCELİK 0: HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI (CLI motoruyla birebir sıra) ---
+  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
+
+  const isTrueEliteBlowout = Boolean(
+    rawFavOdds != null && rawFavOdds <= 1.45 &&
+    ou35Eff != null && ou35Eff <= 2.10 &&
+    medHt00 != null && medHt00 >= 3.80
+  );
+
+  const isAsymmetricBarrenTrap = Boolean(
+    !isTrueEliteBlowout &&
+    !isYouthOrReserve &&
+    rawFavOdds != null && rawFavOdds >= 1.20 && rawFavOdds <= 1.45 &&
+    medBttsYes != null && medBttsYes >= 1.78 && medBttsYes <= 2.30 &&
+    (ou35Eff == null || ou35Eff >= 2.30) &&
+    (medHt00 != null && medHt00 <= 3.75)
+  );
+
+  if (isTrueEliteBlowout) {
+    matchedCase = {
+      name: "ELITE BLOWOUT (Feyenoord / Barcelona Hegemonya Patlaması)",
+      desc: "Ağır favorinin 3.5 Üst baremi diri (@2.10 altı) ve ilk yarı 0-0 barajı tamamen yıkılmış. Tek taraflı 4+ / 5+ gol fırtınası.",
+      ht: "🔥 FIRST HALF TEMPO (Erken Gol Yağmuru / HT 0.5 & 1.5 Over)",
+      ft: "🚀 ELITE BLOWOUT (3.5 Üst & 4+ Gol Beklentisi / Favori Yıkımı)",
+      team: "✅ Favori Kazanır & Favori Üst Baremleri (3.5 Üst / Handikap)",
+      profile: "ELITE_BLOWOUT",
+    };
+  } else if (isAsymmetricBarrenTrap) {
+    matchedCase = {
+      name: "ASYMMETRIC BARREN TRAP (Hammarby / Genk W Sahte Vitrin Tuzağı)",
+      desc: "Favori ve 2.5 Üst vitrinde çok düşük fakat rakibin gol katkısı piyasadan tamamen silinmiş (KG Var @1.78-2.30). 3.5 baremi boşlukta, 1-0 / 2-0 kilit riski!",
+      ht: "🔒 FIRST HALF CONTROL (0-0 / 1-0 Kilit)",
+      ft: "🛡️ ASYMMETRIC BARREN LOCK (Maksimum 1-2 Gol / 1-0, 2-0 Koridoru)",
+      team: "⛔ GENEL ÜST OYNANMAZ (Deplasman katkısı yok; Sadece Favori Tek Fark / 2.5-3.5 Alt)",
+      profile: "ASYMMETRIC_BARREN_TRAP",
+    };
+  }
 
   if (
+    !matchedCase &&
     ((medH != null && medH <= 1.55) || minDnb <= 1.25) &&
     rawFavSide === "H" &&
     handicapSmashCount >= 1 &&
@@ -457,6 +496,7 @@ export function computeGoalEngine(
       profile: "BILBAO_HOME_BALLOON_TRAP",
     };
   } else if (
+    !matchedCase &&
     ((medA != null && medA <= 1.55) || minDnb <= 1.25) &&
     rawFavSide === "A" &&
     handicapSmashCount >= 1 &&
@@ -823,44 +863,6 @@ export function computeGoalEngine(
     };
   }
 
-    // --- HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI ---
-    // --- HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI (CLI motoruyla birebir) ---
-  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
-
-  const isTrueEliteBlowout = Boolean(
-    rawFavOdds != null && rawFavOdds <= 1.45 &&
-    ou35Eff != null && ou35Eff <= 2.10 &&
-    medHt00 != null && medHt00 >= 3.80
-  );
-
-  const isAsymmetricBarrenTrap = Boolean(
-    !isTrueEliteBlowout &&
-    !isYouthOrReserve &&
-    rawFavOdds != null && rawFavOdds >= 1.20 && rawFavOdds <= 1.45 &&
-    medBttsYes != null && medBttsYes >= 1.78 && medBttsYes <= 2.30 &&
-    (ou35Eff == null || ou35Eff >= 2.30) &&
-    (medHt00 != null && medHt00 <= 3.75)
-  );
-
-  if (!matchedCase && isTrueEliteBlowout) {
-    matchedCase = {
-      name: "ELITE BLOWOUT (Feyenoord / Barcelona Hegemonya Patlaması)",
-      desc: "Ağır favorinin 3.5 Üst baremi diri (@2.05 altı) ve ilk yarı 0-0 barajı tamamen yıkılmış. Tek taraflı 4+ / 5+ gol fırtınası.",
-      ht: "🔥 FIRST HALF TEMPO (Erken Gol Yağmuru / HT 0.5 & 1.5 Over)",
-      ft: "🚀 ELITE BLOWOUT (3.5 Üst & 4+ Gol Beklentisi / Favori Yıkımı)",
-      team: "✅ Favori Kazanır & Favori Üst Baremleri (3.5 Üst / Handikap)",
-      profile: "ELITE_BLOWOUT",
-    };
-  } else if (!matchedCase && isAsymmetricBarrenTrap) {
-    matchedCase = {
-      name: "ASYMMETRIC BARREN TRAP (Hammarby / Genk W Sahte Vitrin Tuzağı)",
-      desc: "Favori ve 2.5 Üst vitrinde çok düşük fakat rakibin gol katkısı piyasadan tamamen silinmiş (KG Var @1.72+). 3.5 baremi boşlukta, 1-0 / 2-0 kilit riski!",
-      ht: "🔒 FIRST HALF CONTROL (0-0 / 1-0 Kilit)",
-      ft: "🛡️ ASYMMETRIC BARREN LOCK (Maksimum 1-2 Gol / 1-0, 2-0 Koridoru)",
-      team: "⛔ GENEL ÜST OYNANMAZ (Deplasman katkısı yok; Sadece Favori Tek Fark / 2.5-3.5 Alt)",
-      profile: "ASYMMETRIC_BARREN_TRAP",
-    };
-  }
 
   // --- 3 ANA PİYASA REJİMİ MOTORU ---
   const isOrganicLadder = Boolean(
