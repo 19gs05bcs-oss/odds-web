@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
-import { MarketSignalsPanel } from "@/components/MarketSignalsPanel";
+import { HtftEnginePanel } from "@/components/HtftEnginePanel";
 import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
 import type { TableRow } from "@/lib/analysis/tableRows";
 import type { BoardCall } from "@/lib/analysis/similarityEngine";
-import { computeMarketSignals } from "@/lib/analysis/marketSignals";
+import { computeHtftEngine } from "@/lib/analysis/htftEngine";
 import { computeScoreConsensus } from "@/lib/analysis/scoreConsensusEngine";
 import { ScoreConsensusPanel } from "@/components/ScoreConsensusPanel";
 // import bloğuna eklendi
@@ -119,15 +119,17 @@ export function SmartAnalysisClient({
     [fixtures, selectedFixtureId],
   );
 
-  // Similarity aramasına gitmeden ÖNCE gösterilecek piyasa sinyalleri
-  // (dispersion / arbitraj / margin skew) — bu maçın kendi oranlarından,
-  // saf client-side hesaplama, ek bir API isteği gerektirmiyor.
-  const marketSignals = useMemo(
-    () => computeMarketSignals(selectedFixture?.odds, selectedFixture?.bookmakers),
-    [selectedFixture?.odds, selectedFixture?.bookmakers],
+  // Similarity aramasına gitmeden ÖNCE gösterilecek HT/FT matris motoru —
+  // bu maçın kendi FH/SH/FT 1X2, O/U ve BTTS oranlarından, saf client-side
+  // hesaplama, ek bir API isteği gerektirmiyor. Eskiden burada piyasa
+  // sinyalleri (dispersion/arbitraj/margin skew) gösteriliyordu; HT/FT
+  // motoru lehine kaldırıldı.
+  const htftResult = useMemo(
+    () => computeHtftEngine(selectedFixture?.odds),
+    [selectedFixture?.odds],
   );
 
-  // marketSignals ile AYNI mantık: similarity aramasına gitmeden önce, seçilen
+  // htftResult ile AYNI mantık: similarity aramasına gitmeden önce, seçilen
   // maçın kendi CORRECT_SCORE + Over/Under 2.5 oranlarından hacim-uyumlu bir
   // skor sıralaması — ek API isteği yok, saf client-side hesap.
   const scoreConsensus = useMemo(
@@ -448,7 +450,7 @@ const goalEngine = useMemo(
             <p className={styles.empty}>Oranlar yükleniyor…</p>
           ) : (
             <>
-              <MarketSignalsPanel signals={marketSignals} />
+              <HtftEnginePanel result={htftResult} />
               <ScoreConsensusPanel consensus={scoreConsensus} />
               <GoalEnginePanel metrics={goalEngine} actualScore={scoreConsensus?.actualScore ?? null} />
             </>
