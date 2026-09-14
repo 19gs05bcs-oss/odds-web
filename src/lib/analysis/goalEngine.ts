@@ -824,20 +824,22 @@ export function computeGoalEngine(
   }
 
     // --- HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI ---
+    // --- HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI (CLI motoruyla birebir) ---
+  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
+
   const isTrueEliteBlowout = Boolean(
     rawFavOdds != null && rawFavOdds <= 1.45 &&
-    ou35Eff != null && ou35Eff <= 2.05 &&
-    medHt00 != null && medHt00 >= 3.80 &&
-    (ou25UnderDrift >= 1.05 || (ou45Eff != null && ou45Eff <= 2.80))
+    ou35Eff != null && ou35Eff <= 2.10 &&
+    medHt00 != null && medHt00 >= 3.80
   );
 
   const isAsymmetricBarrenTrap = Boolean(
     !isTrueEliteBlowout &&
-    rawFavOdds != null && rawFavOdds <= 1.45 &&
-    ou25Eff != null && ou25Eff <= 1.55 &&
-    medBttsYes != null && medBttsYes >= 1.72 &&
-    (ou35Eff == null || ou35Eff >= 2.10) &&
-    (medHt00 != null && medHt00 <= 3.80)
+    !isYouthOrReserve &&
+    rawFavOdds != null && rawFavOdds >= 1.20 && rawFavOdds <= 1.45 &&
+    medBttsYes != null && medBttsYes >= 1.78 && medBttsYes <= 2.30 &&
+    (ou35Eff == null || ou35Eff >= 2.30) &&
+    (medHt00 != null && medHt00 <= 3.75)
   );
 
   if (!matchedCase && isTrueEliteBlowout) {
@@ -876,7 +878,6 @@ export function computeGoalEngine(
   );
 
   const isHighBaselineOpening = ou25Eff != null && ou25Eff <= 1.55;
-  const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
   const isNonLeagueOrAmateur = /isthmian|southern league|northern premier|national league|trophy|non league|regional|oberliga|landesliga/i.test(
     `${leagueName} ${homeTeam} ${awayTeam}`
   );
