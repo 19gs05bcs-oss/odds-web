@@ -8,6 +8,8 @@ import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
 import type { TableRow } from "@/lib/analysis/tableRows";
 import type { BoardCall } from "@/lib/analysis/similarityEngine";
 import { computeHtftEngine } from "@/lib/analysis/htftEngine";
+import { computeAnatomyEngine } from "@/lib/analysis/anatomyEngine";
+import { AnatomyEnginePanel } from "@/components/AnatomyEnginePanel";
 import { computeScoreConsensus } from "@/lib/analysis/scoreConsensusEngine";
 import { ScoreConsensusPanel } from "@/components/ScoreConsensusPanel";
 // import bloğuna eklendi
@@ -127,6 +129,35 @@ export function SmartAnalysisClient({
   const htftResult = useMemo(
     () => computeHtftEngine(selectedFixture?.odds),
     [selectedFixture?.odds],
+  );
+
+  // htftResult ile AYNI kaynaktan (bu maçın kendi odds satırları) ama farklı
+  // bir okuma: FT 1X2 + FT/İY O/U + Correct Score'dan 4 sabit anatomi
+  // modelinden (Blowout / Defensive Lock / İY Kilit / Fake Favorite Trap)
+  // birine uyup uymadığını kontrol eder. Ek API isteği yok, saf client-side.
+  const anatomyResult = useMemo(
+    () =>
+      computeAnatomyEngine(selectedFixture?.odds, {
+        league: selectedFixture?.league ?? null,
+        leagueCountry: selectedFixture?.league_country ?? null,
+        homeName: selectedFixture?.home_name ?? null,
+        awayName: selectedFixture?.away_name ?? null,
+        homeScore: selectedFixture?.home_score ?? null,
+        awayScore: selectedFixture?.away_score ?? null,
+        homeHtScore: selectedFixture?.home_ht_score ?? null,
+        awayHtScore: selectedFixture?.away_ht_score ?? null,
+      }),
+    [
+      selectedFixture?.odds,
+      selectedFixture?.league,
+      selectedFixture?.league_country,
+      selectedFixture?.home_name,
+      selectedFixture?.away_name,
+      selectedFixture?.home_score,
+      selectedFixture?.away_score,
+      selectedFixture?.home_ht_score,
+      selectedFixture?.away_ht_score,
+    ],
   );
 
   // htftResult ile AYNI mantık: similarity aramasına gitmeden önce, seçilen
@@ -450,6 +481,7 @@ const goalEngine = useMemo(
             <p className={styles.empty}>Oranlar yükleniyor…</p>
           ) : (
             <>
+              <AnatomyEnginePanel result={anatomyResult} />
               <HtftEnginePanel result={htftResult} />
               <ScoreConsensusPanel consensus={scoreConsensus} />
               <GoalEnginePanel metrics={goalEngine} actualScore={scoreConsensus?.actualScore ?? null} />
