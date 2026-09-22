@@ -1,45 +1,90 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
 /**
- * Anatomy Engine — test_12_september_real_schema.py'deki 4 model (ULTIMATE
- * BLOWOUT / DEFENSIVE LOCK / İY KİLİT ➔ 2Y ÇÖZÜM / FAKE FAVORITE TRAP) ile
- * AYNI eşikler. htftEngine.ts / goalEngine.ts gibi saf client-side: ek bir
- * API isteği gerektirmez, seçilen maçın kendi FT 1X2, FT/İY Over-Under ve
- * Correct Score oranlarından hesaplanır.
+ * Anatomy Engine ("Market Detect") — ported from the Python odds radar
+ * (run_radarv2.py: "akilli para / katı yön / skor radari"). File and export
+ * names are kept as `anatomyEngine.ts` / `computeAnatomyEngine` on purpose —
+ * only the underlying model changed, not the wiring.
  *
- * NOT — YORUM SINIRI: bu bir olasılık/anatomi taraması, kesin bir tahmin
- * değildir. Maç henüz oynanmadıysa sadece model + hedefler gösterilir; maç
- * bittiyse (home_score/away_score doluysa) gerçekleşenle karşılaştırılır.
+ * This replaces the old fixed 4-model pattern matcher (Blowout / Defensive
+ * Lock / HT Lock / Fake Favourite Trap) with a live market-state reader:
+ * it looks at how every quoted market moved between opening and current
+ * price across all bookmakers offering this fixture, weights each move by
+ * how many bookmakers confirm it (liquidity), and from that derives:
+ *   - an X-ray side (which outcome the sharpest money is leaning on),
+ *   - an expected goal-margin corridor,
+ *   - a tempo/goal-count read (including a "super explosive" flag for
+ *     short HT Over 1.5 + short FT Over 3.5 combinations),
+ *   - a short list of "hot" Correct Score prices that shortened hardest.
+ *
+ * Same as htftEngine.ts / goalEngine.ts: pure client-side, computed only
+ * from this match's own odds rows — no extra API request. The historical
+ * "twin match" search from the Python script (looking up similar finished
+ * matches in Postgres) is NOT ported here — that is a separate concern and
+ * lives in the existing similarity search (similarityEngine.ts).
+ *
+ * READING LIMIT: this is a market-state scan, not a guaranteed outcome. If
+ * the match hasn't been played yet, only the read itself is shown; once it
+ * has finished (home_score/away_score present), it's compared to what
+ * actually happened.
  */
 
-export type AnatomyModelKey =
-  | "ULTIMATE_BLOWOUT"
-  | "DEFENSIVE_LOCK"
-  | "IY_KILIT_2Y_COZUM"
-  | "FAKE_FAVORITE_TRAP";
+export type MarketDirection = "UP" | "DOWN" | "FLAT";
+export type XraySide = "LOW" | "DRAW" | "OVER" | "AWAY" | "HOME" | "NONE";
+
+export type ExpectedMargin =
+  | "MARGIN_INSIDER_LEAK"
+  | "MARGIN_3_PLUS"
+  | "MARGIN_HOME_RESISTANCE"
+  | "MARGIN_TRAP"
+  | "MARGIN_LOW_SCORING"
+  | "MARGIN_OPEN_DRAW"
+  | "MARGIN_OVER_LADDER"
+  | "MARGIN_CLOSE_OR_UPSET"
+  | "MARGIN_XRAY_AWAY"
+  | "MARGIN_XRAY_HOME"
+  | "MARGIN_STAGNANT_DRAW"
+  | "MARGIN_1_2"
+  | "MARGIN_FAV_WIN"
+  | "ANY";
+
+export type TargetTempo =
+  | "SUPER_EXPLOSIVE"
+  | "LOW_PACE"
+  | "EXPLOSIVE_GOALS"
+  | "HIGH_PACE"
+  | "DECEPTIVE_TEMPO"
+  | "BALANCED";
+
+export type MarketMove = {
+  label: string;
+  openOdd: number;
+  currentOdd: number;
+  pctMove: number; // liquidity-weighted % move (negative = shortened)
+  bookCount: number;
+};
 
 export type AnatomyActualCheck = {
   score: string;
   htScore: string | null;
-  msHit: boolean;
-  iyHit: boolean;
-  auHit: boolean;
-  bandHit: boolean;
-  scoreHit: boolean;
+  totalGoals: number;
+  scoreHit: boolean; // actual score matched one of the hot Correct Score prices
+  tempoHit: boolean | null; // null when the tempo read makes no directional goal-count claim
 };
 
 export type AnatomyEngineResult = {
-  model: AnatomyModelKey;
-  title: string;
   favSide: "HOME" | "AWAY";
   favOdd: number;
-  iyKarar: string;
-  msTaraf: string;
-  iyMs: string;
-  auKarar: string;
-  golBandi: string;
-  iySkor: string;
-  hedefSkorlar: string[];
+  homeDirection: MarketDirection;
+  awayDirection: MarketDirection;
+  xraySide: XraySide;
+  expectedMargin: ExpectedMargin;
+  marginLabel: string;
+  targetTempo: TargetTempo;
+  tempoLabel: string;
+  isSuperExplosive: boolean;
+  hotScores: string[]; // e.g. ["2:2", "1:1"] — Correct Score prices that shortened hardest
+  topDrops: MarketMove[]; // biggest liquidity-weighted odds drops across every quoted market
   isMajorLeague: boolean;
   actual: AnatomyActualCheck | null;
 };
@@ -84,7 +129,7 @@ function pushPool(p: PricePool, op: number | null, cur: number | null) {
   if (cur != null) p.cur.push(cur);
 }
 type Stats = { eff: number | null; mo: number | null; mc: number | null; drift: number };
-// Python get_med ile birebir: eff = mc yoksa mo; drift = (mc-mo)/mo*100.
+// drift is a PERCENTAGE (e.g. 5.2 means +5.2%), matching the rest of this file's convention.
 function statsOf(p: PricePool): Stats {
   const mo = p.open.length ? median(p.open) : null;
   const mc = p.cur.length ? median(p.cur) : null;
@@ -109,6 +154,22 @@ function toInt(v: string | number | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Liquidity weight: how much a move counts, scaled by how many bookmakers confirm it. */
+function liqWeight(nb: number): number {
+  if (nb <= 0) return 0.0;
+  if (nb < 3) return 0.1;
+  if (nb < 5) return 0.35;
+  if (nb < 8) return 0.75;
+  if (nb < 12) return 0.9;
+  return 1.0;
+}
+
+function getDirection(deltaPct: number): MarketDirection {
+  if (deltaPct <= -3.5) return "DOWN";
+  if (deltaPct >= 3.5) return "UP";
+  return "FLAT";
+}
+
 export type AnatomyFixtureMeta = {
   league?: string | null;
   leagueCountry?: string | null;
@@ -119,6 +180,8 @@ export type AnatomyFixtureMeta = {
   homeHtScore?: string | number | null;
   awayHtScore?: string | number | null;
 };
+
+type MoveAgg = { open: number[]; cur: number[]; books: Set<number> };
 
 export function computeAnatomyEngine(
   odds: CompactOddsRow[] | null | undefined,
@@ -131,13 +194,15 @@ export function computeAnatomyEngine(
   const ou25 = { over: newPool(), under: newPool() };
   const ouBare = { over: newPool(), under: newPool() };
   const ou35Over = newPool();
-  const fhOver05 = newPool();
-  const fhOver15 = newPool();
+  const htOver15 = newPool();
+  const btts = { yes: newPool(), no: newPool() };
   const cs = new Map<string, PricePool>();
+  const eh = new Map<string, PricePool>();
+  const allMoves = new Map<string, MoveAgg>();
 
   for (const row of odds) {
     if (!Array.isArray(row) || row.length < 6) continue;
-    const [, mtypeRaw, scopeRaw, sideRaw, opening, current, active] = row;
+    const [bookmakerId, mtypeRaw, scopeRaw, sideRaw, opening, current, active] = row;
     if (!isActive(active)) continue;
 
     const cur = parseNum(current);
@@ -147,6 +212,18 @@ export function computeAnatomyEngine(
     const type = String(mtypeRaw).toUpperCase();
     const scp = String(scopeRaw).toUpperCase();
     const side = String(sideRaw).toUpperCase();
+
+    // Generic per-market-per-selection aggregate — used for the liquidity
+    // X-ray and the "biggest movers" list, regardless of market type.
+    const label = `${type} (${scp}) - ${side}`;
+    let agg = allMoves.get(label);
+    if (!agg) {
+      agg = { open: [], cur: [], books: new Set() };
+      allMoves.set(label, agg);
+    }
+    if (op != null) agg.open.push(op);
+    if (cur != null) agg.cur.push(cur);
+    agg.books.add(Number(bookmakerId));
 
     if (type === "HOME_DRAW_AWAY" && scp === "FULL_TIME") {
       if (side === "H") pushPool(ft.H, op, cur);
@@ -170,9 +247,14 @@ export function computeAnatomyEngine(
           else if (isUnder) pushPool(ouBare.under, op, cur);
         }
       } else if (scp === "FIRST_HALF") {
-        if (lineStr === "0.5" && isOver) pushPool(fhOver05, op, cur);
-        else if (lineStr === "1.5" && isOver) pushPool(fhOver15, op, cur);
+        if (lineStr === "1.5" && isOver) pushPool(htOver15, op, cur);
       }
+      continue;
+    }
+
+    if (type === "BOTH_TEAMS_TO_SCORE" && scp === "FULL_TIME") {
+      if (side.includes("YES")) pushPool(btts.yes, op, cur);
+      else if (side.includes("NO")) pushPool(btts.no, op, cur);
       continue;
     }
 
@@ -184,187 +266,344 @@ export function computeAnatomyEngine(
       }
       continue;
     }
+
+    if (type === "EUROPEAN_HANDICAP" && scp === "FULL_TIME") {
+      if (!eh.has(side)) eh.set(side, newPool());
+      pushPool(eh.get(side)!, op, cur);
+      continue;
+    }
   }
 
   const msH = statsOf(ft.H);
-  const msX = statsOf(ft.D);
+  const msD = statsOf(ft.D);
   const msA = statsOf(ft.A);
-  if (msH.eff == null || msX.eff == null || msA.eff == null) return null;
+  if (msH.eff == null || msD.eff == null || msA.eff == null) return null;
 
   let under25 = statsOf(ou25.under);
   if (under25.eff == null) under25 = statsOf(ouBare.under);
   let over25 = statsOf(ou25.over);
   if (over25.eff == null) over25 = statsOf(ouBare.over);
   const over35 = statsOf(ou35Over);
-  const gap = over35.eff != null && over25.eff != null ? over35.eff - over25.eff : 99.0;
+  const htOver15Stats = statsOf(htOver15);
+  const bttsYes = statsOf(btts.yes);
 
-  const hto05 = statsOf(fhOver05);
-  const hto15 = statsOf(fhOver15);
+  const o25Odd = over25.mo ?? 1.95;
+  const u25Odd = under25.mo ?? 1.8;
+  const o35Odd = over35.mo ?? 2.5;
+  const htOver15Odd = htOver15Stats.mo ?? 2.5;
+  const bttsYesOdd = bttsYes.mo ?? 1.8;
+  const bttsNoOdd = statsOf(btts.no).mo ?? 1.9;
+  const tDeltaO25 = over25.drift;
+  const tDeltaBtts = bttsYes.drift;
 
-  const favOdd = Math.min(msH.eff, msA.eff);
-  const favSide: "HOME" | "AWAY" = msH.eff <= msA.eff ? "HOME" : "AWAY";
-  const favDrift = favSide === "HOME" ? msH.drift : msA.drift;
+  // Favourite side/price is read off the OPENING line (matches the Python
+  // radar), not the current price — this is "who opened as favourite", used
+  // as the anchor the rest of the read compares drift against.
+  const favHomeOdd = msH.mo ?? msH.eff;
+  const favAwayOdd = msA.mo ?? msA.eff;
+  const favOdd = Math.min(favHomeOdd, favAwayOdd);
+  const favSide: "HOME" | "AWAY" = favHomeOdd <= favAwayOdd ? "HOME" : "AWAY";
+  const favTeamTok: "H" | "A" = favSide === "HOME" ? "H" : "A";
+  const favDelta = favSide === "HOME" ? msH.drift : msA.drift;
 
-  // Correct Score tablosundaki en çok düşen (en likit) skor — toplam gol <= 4
-  let bestLiquidScore: string | null = null;
-  let minScoreDrift = -2.0;
-  for (const [score, pool] of cs) {
-    const parts = score.split(":");
-    const h = Number(parts[0]);
-    const a = Number(parts[1]);
-    if (h + a > 4) continue;
-    const s = statsOf(pool);
-    if (s.mo != null && s.mc != null && s.mo > 1.0) {
-      const d = ((s.mc - s.mo) / s.mo) * 100.0;
-      if (d < minScoreDrift) {
-        minScoreDrift = d;
-        bestLiquidScore = score;
+  const targetDirH = getDirection(msH.drift);
+  const targetDirA = getDirection(msA.drift);
+
+  // 🌋 "Super explosive" flag: short HT Over 1.5 combined with a short FT
+  // Over 3.5 tends to precede lower-league goal avalanches.
+  const isSuperExplosive = htOver15Odd <= 2.0 && o35Odd <= 1.85;
+
+  // Correct Score drift for 1:0 / 2:0 — used only by the tempo read below.
+  const dCs10 = cs.has("1:0") ? statsOf(cs.get("1:0")!).drift : 0;
+  const dCs20 = cs.has("2:0") ? statsOf(cs.get("2:0")!).drift : 0;
+
+  // European Handicap drift for the favourite at -1 and -2 goals ("-1"/"-1.0"
+  // but not "-1.5" etc.).
+  function matchesHandicap(sel: string, n: 1 | 2): boolean {
+    const base = `-${n}`;
+    const dot = `-${n}.`;
+    return (sel.includes(base) && !sel.includes(dot)) || sel.includes(`${dot}0`);
+  }
+  function findEh(n: 1 | 2): PricePool | null {
+    for (const [sel, pool] of eh) {
+      if (!sel.includes(favTeamTok)) continue;
+      if (matchesHandicap(sel, n)) return pool;
+    }
+    return null;
+  }
+  const eh1Pool = findEh(1);
+  const eh2Pool = findEh(2);
+  const tDeltaEh1 = eh1Pool ? statsOf(eh1Pool).drift : 0;
+  const tDeltaEh2 = eh2Pool ? statsOf(eh2Pool).drift : 0;
+
+  const max1x2Move = Math.max(Math.abs(msH.drift), Math.abs(msD.drift), Math.abs(msA.drift));
+
+  // ---- Liquidity X-ray: which side the sharpest, most-confirmed money is on ----
+  const xrayEntries: { pct: number; nb: number; label: string }[] = [];
+  const moveSummaries: MarketMove[] = [];
+  for (const [label, agg] of allMoves) {
+    if (!agg.open.length || !agg.cur.length) continue;
+    const mo = median(agg.open);
+    const mc = median(agg.cur);
+    if (mo <= 1.05) continue;
+    const pct = ((mc - mo) / mo) * 100;
+    const nb = agg.books.size;
+
+    // Weighted move, used for the "biggest movers" list and the hot-score scan.
+    let adjPct = pct * liqWeight(nb);
+    if (label.includes("CORRECT_SCORE (FIRST_HALF)") && mo > 15.0) adjPct = 0;
+    moveSummaries.push({ label, openOdd: mo, currentOdd: mc, pctMove: adjPct, bookCount: nb });
+
+    // Unweighted move, only counted toward the X-ray once enough bookmakers confirm it.
+    if (nb >= 4 && mo <= 15.0) xrayEntries.push({ pct, nb, label });
+  }
+  moveSummaries.sort((a, b) => a.pctMove - b.pctMove);
+  const topDrops = moveSummaries.filter((m) => m.pctMove < -2.0).slice(0, 8);
+  const topRises = moveSummaries
+    .filter((m) => m.pctMove > 2.0)
+    .sort((a, b) => b.pctMove - a.pctMove)
+    .slice(0, 5);
+
+  let liqAway = 0;
+  let liqHome = 0;
+  let liqDraw = 0;
+  let liqOver = 0;
+  let liqLow = 0;
+  let liqEhHome = 0;
+  let liqEhAway = 0;
+  for (const { pct, nb, label: L } of xrayEntries) {
+    if (pct > -4.0) continue;
+    const w = liqWeight(nb);
+    const isFt = L.includes("(FULL_TIME)");
+
+    if (L.includes("DRAW_NO_BET") && isFt) {
+      const dnbSel = L.split("-").pop()?.trim() ?? "";
+      if (dnbSel === "A") liqAway += w;
+      else if (dnbSel === "H") liqHome += w;
+      continue;
+    }
+    if (isFt && (L.includes("SCORE:0:0") || L.includes("UNDER:0.5") || L.includes("UNDER:1.5") || L.includes("UNDER:2.0"))) {
+      liqLow += w;
+      continue;
+    }
+    if (isFt && (L.includes("SCORE:1:1") || L.includes("SCORE:2:2") || L.includes("HTFT:1/X") || L.includes("HTFT:X/X"))) {
+      liqDraw += w;
+      continue;
+    }
+    if (isFt && L.includes("OVER:") && ["2.5", "3.5", "4.5", "5.5"].some((x) => L.includes(x))) {
+      liqOver += w;
+      continue;
+    }
+    if (L.includes("BOTH_TEAMS_TO_SCORE") && L.includes("YES")) {
+      liqOver += w;
+      continue;
+    }
+    if (L.includes("CORRECT_SCORE") && ["2:2", "3:2", "2:3", "3:3", "4:2", "2:4", "4:3", "3:4"].some((s) => L.includes(s))) {
+      liqOver += w;
+    }
+    if (L.includes("FIRST_HALF") && L.includes("ASIAN_HANDICAP")) continue;
+
+    if (isFt && (L.includes("HTFT:X/2") || L.includes("HTFT:2/2") || L.includes("SCORE:0:1") || L.includes("SCORE:0:2") || L.includes("SCORE:1:2"))) {
+      liqAway += w;
+    }
+    if (isFt && L.includes("ASIAN_HANDICAP") && (L.includes("A:-1") || L.includes("A:-1.5") || L.includes("A:-2"))) {
+      liqAway += w;
+      liqEhAway += w;
+    }
+    if (isFt && L.includes("EUROPEAN_HANDICAP") && (L.includes("A:-1") || L.includes("A:-2"))) {
+      liqEhAway += w;
+      liqAway += w;
+    }
+    if (isFt && (L.includes("HTFT:1/1") || L.includes("SCORE:1:0") || L.includes("SCORE:2:0") || L.includes("SCORE:3:0"))) {
+      liqHome += w;
+    }
+    if (isFt && L.includes("ASIAN_HANDICAP") && (L.includes("H:-1") || L.includes("H:-2"))) {
+      liqHome += w;
+      liqEhHome += w;
+    }
+    if (isFt && L.includes("EUROPEAN_HANDICAP") && (L.includes("H:-1") || L.includes("H:-2"))) {
+      liqEhHome += w;
+      liqHome += w;
+    }
+  }
+
+  let xraySide: XraySide = "NONE";
+  if (liqLow >= 2 && liqLow >= liqAway) xraySide = "LOW";
+  else if (liqOver >= 3 && liqOver >= liqHome && liqOver >= liqAway) xraySide = "OVER";
+  else if (liqDraw >= 2 && liqDraw >= liqHome && liqDraw >= liqAway) xraySide = "DRAW";
+  else if (liqEhAway >= 2 || (liqAway >= 3 && liqAway > liqHome + 1)) xraySide = "AWAY";
+  else if (liqEhHome >= 2 || (liqHome >= 3 && liqHome > liqAway + 1)) xraySide = "HOME";
+
+  // A rising favourite handicap paired with the X-ray saying AWAY (while the
+  // home favourite is actually drifting out) is more likely a false signal.
+  if (xraySide === "AWAY" && favSide === "HOME" && tDeltaEh1 >= 5 && liqEhAway === 0) {
+    xraySide = liqLow > 0 ? "LOW" : "NONE";
+  }
+
+  // ---- Hot Correct Score prices ----
+  let trapScoreCount = 0;
+  const hotFtLiquid: string[] = [];
+  for (const m of topDrops) {
+    if (m.label.includes("CORRECT_SCORE") && m.openOdd >= 80) continue;
+    if (m.openOdd >= 8.0 && m.openOdd <= 45.0 && m.pctMove <= -18.0) trapScoreCount += 1;
+    if (m.label.includes("CORRECT_SCORE (FULL_TIME)") && m.pctMove <= -15.0) {
+      const match = m.label.match(/(\d+)\s*[:.]\s*(\d+)/);
+      if (match && m.openOdd <= 12.0 && m.bookCount >= 5) {
+        hotFtLiquid.push(`${match[1]}:${match[2]}`);
       }
     }
   }
-  function withLiquid(hedef: string[]): string[] {
-    if (bestLiquidScore && !hedef.includes(bestLiquidScore)) return [...hedef, bestLiquidScore];
-    return hedef;
+  const hotScores = hotFtLiquid;
+  const liquidOpenDraw = ["2:2", "3:3", "3:2", "2:3", "1:1", "4:4"].some((s) => hotScores.includes(s));
+
+  const handicapConfirmedBlowout = tDeltaEh1 <= -8.0 && tDeltaEh2 <= -8.0 && tDeltaBtts >= -3.0 && !liquidOpenDraw;
+  const isTrap =
+    trapScoreCount >= 2 &&
+    favOdd <= 1.85 &&
+    favDelta < 2.0 &&
+    !handicapConfirmedBlowout &&
+    (tDeltaEh1 >= -2.0 || tDeltaEh2 >= 0.0);
+  const isInsiderLeak =
+    trapScoreCount >= 2 && favOdd > 1.85 && (max1x2Move >= 4.0 || tDeltaO25 <= -6.0 || tDeltaBtts <= -6.0);
+
+  const isStagnant = max1x2Move <= 4.5 && Math.abs(tDeltaEh1) <= 4.0 && tDeltaBtts > -4.5 && tDeltaO25 > -4.5;
+
+  // ---- Expected goal-margin corridor ----
+  let expectedMargin: ExpectedMargin = "ANY";
+  let marginLabel = "Open / unclear";
+
+  if (isInsiderLeak) {
+    expectedMargin = "MARGIN_INSIDER_LEAK";
+    marginLabel = "Inside-info / chaos read (close match, money on long-shot scores)";
+  } else if (handicapConfirmedBlowout) {
+    expectedMargin = "MARGIN_3_PLUS";
+    marginLabel = "3+ goal blowout (EH -1 and -2 both confirmed, BTTS fading)";
+  } else if (msH.drift >= 7.0 && msA.drift <= -7.0 && favHomeOdd <= 2.6) {
+    expectedMargin = "MARGIN_HOME_RESISTANCE";
+    marginLabel = "Home resistance (away drifting out; expect 1-1 / 2-0 / 2-1)";
+  } else if (isTrap) {
+    expectedMargin = "MARGIN_TRAP";
+    marginLabel = "Trap corridor (heavy favourite drifting out, max 1-goal margin)";
+  } else if (xraySide === "LOW") {
+    expectedMargin = "MARGIN_LOW_SCORING";
+    marginLabel = "Liquid X-ray: 0-0 / Under 1.5 shortening (tight, locked match)";
+  } else if (xraySide === "DRAW") {
+    expectedMargin = "MARGIN_OPEN_DRAW";
+    marginLabel = "Liquid X-ray: 1-1 / HTFT 1/X shortening (draw)";
+  } else if (xraySide === "OVER") {
+    expectedMargin = "MARGIN_OVER_LADDER";
+    marginLabel = "Liquid X-ray: Over 2.5/3.5 and high-scoring lines shortening (chaos/explosion)";
+  } else if (xraySide === "AWAY" && favSide === "HOME" && msH.drift >= 8.0) {
+    expectedMargin = "MARGIN_CLOSE_OR_UPSET";
+    marginLabel = "Fleeing the favourite (X-ray says away, but the favourite itself is drifting out → upset/draw risk)";
+  } else if (xraySide === "AWAY") {
+    expectedMargin = "MARGIN_XRAY_AWAY";
+    marginLabel = "Liquid X-ray: away AH/EH -1/-2 or CS 0-1 / 0-2 shortening";
+  } else if (xraySide === "HOME") {
+    expectedMargin = "MARGIN_XRAY_HOME";
+    marginLabel = "Liquid X-ray: home AH/EH -1/-2 or CS 1-0 / 2-0 shortening";
+  } else if (isStagnant) {
+    expectedMargin = "MARGIN_STAGNANT_DRAW";
+    marginLabel = "Stagnant market (draw / tactical lock)";
+  } else if (tDeltaEh1 >= 4.0 && favOdd <= 2.4 && max1x2Move <= 8.0) {
+    if (o25Odd <= 1.6 && bttsYesOdd <= 1.6) {
+      expectedMargin = "MARGIN_OPEN_DRAW";
+      marginLabel = "Favourite's EH-1 drifting out + Over/BTTS still open (2-2 / 1-1, not 0-0)";
+    } else {
+      expectedMargin = "MARGIN_CLOSE_OR_UPSET";
+      marginLabel = "Favourite's EH-1 drifting out (1-1 / 0-0 / 1-0 corridor)";
+    }
+  } else if (favDelta <= -2.0 && tDeltaEh1 <= -4.0) {
+    const eh2LabelRising = topRises.some((m) => m.label.includes("EUROPEAN_HANDICAP") && (m.label.includes("-2") || m.label.includes("-3")) && m.pctMove > 15.0);
+    if (tDeltaEh2 >= 5.0 || eh2LabelRising) {
+      expectedMargin = "MARGIN_1_2";
+      marginLabel = "1-2 goal margin corridor (EH-1 confirmed, EH-2 capped out)";
+    } else {
+      expectedMargin = "MARGIN_FAV_WIN";
+      marginLabel = "Favourite win";
+    }
+  } else if (favDelta >= 3.0) {
+    expectedMargin = "MARGIN_CLOSE_OR_UPSET";
+    marginLabel = "0-1 goal margin / upset risk (fleeing the favourite)";
   }
 
-  let result: Omit<AnatomyEngineResult, "favSide" | "favOdd" | "isMajorLeague" | "actual"> | null = null;
+  // ---- Tempo / goal-count read ----
+  let targetTempo: TargetTempo = "BALANCED";
+  let tempoLabel = "Balanced tempo";
 
-  // MODEL 1: ULTIMATE BLOWOUT
-  if (favOdd <= 1.45 && gap <= 0.46 && under25.drift >= 6.0 && hto05.eff != null && hto05.eff <= 1.35) {
-    const hedef =
-      favSide === "HOME"
-        ? withLiquid(["3:1", "4:0", "4:1", "3:0", "3:2", "2:1"])
-        : withLiquid(["1:3", "0:4", "1:4", "0:3", "2:3", "1:2"]);
-    result = {
-      model: "ULTIMATE_BLOWOUT",
-      title: "🔥 ULTIMATE BLOWOUT (HT+FT PATLAMA)",
-      iyKarar: "İY 0.5 ÜST (İY 1.5Ü Riski)",
-      msTaraf: `MS ${favSide === "HOME" ? 1 : 2}`,
-      iyMs: favSide === "HOME" ? "1/1" : "2/2",
-      auKarar: "FT BLOWOUT (3.5 ÜST / 2.5 ÜST)",
-      golBandi: "4+ GOL (En az 3)",
-      iySkor: favSide === "HOME" ? "2:0 veya 1:1" : "0:2",
-      hedefSkorlar: hedef,
-    };
+  if (isSuperExplosive) {
+    targetTempo = "SUPER_EXPLOSIVE";
+    tempoLabel = "🌋 Super explosion risk: HT Over 1.5 < 2.00 & FT Over 3.5 < 1.85 (lower-league chaos pattern)";
+  } else if (xraySide === "LOW") {
+    targetTempo = "LOW_PACE";
+    tempoLabel = "🔒 Low tempo (X-ray confirmed, tight match)";
+  } else if (xraySide === "OVER") {
+    targetTempo = "EXPLOSIVE_GOALS";
+    tempoLabel = "💣 Heavy goal flow (X-ray confirmed)";
+  } else if (tDeltaO25 <= -5.0 || tDeltaBtts <= -5.0 || (tDeltaO25 <= -2.5 && tDeltaBtts <= -2.5)) {
+    targetTempo = "EXPLOSIVE_GOALS";
+    tempoLabel = "Heavy goal flow (Over/BTTS odds collapsing)";
+  } else if (favOdd <= 1.5 && o25Odd <= 1.42 && favDelta <= 2.0 && dCs10 < 4.0 && dCs20 < 4.0) {
+    targetTempo = "HIGH_PACE";
+    tempoLabel = "Heavy favourite + short Over price";
+  } else if (favOdd <= 1.25 && (dCs10 >= 4.0 || dCs20 >= 4.0)) {
+    targetTempo = "DECEPTIVE_TEMPO";
+    tempoLabel = "Short favourite, but 1-0 / 2-0 drifting out (messy-score risk)";
+  } else if (favOdd <= 1.7 && favDelta >= 6.0) {
+    targetTempo = "DECEPTIVE_TEMPO";
+    tempoLabel = "Favourite drifting out — directional shock (reverse-score risk)";
+  } else if ((o25Odd <= 1.55 && tDeltaO25 >= 1.5) || (favDelta >= 3.0 && o25Odd <= 1.55)) {
+    targetTempo = "DECEPTIVE_TEMPO";
+    tempoLabel = "Suspicious favourite & resistance on goals / lock risk";
+  } else if (o25Odd <= 1.7 && bttsYesOdd <= 1.7) {
+    targetTempo = "HIGH_PACE";
+    tempoLabel = "High tempo / goal duel";
+  } else if (u25Odd <= 1.75 || bttsNoOdd <= 1.75) {
+    targetTempo = "LOW_PACE";
+    tempoLabel = "Low tempo / tactical lock";
   }
-  // MODEL 2: DEFENSIVE LOCK
-  else if (
-    under25.drift <= -5.0 &&
-    gap >= 1.05 &&
-    hto15.eff != null &&
-    hto15.eff >= 2.45 &&
-    under25.mo != null &&
-    under25.mo <= 1.68
-  ) {
-    const hedef = withLiquid(["0:0", "1:0", "0:1", "1:1"]);
-    result = {
-      model: "DEFENSIVE_LOCK",
-      title: "🧱 DEFENSIVE LOCK (HT 0-0 & FT KISIR)",
-      iyKarar: "HT 0.5 UNDER (İY 0-0 KİLİT)",
-      msTaraf: "MS X veya TEK FARK",
-      iyMs: "X/X veya X/1",
-      auKarar: "FT 2.5 UNDER",
-      golBandi: "0-1 GOL (Maks 2)",
-      iySkor: "0:0",
-      hedefSkorlar: hedef,
-    };
-  }
-  // MODEL 3: İY KİLİT ➔ 2Y ÇÖZÜM (KONTROLLÜ FAV)
-  else if (favOdd <= 1.7 && favDrift <= 0.5 && hto15.eff != null && hto15.eff >= 2.25 && gap <= 1.15) {
-    const tight = favOdd <= 1.45 && hto05.eff != null && hto05.eff <= 1.28;
-    const hedef = tight
-      ? favSide === "HOME"
-        ? withLiquid(["2:0", "3:0", "4:0", "3:1", "4:1"])
-        : withLiquid(["0:2", "0:3", "0:4", "1:3", "1:4"])
-      : favSide === "HOME"
-        ? withLiquid(["2:0", "2:1", "3:0", "3:1", "1:0"])
-        : withLiquid(["0:2", "1:2", "0:3", "1:3", "0:1"]);
-    result = {
-      model: "IY_KILIT_2Y_COZUM",
-      title: "⚡ İY KİLİT ➔ 2Y ÇÖZÜM (KONTROLLÜ FAV)",
-      iyKarar: "İY 1.5 ALT (Tek Gol veya 0-0)",
-      msTaraf: `MS ${favSide === "HOME" ? 1 : 2}`,
-      iyMs: favSide === "HOME" ? "1/1 veya X/1" : "2/2 veya X/2",
-      auKarar: "2.5 ÜST / 2-3 GOL",
-      golBandi: "2-3 GOL ARALIĞI (Maks 4)",
-      iySkor: favSide === "HOME" ? "1:0 veya 0:0" : "0:1",
-      hedefSkorlar: hedef,
-    };
-  }
-  // MODEL 4: FAKE FAVORITE TRAP
-  else if (msH.eff >= 1.85 && msH.eff <= 2.3 && msH.drift >= 2.5 && msA.drift <= -1.8 && gap >= 0.8) {
-    const hedef = withLiquid(["1:1", "1:2", "0:1", "2:2"]);
-    result = {
-      model: "FAKE_FAVORITE_TRAP",
-      title: "⚠️ FAKE FAVORITE TRAP (SÜRPRİZ X2 & KG VAR)",
-      iyKarar: "İY 0.5 ÜST",
-      msTaraf: "ÇİFTE ŞANS X2",
-      iyMs: "X/2 veya 1/X",
-      auKarar: "KG VAR & 1.5 ÜST",
-      golBandi: "2-3 GOL ARALIĞI",
-      iySkor: "0:1 veya 1:1",
-      hedefSkorlar: hedef,
-    };
-  }
-
-  if (!result) return null;
 
   const isMajorLeague = isTargetMajor(meta?.leagueCountry, meta?.league);
 
-  // Maç bittiyse gerçekleşenle karşılaştır (bulletin fixture tablosu ile aynı home_score/away_score/home_ht_score/away_ht_score alanları)
+  // If the match has finished, compare the read against what actually happened.
   let actual: AnatomyActualCheck | null = null;
   const hSc = toInt(meta?.homeScore);
   const aSc = toInt(meta?.awayScore);
   if (hSc != null && aSc != null) {
     const hHt = toInt(meta?.homeHtScore);
     const aHt = toInt(meta?.awayHtScore);
-    const totHt = hHt != null && aHt != null ? hHt + aHt : null;
-    const totGoals = hSc + aSc;
-    const ftRes: "MS1" | "MSX" | "MS2" = hSc > aSc ? "MS1" : aSc > hSc ? "MS2" : "MSX";
+    const totalGoals = hSc + aSc;
     const actualScore = `${hSc}:${aSc}`;
 
-    let msHit = false;
-    let iyHit = totHt != null ? false : true;
-    let auHit = false;
-    let bandHit = false;
-
-    if (result.model === "ULTIMATE_BLOWOUT") {
-      msHit = favSide === "HOME" ? ftRes === "MS1" : ftRes === "MS2";
-      if (totHt != null) iyHit = totHt >= 1;
-      auHit = totGoals >= 3;
-      bandHit = totGoals >= 3;
-    } else if (result.model === "DEFENSIVE_LOCK") {
-      msHit = ftRes === "MSX" || Math.abs(hSc - aSc) <= 1;
-      if (totHt != null) iyHit = totHt === 0;
-      auHit = totGoals < 3;
-      bandHit = totGoals <= 2;
-    } else if (result.model === "IY_KILIT_2Y_COZUM") {
-      msHit = favSide === "HOME" ? ftRes === "MS1" : ftRes === "MS2";
-      if (totHt != null) iyHit = totHt <= 1;
-      auHit = totGoals >= 2;
-      bandHit = totGoals >= 2 && totGoals <= 4;
-    } else if (result.model === "FAKE_FAVORITE_TRAP") {
-      msHit = ftRes === "MSX" || ftRes === "MS2";
-      if (totHt != null) iyHit = totHt >= 1;
-      auHit = totGoals >= 2;
-      bandHit = totGoals >= 2 && totGoals <= 4;
+    let tempoHit: boolean | null = null;
+    if (targetTempo === "SUPER_EXPLOSIVE" || targetTempo === "EXPLOSIVE_GOALS" || targetTempo === "HIGH_PACE") {
+      tempoHit = totalGoals >= 3;
+    } else if (targetTempo === "LOW_PACE") {
+      tempoHit = totalGoals <= 2;
     }
 
     actual = {
       score: actualScore,
       htScore: hHt != null && aHt != null ? `${hHt}:${aHt}` : null,
-      msHit,
-      iyHit,
-      auHit,
-      bandHit,
-      scoreHit: result.hedefSkorlar.includes(actualScore),
+      totalGoals,
+      scoreHit: hotScores.includes(actualScore),
+      tempoHit,
     };
   }
 
   return {
-    ...result,
     favSide,
     favOdd: Math.round(favOdd * 100) / 100,
+    homeDirection: targetDirH,
+    awayDirection: targetDirA,
+    xraySide,
+    expectedMargin,
+    marginLabel,
+    targetTempo,
+    tempoLabel,
+    isSuperExplosive,
+    hotScores,
+    topDrops,
     isMajorLeague,
     actual,
   };
