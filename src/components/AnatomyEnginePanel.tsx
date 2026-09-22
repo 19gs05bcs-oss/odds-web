@@ -1,11 +1,19 @@
-import type { AnatomyEngineResult } from "@/lib/analysis/anatomyEngine";
+import type { AnatomyEngineResult, XraySide } from "@/lib/analysis/anatomyEngine";
 import styles from "./SmartAnalysisClient.module.css";
 
-const MODEL_BADGE_CLASS: Record<AnatomyEngineResult["model"], string> = {
-  ULTIMATE_BLOWOUT: styles.pos,
-  DEFENSIVE_LOCK: styles.muted,
-  IY_KILIT_2Y_COZUM: styles.pos,
-  FAKE_FAVORITE_TRAP: styles.neg,
+const XRAY_LABEL: Record<XraySide, string> = {
+  LOW: "Low scoring",
+  DRAW: "Draw",
+  OVER: "Over / goals",
+  AWAY: "Away",
+  HOME: "Home",
+  NONE: "No clear signal",
+};
+
+const DIRECTION_ICON: Record<"UP" | "DOWN" | "FLAT", string> = {
+  UP: "📈",
+  DOWN: "📉",
+  FLAT: "➡️",
 };
 
 function HitTag({ hit, label }: { hit: boolean; label: string }) {
@@ -20,26 +28,25 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
   if (!result) {
     return (
       <section className={styles.card}>
-        <h3>🧬 Anatomy Engine</h3>
+        <h3>📡 Market Detect</h3>
         <p className={styles.empty}>
-          This match&rsquo;s FT 1X2, FT/HT Over-Under, and Correct Score odds don&rsquo;t line up
-          with any of the four anatomy models.
+          Not enough FT 1X2 odds on this match yet to read the market.
         </p>
       </section>
     );
   }
 
   const {
-    title,
     favSide,
     favOdd,
-    iyKarar,
-    msTaraf,
-    iyMs,
-    auKarar,
-    golBandi,
-    iySkor,
-    hedefSkorlar,
+    homeDirection,
+    awayDirection,
+    xraySide,
+    marginLabel,
+    tempoLabel,
+    isSuperExplosive,
+    hotScores,
+    topDrops,
     isMajorLeague,
     actual,
   } = result;
@@ -47,96 +54,93 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
   return (
     <section className={styles.card}>
       <h3>
-        🧬 Anatomy Engine{" "}
+        📡 Market Detect{" "}
         <span className={styles.muted}>
           · Favourite {favSide === "HOME" ? "Home" : "Away"} @{favOdd.toFixed(2)}
         </span>
       </h3>
       <p className={styles.cardLead}>
-        A rule-based anatomy scan across four fixed patterns (Blowout / Defensive Lock / HT Lock
-        → 2H Solve / Fake Favourite Trap), derived purely from this match&rsquo;s own FT 1X2,
-        FT/HT Over-Under, and Correct Score odds. This is a pattern match, not a guaranteed
-        outcome.
+        A liquidity-weighted read of how every quoted market moved between opening and current
+        price across all bookmakers on this fixture — which side the sharpest money is leaning
+        on, the expected goal-margin corridor, and the tempo/goal-count read. This is a market
+        scan, not a guaranteed outcome.
       </p>
 
       <p className={styles.subHead}>
-        Model: <strong className={MODEL_BADGE_CLASS[result.model]}>{title}</strong>
+        Directions: Home {DIRECTION_ICON[homeDirection]} {homeDirection} · Away{" "}
+        {DIRECTION_ICON[awayDirection]} {awayDirection}
         {isMajorLeague ? <span className={styles.geScoreTag}> Major League</span> : null}
       </p>
 
       <div className={styles.geVerdictGrid}>
         <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>1st Half</span>
-          <span className={styles.geVerdictText}>{iyKarar}</span>
+          <span className={styles.geVerdictLabel}>X-ray side</span>
+          <span className={styles.geVerdictText}>{XRAY_LABEL[xraySide]}</span>
         </div>
         <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>Full Time</span>
-          <span className={styles.geVerdictText}>{msTaraf}</span>
+          <span className={styles.geVerdictLabel}>Margin corridor</span>
+          <span className={styles.geVerdictText}>{marginLabel}</span>
         </div>
         <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>HT/FT</span>
-          <span className={styles.geVerdictText}>{iyMs}</span>
-        </div>
-      </div>
-
-      <p className={styles.subHead}>
-        <strong>Goal Reading</strong>
-      </p>
-      <div className={styles.geStatsGrid}>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Over/Under Call</span>
-          <span className={styles.geStatValue}>{auKarar}</span>
-        </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Goal Band</span>
-          <span className={styles.geStatValue}>{golBandi}</span>
-        </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Expected HT Score</span>
-          <span className={styles.geStatValue}>{iySkor}</span>
-        </div>
-      </div>
-
-      <p className={styles.subHead}>
-        <strong>Target Scores</strong>
-      </p>
-      <p className={styles.cardLead}>
-        {hedefSkorlar.map((s) => (
-          <span key={s} className={styles.geScoreTag} style={{ marginRight: "0.4rem" }}>
-            {s}
-            {actual?.score === s ? " ←" : ""}
+          <span className={styles.geVerdictLabel}>Tempo read</span>
+          <span className={styles.geVerdictText}>
+            {isSuperExplosive ? "🌋 " : ""}
+            {tempoLabel}
           </span>
-        ))}
-      </p>
+        </div>
+      </div>
+
+      {hotScores.length ? (
+        <>
+          <p className={styles.subHead}>
+            <strong>Hot Correct Score prices</strong>
+          </p>
+          <p className={styles.cardLead}>
+            {hotScores.map((s) => (
+              <span key={s} className={styles.geScoreTag} style={{ marginRight: "0.4rem" }}>
+                {s}
+                {actual?.score === s ? " ←" : ""}
+              </span>
+            ))}
+          </p>
+        </>
+      ) : null}
+
+      {topDrops.length ? (
+        <>
+          <p className={styles.subHead}>
+            <strong>Biggest liquidity-weighted drops</strong>
+          </p>
+          <ul className={styles.cardLead} style={{ margin: 0, paddingLeft: "1.1rem" }}>
+            {topDrops.slice(0, 5).map((m) => (
+              <li key={m.label}>
+                <span className={styles.muted}>{m.label}</span> {m.openOdd.toFixed(2)} →{" "}
+                {m.currentOdd.toFixed(2)} ({m.pctMove.toFixed(1)}%, {m.bookCount} books)
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
 
       {actual ? (
         <>
           <p className={styles.subHead}>
             Final score: <span className={styles.geScoreTag}>{actual.score}</span>
-            {actual.htScore ? (
-              <span className={styles.muted}> · HT {actual.htScore}</span>
-            ) : null}
+            {actual.htScore ? <span className={styles.muted}> · HT {actual.htScore}</span> : null}
           </p>
           <div className={styles.geStatsGrid}>
             <div className={styles.geStat}>
-              <HitTag hit={actual.msHit} label="FT call" />
+              <HitTag hit={actual.scoreHit} label="Hot score" />
             </div>
-            <div className={styles.geStat}>
-              <HitTag hit={actual.iyHit} label="1st half call" />
-            </div>
-            <div className={styles.geStat}>
-              <HitTag hit={actual.auHit} label="O/U call" />
-            </div>
-            <div className={styles.geStat}>
-              <HitTag hit={actual.bandHit} label="Goal band" />
-            </div>
-            <div className={styles.geStat}>
-              <HitTag hit={actual.scoreHit} label="Target score" />
-            </div>
+            {actual.tempoHit != null ? (
+              <div className={styles.geStat}>
+                <HitTag hit={actual.tempoHit} label="Tempo read" />
+              </div>
+            ) : null}
           </div>
         </>
       ) : (
-        <p className={styles.muted}>Match not finished yet — model and targets shown only.</p>
+        <p className={styles.muted}>Match not finished yet — read shown only.</p>
       )}
     </section>
   );
