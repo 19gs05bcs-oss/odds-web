@@ -39,7 +39,23 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
     expCol,
     isMajorLeague,
     actual,
+    engineSource,
+    engineId,
+    lambda,
+    drifts,
+    similarity,
+    twinProof,
+    simDisplayPct,
+    shields,
+    gateNotes,
+    enrichStatus,
+    mmsV23,
+    kilitV23,
+    mispricingAnomaly,
   } = result;
+
+  const f2 = (n: number | null | undefined): string => (n == null ? "-" : n.toFixed(2));
+  const pct = (x: number): string => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(0)}%`;
 
   return (
     <section className={styles.card}>
@@ -74,6 +90,7 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
         <div className={styles.geVerdictBox}>
           <span className={styles.geVerdictLabel}>Engine</span>
           <span className={styles.geVerdictText}>{comboLabel}</span>
+          <span className={styles.muted}>{engineSource}</span>
         </div>
       </div>
 
@@ -107,6 +124,89 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
           </li>
         ) : null}
       </ul>
+
+      <p className={styles.subHead}>
+        <strong>Goal expectation (λ) &amp; drifts</strong>
+        {enrichStatus === "pending" ? (
+          <span className={styles.muted}> · loading H2H form &amp; twins…</span>
+        ) : null}
+        {enrichStatus === "unavailable" ? (
+          <span className={styles.muted}> · form / twin data unavailable — v23 gates cannot confirm</span>
+        ) : null}
+      </p>
+      <ul className={styles.cardLead} style={{ margin: 0, paddingLeft: "1.1rem" }}>
+        <li>
+          <span className={styles.muted}>λ_market</span> {f2(lambda.market)} ·{" "}
+          <span className={styles.muted}>λ_form</span>{" "}
+          {lambda.form != null
+            ? `${f2(lambda.form)} (n=${lambda.formN}, w=${lambda.formWSum}, γ=${f2(lambda.gamma)})`
+            : "none"}{" "}
+          → <span className={styles.muted}>λ_blend</span> <strong>{f2(lambda.blend)}</strong>
+        </li>
+        <li>
+          <span className={styles.muted}>Δ Over 2.5</span> {pct(drifts.d25)} ·{" "}
+          <span className={styles.muted}>Δ Over 3.5</span> {pct(drifts.d35)} ·{" "}
+          <span className={styles.muted}>Δ BTTS Yes</span> {pct(drifts.dBtts)} ·{" "}
+          <span className={styles.muted}>Δ CS 0:0</span> {pct(drifts.dCs00)}
+        </li>
+        <li>
+          <span className={styles.muted}>MMS v23 (Shin)</span> {mmsV23.toFixed(0)} ·{" "}
+          <span className={styles.muted}>Lock v23</span> {kilitV23.toFixed(0)}
+        </li>
+      </ul>
+
+      <p className={styles.subHead}>
+        <strong>888 M6 similarity</strong>
+      </p>
+      {similarity ? (
+        <ul className={styles.cardLead} style={{ margin: 0, paddingLeft: "1.1rem" }}>
+          <li>
+            <span className={styles.muted}>Similarity</span> {similarity.simPct.toFixed(0)}%
+            {engineId === "SAF_V23_KILIT" && simDisplayPct != null ? (
+              <span className={styles.muted}> (lock reads inverse: {simDisplayPct.toFixed(0)}%)</span>
+            ) : null}{" "}
+            · <span className={styles.muted}>bank</span> {similarity.bankSize}
+          </li>
+          <li>
+            <span className={styles.muted}>Twins (k={similarity.k})</span> 3.5+: {similarity.twinO35}/5 · 5.5+:{" "}
+            {similarity.twinO55}/5 · &lt;2.5: {similarity.twinU25}/5
+            {twinProof ? <span className={styles.muted}> · engine proof: {twinProof}</span> : null}
+          </li>
+          <li>
+            <span className={styles.muted}>Nearest twins</span>{" "}
+            {similarity.top.map((t) => `${t.score} (${t.tot}G)`).join(" · ")}
+          </li>
+        </ul>
+      ) : (
+        <p className={styles.muted}>
+          {enrichStatus === "pending" ? "Loading twin check…" : "No twin data for this match."}
+        </p>
+      )}
+
+      {shields.length || gateNotes.length || mispricingAnomaly ? (
+        <>
+          <p className={styles.subHead}>
+            <strong>Shields &amp; gates</strong>
+          </p>
+          <ul className={styles.cardLead} style={{ margin: 0, paddingLeft: "1.1rem" }}>
+            {shields.map((s) => (
+              <li key={s}>
+                <span className={styles.neg}>{s}</span>
+              </li>
+            ))}
+            {gateNotes.map((g) => (
+              <li key={g}>
+                <span className={styles.muted}>{g}</span>
+              </li>
+            ))}
+            {mispricingAnomaly ? (
+              <li>
+                <span className={styles.muted}>OU mispricing: E_FT &lt; E_HT (2nd-half expectation negative)</span>
+              </li>
+            ) : null}
+          </ul>
+        </>
+      ) : null}
 
       {actual ? (
         <>
