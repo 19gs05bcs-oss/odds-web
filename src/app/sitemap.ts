@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next";
 import { listTipSlugs } from "@/lib/freeTips";
 
+export const revalidate = 3600;
+
 const SITE_URL = "https://oddsvig.com";
 
 /**
