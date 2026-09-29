@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { listTipSlugs } from "@/lib/freeTips";
 
 const SITE_URL = "https://oddsvig.com";
 
@@ -10,8 +11,9 @@ const SITE_URL = "https://oddsvig.com";
  * login gerektirmeyen sayfaları koyuyoruz. Gated sayfalar için içerik
  * public hale gelmeden (teaser sayfa vb.) sitemap'e eklenmemeli.
  */
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
+  const tips = await listTipSlugs();
 
   return [
     {
@@ -26,5 +28,17 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "monthly",
       priority: 0.7,
     },
+    {
+      url: `${SITE_URL}/free-tips`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.9,
+    },
+    ...tips.map((t) => ({
+      url: `${SITE_URL}/free-tips/${t.slug}`,
+      lastModified: new Date(t.updated_at),
+      changeFrequency: "daily" as const,
+      priority: 0.6,
+    })),
   ];
 }
