@@ -30,15 +30,36 @@ export default async function TipPage({ params }: Props) {
   const t = await getTipBySlug(params.slug);
   if (!t) notFound();
 
+  const startIso = new Date(t.kickoff_at).toISOString();
+  const endIso = new Date(new Date(t.kickoff_at).getTime() + 2 * 60 * 60 * 1000).toISOString();
+  const eventDesc = `${t.home_name} vs ${t.away_name}${t.league ? ` (${t.league})` : ""}: free tip ${t.market} — ${t.pick}${
+    t.odds != null ? ` @ ${t.odds.toFixed(2)}` : ""
+  }. Odds movement analysis and historical pattern match.`;
+
   const jsonLd = [
     {
       "@context": "https://schema.org",
       "@type": "SportsEvent",
       name: `${t.home_name} vs ${t.away_name}`,
-      startDate: t.kickoff_at,
+      description: eventDesc,
+      startDate: startIso,
+      endDate: endIso,
+      eventStatus: "https://schema.org/EventScheduled",
+      eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
       sport: "Soccer",
+      image: [`${SITE}/oddsvig.png`],
+      location: {
+        "@type": "Place",
+        name: t.league ? `${t.league} venue` : "Venue to be confirmed",
+        address: "To be confirmed",
+      },
+      organizer: { "@type": "Organization", name: t.league ?? "Football association" },
       homeTeam: { "@type": "SportsTeam", name: t.home_name },
       awayTeam: { "@type": "SportsTeam", name: t.away_name },
+      performer: [
+        { "@type": "SportsTeam", name: t.home_name },
+        { "@type": "SportsTeam", name: t.away_name },
+      ],
       url: `${SITE}/free-tips/${t.slug}`,
     },
     {
