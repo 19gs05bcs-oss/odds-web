@@ -30,7 +30,7 @@ import type { H2hForm, TwinFeatures, TwinResult } from "@/lib/analysis/m6Twins";
  *
  * On top of the single-winner engine chain, `goldSignals` carries the radar's
  * "Gold Signals" (V8 Home Rout, Elite Duel, Entropy Shock, MER Split, Combined
- * Fire) — evaluated independently on opening/current medians, so more than one
+ * Fire, X1/X2 draw alpha) — evaluated independently on opening/current medians, so more than one
  * can fire on the same match.
  *
  * READING LIMIT: this is a market-state scan, not a guaranteed outcome. If
@@ -73,14 +73,21 @@ export type EngineSource = "super_radar_v23" | "toplu_radar saf v23" | "toplu_ra
 export type AnatomyEnrichment = { form: H2hForm | null; twins: TwinResult | null };
 
 /** Gold Signals — ported from the Python live radar (radar_supabase_gold.py, v24). Independent of the single-winner engine chain above: several can fire on the same match. */
-export type GoldSignalId = "V8_HOME_ROUT" | "ELITE_DUEL" | "ENTROPY_SHOCK" | "MER_SPLIT" | "COMBINED_FIRE";
+export type GoldSignalId =
+  | "V8_HOME_ROUT"
+  | "ELITE_DUEL"
+  | "ENTROPY_SHOCK"
+  | "MER_SPLIT"
+  | "COMBINED_FIRE"
+  | "X1_SMART_MONEY_DRAW"
+  | "X2_TEMPO_22_DRAW";
 
 export type GoldSignal = {
   id: GoldSignalId;
   label: string; // "🚀 V8: HOME ROUT"
-  market: "Over 3.5" | "Over 2.5";
+  market: "Over 3.5" | "Over 2.5" | "Draw (FT)";
   odds: number | null; // opening median of the target market
-  goalsRequired: number; // total goals needed for the target to win (4 for Over 3.5 signals, 3 for Over 2.5)
+  goalsRequired: number | null; // total goals needed for the target to win (4 for Over 3.5 signals, 3 for Over 2.5); null for draw signals
   backtest: string | null; // historical figure quoted in the radar script header (not re-verified here)
   hit: boolean | null; // null until the match has finished
 };
@@ -90,6 +97,7 @@ export type GoldMetrics = {
   klTotal: number; // KL divergence of opening vs current devigged 1X2 + OU 2.5
   d45: number; // Over 4.5 opening -> current (fraction)
   dCs10: number; // CS 1:0 opening -> current (fraction)
+  dDraw: number; // FT draw (X) opening -> current (fraction)
 };
 
 export type AnatomyActualCheck = {
@@ -498,6 +506,7 @@ export function computeAnatomyEngine(
   const rawCs00 = openMedian(csPool(csFt, "0:0"));
   const rawCs11 = openMedian(csPool(csFt, "1:1"));
   const rawCsHt00 = openMedian(csPool(csHt, "0:0"));
+  const rawCs22 = openMedian(csPool(csFt, "2:2"));
   const rawCs21 = openMedian(csPool(csFt, "2:1"));
   const rawCs12 = openMedian(csPool(csFt, "1:2"));
 
@@ -884,12 +893,14 @@ export function computeAnatomyEngine(
   const isMajorLeague = isTargetMajor(meta?.leagueCountry, meta?.league);
 
   // =========================================================================
-  // 🏆 GOLD SIGNALS (radar_supabase_gold.py v24) — non-exclusive, opening-odds based.
+  // 🏆 GOLD SIGNALS (radar_supabase_gold.py v25) — non-exclusive, opening-odds based.
   //   🚀 V8 Home Rout (Over 3.5) · 💎 Elite Duel (Over 2.5) · ⚡ Entropy Shock (Over 2.5)
   //   🎯 MER Split (Over 2.5) · 🔥 Combined Fire (MER + V8 / MER + Duel → Over 3.5)
+  //   🤝 X1 Strong Smart Money · 🤝 X2 High-Tempo 2-2 Corridor (both → FT Draw)
   // =========================================================================
   const dOf = (open: number | null, cur: number | null): number => (open && cur != null && open > 1.0 ? (cur - open) / open : 0);
   const d45 = dOf(rawO45o, curMedian(ou45.over));
+  const dDraw = dOf(rawDo, curMedian(ft.D));
   const dCs10 = dOf(openMedian(csPool(csFt, "1:0")), curMedian(csPool(csFt, "1:0")));
 
   // Radar MMS: only the 0:0 / 1:1 CS penalties (the HT 0:0 penalty in mmsV23 is not part of the radar).
@@ -926,6 +937,9 @@ export function computeAnatomyEngine(
   const goldEntropy = klTotal >= 0.04 && tDeltaO25 <= 0 && rawO25o != null && rawO25o >= 1.45 && mmsRadar >= 55.0;
   const goldMer = rawO25o != null && rawO25o <= 1.4 && d45 <= -0.02 && dCs10 >= 0.03 && tDeltaO25 < 0.04;
 
+  const goldX1 = rawDo != null && rawDo >= 3.3 && dDraw <= -0.06;
+  const goldX2 = rawCs22 != null && rawCs22 <= 12.0 && rawO25o != null && rawO25o <= 1.85 && dDraw <= -0.03;
+
   type GoldDef = Omit<GoldSignal, "hit">;
   const goldDefs: GoldDef[] = [];
   const wildLeague = GOLD_WILD_LEAGUE.some((w) => String(meta?.league || "").toLowerCase().includes(w));
@@ -940,14 +954,20 @@ export function computeAnatomyEngine(
       if (goldEntropy) goldDefs.push({ id: "ENTROPY_SHOCK", label: "⚡ INFORMATION ENTROPY SHOCK (Smart Money)", market: "Over 2.5", odds: rawO25o, goalsRequired: 3, backtest: "Historical ROI +15%+" });
       if (goldMer) goldDefs.push({ id: "MER_SPLIT", label: "🎯 MER SPLIT (Banker Flow)", market: "Over 2.5", odds: rawO25o, goalsRequired: 3, backtest: "Historical hit rate 79%-100%" });
     }
+    // 🤝 Draw (FT X) alpha signals — independent of the goal-market signals above.
+    // X1: draw odds ≥ 3.30 collapsing ≥ 6% since opening.
+    if (goldX1) goldDefs.push({ id: "X1_SMART_MONEY_DRAW", label: "🤝 X1: STRONG SMART MONEY", market: "Draw (FT)", odds: rawDo, goalsRequired: null, backtest: "Historical ROI +4.0% (avg odds 4.40)" });
+    // X2: CS 2:2 ≤ 12.0, Over 2.5 ≤ 1.85, draw odds down ≥ 3%.
+    if (goldX2) goldDefs.push({ id: "X2_TEMPO_22_DRAW", label: "🤝 X2: HIGH-TEMPO 2-2 CORRIDOR", market: "Draw (FT)", odds: rawDo, goalsRequired: null, backtest: "Historical ROI +4.3% (avg odds 3.57)" });
   }
-  const goldTotalGoals = (() => {
-    const h = toInt(meta?.homeScore);
-    const a = toInt(meta?.awayScore);
-    return h != null && a != null ? h + a : null;
-  })();
-  const goldSignals: GoldSignal[] = goldDefs.map((g) => ({ ...g, hit: goldTotalGoals == null ? null : goldTotalGoals >= g.goalsRequired }));
-  const goldMetrics: GoldMetrics = { mmsRadar, klTotal, d45, dCs10 };
+  const goldH = toInt(meta?.homeScore);
+  const goldA = toInt(meta?.awayScore);
+  const goldFinished = goldH != null && goldA != null;
+  const goldSignals: GoldSignal[] = goldDefs.map((g) => ({
+    ...g,
+    hit: !goldFinished ? null : g.goalsRequired == null ? goldH === goldA : goldH! + goldA! >= g.goalsRequired,
+  }));
+  const goldMetrics: GoldMetrics = { mmsRadar, klTotal, d45, dCs10, dDraw };
 
   // If the match has finished, compare the read against what actually happened.
   let actual: AnatomyActualCheck | null = null;
