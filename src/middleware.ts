@@ -19,11 +19,18 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   let response = NextResponse.next({ request });
 
+  // 1. Googlebot ziyareti geldiğinde Railway konsoluna log bas
+  const userAgent = request.headers.get("user-agent") || "";
+  if (userAgent.includes("Googlebot")) {
+    console.log(`[GOOGLEBOT HIT] ${request.method} ${pathname} - IP: ${request.ip ?? "unknown"}`);
+  }
+
   const isMemberRoute =
     matchesPrefix(pathname, MEMBER_PAGES) || matchesPrefix(pathname, MEMBER_API);
   const isSmartRoute =
     matchesPrefix(pathname, SMART_PAGES) || matchesPrefix(pathname, SMART_API);
 
+  // Üye sayfası değilse (ör. /free-tips) Supabase sorgusu yapmadan doğrudan devam et
   if (!isMemberRoute && !isSmartRoute) {
     return response;
   }
@@ -102,6 +109,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/free-tips/:path*", // Googlebot takibi için eklendi
     "/analyze/:path*",
     "/matches/:path*",
     "/smart-analysis/:path*",
