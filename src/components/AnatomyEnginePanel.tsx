@@ -52,6 +52,8 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
     mmsV23,
     kilitV23,
     mispricingAnomaly,
+    goldSignals,
+    goldMetrics,
   } = result;
 
   const f2 = (n: number | null | undefined): string => (n == null ? "-" : n.toFixed(2));
@@ -93,6 +95,33 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
           <span className={styles.muted}>{engineSource}</span>
         </div>
       </div>
+
+      <p className={styles.subHead}>
+        <strong>🏆 Gold Signals</strong>
+        <span className={styles.muted}>
+          {" "}
+          · MMS {goldMetrics.mmsRadar.toFixed(0)} · KL {goldMetrics.klTotal.toFixed(3)}
+        </span>
+      </p>
+      {goldSignals.length ? (
+        <ul className={styles.cardLead} style={{ margin: 0, paddingLeft: "1.1rem" }}>
+          {goldSignals.map((g) => (
+            <li key={g.id}>
+              <strong>{g.label}</strong> → {g.market}
+              {g.odds != null ? <> @{g.odds.toFixed(2)}</> : null}
+              {g.backtest ? <span className={styles.muted}> · {g.backtest}</span> : null}
+              {g.hit != null ? (
+                <>
+                  {" "}
+                  <HitTag hit={g.hit} label={g.hit ? "Won" : "Lost"} />
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className={styles.muted}>No Gold Signal triggered on this match.</p>
+      )}
 
       <p className={styles.subHead}>
         <strong>Sub-ratings</strong>
