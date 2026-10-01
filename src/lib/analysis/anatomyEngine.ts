@@ -28,6 +28,11 @@ import type { H2hForm, TwinFeatures, TwinResult } from "@/lib/analysis/m6Twins";
  * matches into hit-rate tables) is NOT ported here — that's a batch/reporting
  * concern, not a single-match read.
  *
+ * On top of the single-winner engine chain, `goldSignals` carries the radar's
+ * "Gold Signals" (V8 Home Rout, Elite Duel, Entropy Shock, MER Split, Combined
+ * Fire) — evaluated independently on opening/current medians, so more than one
+ * can fire on the same match.
+ *
  * READING LIMIT: this is a market-state scan, not a guaranteed outcome. If
  * the match hasn't been played yet, only the read itself is shown; once it
  * has finished (home_score/away_score present), it's compared to what
@@ -66,6 +71,26 @@ export type EngineSource = "super_radar_v23" | "toplu_radar saf v23" | "toplu_ra
 
 /** /api/smart-analysis/market-detect cevabı: fixture.h2h formu + 888 M6 KNN ikizleri. */
 export type AnatomyEnrichment = { form: H2hForm | null; twins: TwinResult | null };
+
+/** Gold Signals — ported from the Python live radar (radar_supabase_gold.py, v24). Independent of the single-winner engine chain above: several can fire on the same match. */
+export type GoldSignalId = "V8_HOME_ROUT" | "ELITE_DUEL" | "ENTROPY_SHOCK" | "MER_SPLIT" | "COMBINED_FIRE";
+
+export type GoldSignal = {
+  id: GoldSignalId;
+  label: string; // "🚀 V8: HOME ROUT"
+  market: "Over 3.5" | "Over 2.5";
+  odds: number | null; // opening median of the target market
+  goalsRequired: number; // total goals needed for the target to win (4 for Over 3.5 signals, 3 for Over 2.5)
+  backtest: string | null; // historical figure quoted in the radar script header (not re-verified here)
+  hit: boolean | null; // null until the match has finished
+};
+
+export type GoldMetrics = {
+  mmsRadar: number; // radar-mode MMS (only 0:0 / 1:1 CS penalties, no HT 0:0 penalty — differs from mmsV23)
+  klTotal: number; // KL divergence of opening vs current devigged 1X2 + OU 2.5
+  d45: number; // Over 4.5 opening -> current (fraction)
+  dCs10: number; // CS 1:0 opening -> current (fraction)
+};
 
 export type AnatomyActualCheck = {
   score: string;
@@ -124,6 +149,8 @@ export type AnatomyEngineResult = {
   gateNotes: string[]; // V23 motorlarının hipotez ✓ ama teyit ✗ açıklamaları
   enrichStatus: "ok" | "pending" | "unavailable";
   twinFeatures: TwinFeatures | null; // route'a gönderilecek KNN vektörü
+  goldSignals: GoldSignal[]; // radar Gold Signals that fired on this match (empty = none / excluded league)
+  goldMetrics: GoldMetrics;
   mispricingAnomaly: boolean; // E_2H < 0 (bilgi amaçlı; sınıflamayı değiştirmez)
   isMajorLeague: boolean;
   actual: AnatomyActualCheck | null;
@@ -319,6 +346,20 @@ function solveHtExpectedGoals(u15htO: number | null, o15htO: number | null): num
   const lam = goldenSectionMin((l) => (poissonCdf(1, l) - pU15) ** 2, 0.01, 8.0);
   return Number.isFinite(lam) ? Math.round(lam * 100) / 100 : null;
 }
+
+/** KL-style divergence used by the radar: sum(q * ln(q / p)) with p = opening dist, q = current dist. */
+function klDivergence(pDist: number[], qDist: number[]): number {
+  let kl = 0;
+  for (let i = 0; i < pDist.length; i++) {
+    const p = Math.max(1e-6, Math.min(0.999999, pDist[i]));
+    const q = Math.max(1e-6, Math.min(0.999999, qDist[i]));
+    kl += q * Math.log(q / p);
+  }
+  return Math.max(0, kl);
+}
+
+/** Same exclusion list as the radar's WILD tuple (substring match on the league name). */
+const GOLD_WILD_LEAGUE = ["u19", "u20", "u21", "u23", "women", "bayan", "youth", "friendly", "junioren", "cup", "kupa", "copa"];
 
 // ---------------------------------------------------------------------------
 
@@ -842,6 +883,72 @@ export function computeAnatomyEngine(
 
   const isMajorLeague = isTargetMajor(meta?.leagueCountry, meta?.league);
 
+  // =========================================================================
+  // 🏆 GOLD SIGNALS (radar_supabase_gold.py v24) — non-exclusive, opening-odds based.
+  //   🚀 V8 Home Rout (Over 3.5) · 💎 Elite Duel (Over 2.5) · ⚡ Entropy Shock (Over 2.5)
+  //   🎯 MER Split (Over 2.5) · 🔥 Combined Fire (MER + V8 / MER + Duel → Over 3.5)
+  // =========================================================================
+  const dOf = (open: number | null, cur: number | null): number => (open && cur != null && open > 1.0 ? (cur - open) / open : 0);
+  const d45 = dOf(rawO45o, curMedian(ou45.over));
+  const dCs10 = dOf(openMedian(csPool(csFt, "1:0")), curMedian(csPool(csFt, "1:0")));
+
+  // Radar MMS: only the 0:0 / 1:1 CS penalties (the HT 0:0 penalty in mmsV23 is not part of the radar).
+  const mmsRadar = r1(
+    (pO25 ?? 0.5) * 60.0 +
+      (pBtts ?? 0.5) * 40.0 +
+      -tDeltaO25 * 50.0 +
+      -tDeltaBtts * 40.0 -
+      ((rawCs00 != null && rawCs00 <= 8.5 ? 10.0 : 0.0) + (rawCs11 != null && rawCs11 <= 5.8 ? 8.0 : 0.0)),
+  );
+
+  let klTotal = 0;
+  const hC = curMedian(ft.H);
+  const dC = curMedian(ft.D);
+  const aC = curMedian(ft.A);
+  if (rawHo && rawDo && rawAo && hC && dC && aC) {
+    klTotal += klDivergence(shinDevig([rawHo, rawDo, rawAo]), shinDevig([hC, dC, aC]));
+  }
+  const o25C = curMedian(ou25.over);
+  const u25C = curMedian(ou25.under);
+  if (rawO25o && rawU25o && o25C && u25C) {
+    klTotal += klDivergence(shinDevig([rawO25o, rawU25o]), shinDevig([o25C, u25C]));
+  }
+  klTotal = Math.round(klTotal * 10000) / 10000;
+
+  const goldV8 =
+    v23Fav != null && v23Fav <= 1.25 && v23Dog != null && v23Dog >= 7.0 && expGoalsFt != null && expGoalsFt >= 3.4 && mmsRadar >= 70.0;
+  const goldDuel =
+    mmsRadar >= 70.0 &&
+    ((rawCs21 != null && rawCs21 <= 9.2) || (rawCs12 != null && rawCs12 <= 9.2)) &&
+    v23Fav != null &&
+    v23Fav >= 1.65 &&
+    tDeltaO25 <= 0.01;
+  const goldEntropy = klTotal >= 0.04 && tDeltaO25 <= 0 && rawO25o != null && rawO25o >= 1.45 && mmsRadar >= 55.0;
+  const goldMer = rawO25o != null && rawO25o <= 1.4 && d45 <= -0.02 && dCs10 >= 0.03 && tDeltaO25 < 0.04;
+
+  type GoldDef = Omit<GoldSignal, "hit">;
+  const goldDefs: GoldDef[] = [];
+  const wildLeague = GOLD_WILD_LEAGUE.some((w) => String(meta?.league || "").toLowerCase().includes(w));
+  if (!wildLeague) {
+    if (goldMer && goldV8) {
+      goldDefs.push({ id: "COMBINED_FIRE", label: "🔥 COMBINED FIRE (MER + V8)", market: "Over 3.5", odds: rawO35o, goalsRequired: 4, backtest: null });
+    } else if (goldMer && goldDuel) {
+      goldDefs.push({ id: "COMBINED_FIRE", label: "🔥 COMBINED FIRE (MER + DUEL)", market: "Over 3.5", odds: rawO35o, goalsRequired: 4, backtest: null });
+    } else {
+      if (goldV8) goldDefs.push({ id: "V8_HOME_ROUT", label: "🚀 V8: HOME ROUT", market: "Over 3.5", odds: rawO35o, goalsRequired: 4, backtest: "Historical ROI +22.1%" });
+      if (goldDuel) goldDefs.push({ id: "ELITE_DUEL", label: "💎 ELITE DUEL (2-1 / 1-2)", market: "Over 2.5", odds: rawO25o, goalsRequired: 3, backtest: "Historical ROI +14.9%" });
+      if (goldEntropy) goldDefs.push({ id: "ENTROPY_SHOCK", label: "⚡ INFORMATION ENTROPY SHOCK (Smart Money)", market: "Over 2.5", odds: rawO25o, goalsRequired: 3, backtest: "Historical ROI +15%+" });
+      if (goldMer) goldDefs.push({ id: "MER_SPLIT", label: "🎯 MER SPLIT (Banker Flow)", market: "Over 2.5", odds: rawO25o, goalsRequired: 3, backtest: "Historical hit rate 79%-100%" });
+    }
+  }
+  const goldTotalGoals = (() => {
+    const h = toInt(meta?.homeScore);
+    const a = toInt(meta?.awayScore);
+    return h != null && a != null ? h + a : null;
+  })();
+  const goldSignals: GoldSignal[] = goldDefs.map((g) => ({ ...g, hit: goldTotalGoals == null ? null : goldTotalGoals >= g.goalsRequired }));
+  const goldMetrics: GoldMetrics = { mmsRadar, klTotal, d45, dCs10 };
+
   // If the match has finished, compare the read against what actually happened.
   let actual: AnatomyActualCheck | null = null;
   const hSc = toInt(meta?.homeScore);
@@ -926,6 +1033,8 @@ export function computeAnatomyEngine(
     gateNotes,
     enrichStatus,
     twinFeatures,
+    goldSignals,
+    goldMetrics,
     mispricingAnomaly,
     isMajorLeague,
     actual,
