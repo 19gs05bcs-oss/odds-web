@@ -100,7 +100,7 @@ export function AnatomyEnginePanel({ result }: { result: AnatomyEngineResult | n
         <strong>🏆 Gold Signals</strong>
         <span className={styles.muted}>
           {" "}
-          · MMS {goldMetrics.mmsRadar.toFixed(0)} · KL {goldMetrics.klTotal.toFixed(3)}
+          · MMS {goldMetrics.mmsRadar.toFixed(0)} · KL {goldMetrics.klTotal.toFixed(3)} · Δ Draw {pct(goldMetrics.dDraw)}
         </span>
       </p>
       {goldSignals.length ? (
