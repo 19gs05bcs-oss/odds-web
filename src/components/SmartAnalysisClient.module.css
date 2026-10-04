@@ -623,3 +623,17 @@
   color: var(--ink-soft);
   margin-top: 0.1rem;
 }
+
+/* HT/FT + Goal Engine yan yana (geniş ekranda), dar ekranda alt alta */
+.enginesRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 0.6rem;
+  align-items: start;
+}
+
+@media (min-width: 900px) {
+  .enginesRow {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  }
+}

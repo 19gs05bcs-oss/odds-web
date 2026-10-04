@@ -1,5 +1,5 @@
 import type { GoalEngineMetrics } from "@/lib/analysis/goalEngine";
-import styles from "./SmartAnalysisClient.module.css";
+import styles from "./EnginePanels.module.css";
 
 const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   EXTREME_BLOWOUT: "Extreme Blowout",
@@ -56,6 +56,9 @@ const SCORE_PROFILE_LABEL: Record<GoalEngineMetrics["scoreProfile"], string> = {
   ASYMMETRIC_BARREN_TRAP: "Asymmetric Barren Trap",
 };
 
+const INFO =
+  "Score profile, HT-FT verdicts and market anomalies derived from this match's own 1X2 / Over-Under / First Half odds. Not a standalone guaranteed prediction.";
+
 export function GoalEnginePanel({
   metrics,
   actualScore,
@@ -66,10 +69,10 @@ export function GoalEnginePanel({
   if (!metrics) {
     return (
       <section className={styles.card}>
-        <h3>🎯 Goal & Market Anomaly Engine</h3>
-        <p className={styles.empty}>
-          Not enough 1X2 / Over-Under / HT odds data was found for this match.
-        </p>
+        <div className={styles.head}>
+          <h3 className={styles.title}>🎯 Goal &amp; Market Anomaly</h3>
+        </div>
+        <p className={styles.empty}>Not enough 1X2 / Over-Under / HT odds for this match.</p>
       </section>
     );
   }
@@ -97,113 +100,98 @@ export function GoalEnginePanel({
 
   const favoriteLabel =
     dominanceSide === "NONE"
-      ? "Balanced (No clear favourite)"
+      ? "Balanced"
       : `${dominanceSide === "HOME" ? "Home" : "Away"}${
-          isExtremeDominance ? " (Extreme Dominance)" : isHeavyFavorite ? " (Heavy Favourite)" : ""
+          isExtremeDominance ? " (Extreme)" : isHeavyFavorite ? " (Heavy)" : ""
         }`;
+
+  const pc = (v: number | null | undefined): string => (v != null ? `${v}%` : "—");
 
   return (
     <section className={styles.card}>
-      <h3>
-        🎯 Goal & Market Anomaly Engine{" "}
-        <span className={styles.muted}>· {SCORE_PROFILE_LABEL[scoreProfile]}</span>
-      </h3>
-      <p className={styles.cardLead}>
-        The score profile, HT-FT verdicts, and market anomalies derived from this match's own
-        1X2 / Over-Under / First Half odds. Not a standalone guaranteed prediction.
-      </p>
+      <div className={styles.head}>
+        <h3 className={styles.title}>🎯 Goal &amp; Market Anomaly</h3>
+        <span className={styles.tag}>{SCORE_PROFILE_LABEL[scoreProfile]}</span>
+        {actualScore ? <span className={styles.tag}>FT {actualScore}</span> : null}
+        <span className={styles.info} title={INFO} aria-label={INFO}>
+          i
+        </span>
+      </div>
 
-      {actualScore ? (
-        <p className={styles.subHead}>
-          Final score: <span className={styles.geScoreTag}>{actualScore}</span>
-        </p>
-      ) : null}
-
-      <div className={styles.geVerdictGrid}>
-        <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>First Half Verdict</span>
-          <span className={styles.geVerdictText}>{htVerdict || "Balanced First Half"}</span>
+      <div className={styles.verdicts}>
+        <div className={styles.verdict}>
+          <span className={styles.label}>First Half</span>
+          <span className={styles.verdictText}>{htVerdict || "Balanced First Half"}</span>
         </div>
-        <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>Full Time Verdict</span>
-          <span className={styles.geVerdictText}>{ftVerdict || "Normal Tempo"}</span>
+        <div className={styles.verdict}>
+          <span className={styles.label}>Full Time</span>
+          <span className={styles.verdictText}>{ftVerdict || "Normal Tempo"}</span>
         </div>
-        <div className={styles.geVerdictBox}>
-          <span className={styles.geVerdictLabel}>Team Goal Safety</span>
-          <span className={styles.geVerdictText}>{teamGoalVerdict}</span>
+        <div className={styles.verdict}>
+          <span className={styles.label}>Team Goal Safety</span>
+          <span className={styles.verdictText}>{teamGoalVerdict}</span>
         </div>
       </div>
 
-      <p className={styles.subHead}>
-        <strong>Detected Market Anomalies</strong>
-      </p>
       {anomalies.length > 0 ? (
-        <div className={styles.steamAlerts} role="status">
+        <div className={styles.alerts} role="status">
           {anomalies.map((item, idx) => (
-            <p key={idx} className={styles.steamAlertItem}>
-              <span className={styles.steamAlertIcon} aria-hidden="true">
-                🚨
-              </span>
-              {item}
+            <p key={idx} className={styles.alert}>
+              🚨 {item}
             </p>
           ))}
         </div>
       ) : (
-        <p className={styles.muted}>
-          No significant odds anomaly or sharp liquidity shift detected.
+        <p className={styles.muted} style={{ margin: "0 0 0.5rem", fontSize: "0.76rem" }}>
+          No significant odds anomaly detected.
         </p>
       )}
 
-      <p className={styles.subHead}>
-        <strong>Market Indicators</strong>
-      </p>
-      <div className={styles.geStatsGrid}>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Side Pressure</span>
-          <span className={styles.geStatValue}>{favoriteLabel}</span>
-          {favoriteOdds != null ? (
-            <span className={styles.geStatSub}>@{favoriteOdds.toFixed(2)}</span>
-          ) : null}
-        </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>HT 0:0 Odds</span>
-          <span className={styles.geStatValue}>
-            {htZeroZeroOdd != null ? `@${htZeroZeroOdd.toFixed(2)}` : "—"}
+      <div className={styles.chips}>
+        <div className={styles.chip}>
+          <span className={styles.label}>Side Pressure</span>
+          <span className={styles.chipValue}>
+            {favoriteLabel}
+            {favoriteOdds != null ? <span className={styles.chipSub}>@{favoriteOdds.toFixed(2)}</span> : null}
           </span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>BTTS Expectancy</span>
-          <span className={bttsExpectancy ? styles.pos : styles.neg}>
+        <div className={styles.chip}>
+          <span className={styles.label}>HT 0:0</span>
+          <span className={styles.chipValue}>{htZeroZeroOdd != null ? `@${htZeroZeroOdd.toFixed(2)}` : "—"}</span>
+        </div>
+        <div className={styles.chip}>
+          <span className={styles.label}>BTTS</span>
+          <span className={`${styles.chipValue} ${bttsExpectancy ? styles.pos : styles.neg}`}>
             {bttsExpectancy ? "Yes (High)" : "No (Low)"}
           </span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Fair Goal Line</span>
-          <span className={styles.geStatValue}>{fairGoalLine}</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>Fair Goal Line</span>
+          <span className={styles.chipValue}>{fairGoalLine}</span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Over 2.5 Probability</span>
-          <span className={styles.geStatValue}>{pOver25}%</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>Over 2.5</span>
+          <span className={styles.chipValue}>{pc(pOver25)}</span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Over 3.5 Probability</span>
-          <span className={styles.geStatValue}>{pOver35 != null ? `${pOver35}%` : "—"}</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>Over 3.5</span>
+          <span className={styles.chipValue}>{pc(pOver35)}</span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Over 4.5 Probability</span>
-          <span className={styles.geStatValue}>{pOver45 != null ? `${pOver45}%` : "—"}</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>Over 4.5</span>
+          <span className={styles.chipValue}>{pc(pOver45)}</span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>Over 5.5 Probability</span>
-          <span className={styles.geStatValue}>{pOver55 != null ? `${pOver55}%` : "—"}</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>Over 5.5</span>
+          <span className={styles.chipValue}>{pc(pOver55)}</span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>1X2 Money Flow</span>
-          <span className={styles.geStatValue}>{moneyFlow1X2}</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>1X2 Flow</span>
+          <span className={styles.chipValue}>{moneyFlow1X2}</span>
         </div>
-        <div className={styles.geStat}>
-          <span className={styles.geStatLabel}>2.5 Line Liquidity</span>
-          <span className={styles.geStatValue}>{ouFlow}</span>
+        <div className={styles.chip}>
+          <span className={styles.label}>2.5 Liquidity</span>
+          <span className={styles.chipValue}>{ouFlow}</span>
         </div>
       </div>
     </section>

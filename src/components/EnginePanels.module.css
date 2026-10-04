@@ -1,0 +1,296 @@
+/* Kompakt motor panelleri: Anatomy (Market Detect), HT/FT, Goal Engine */
+
+.card {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow-soft);
+  margin-bottom: 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
+.meta {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+
+.info {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  cursor: help;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: inline-grid;
+  place-items: center;
+  user-select: none;
+}
+
+.empty {
+  color: var(--ink-faint);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.muted {
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+
+.pos {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.neg {
+  color: #c0392b;
+  font-weight: 600;
+}
+
+.tag {
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: var(--orange-wash);
+  color: var(--orange);
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 0.1rem;
+}
+
+.sec {
+  margin: 0.55rem 0 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ---------- Uyarı / anomali ---------- */
+.alerts {
+  border: 1px solid color-mix(in srgb, #d9534f 40%, var(--line));
+  background: color-mix(in srgb, #d9534f 7%, transparent);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  margin: 0 0 0.5rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.alert {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* ---------- Verdict kutuları ---------- */
+.verdicts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.verdict {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange);
+  border-radius: 8px;
+  background: #fafafa;
+  min-width: 0;
+}
+
+.verdictText {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Yoğun istatistik chip'leri ---------- */
+.chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 0.35rem;
+}
+
+.chip {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--orange-wash);
+  min-width: 0;
+}
+
+.chipValue {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.chipSub {
+  font-weight: 500;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  margin-left: 0.2rem;
+}
+
+/* ---------- HT/FT matrisi ---------- */
+.htftGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 0.35rem;
+}
+
+.htftCell {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.htftCellTop {
+  border-color: rgba(232, 93, 4, 0.45);
+}
+
+.htftBar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--orange-wash);
+  pointer-events: none;
+}
+
+.htftCellTop .htftBar {
+  background: rgba(232, 93, 4, 0.18);
+}
+
+.htftCombo,
+.htftPct {
+  position: relative;
+  z-index: 1;
+}
+
+.htftCombo {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.htftPct {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.htftCellTop .htftPct {
+  color: var(--orange);
+  font-weight: 700;
+}
+
+/* ---------- Açılır detay ---------- */
+.details {
+  margin-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+  padding-top: 0.35rem;
+}
+
+.details > summary {
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--orange);
+  list-style: none;
+  user-select: none;
+}
+
+.details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.details > summary::before {
+  content: "▸ ";
+}
+
+.details[open] > summary::before {
+  content: "▾ ";
+}
+
+.kv {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.76rem;
+  color: var(--ink);
+}
+
+.kv li {
+  overflow-wrap: anywhere;
+}
+
+.goldList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+}
+
+.goldItem {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf3;
+}
+
+/* ---------- Motorları yan yana dizme ---------- */
+@media (max-width: 640px) {
+  .htftGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
