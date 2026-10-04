@@ -482,10 +482,8 @@ const goalEngine = useMemo(
           ) : (
             <>
               <AnatomyEnginePanel result={anatomyResult} />
-              <div className={styles.enginesRow}>
-                <HtftEnginePanel result={htftResult} />
-                <GoalEnginePanel metrics={goalEngine} actualScore={scoreConsensus?.actualScore ?? null} />
-              </div>
+              <HtftEnginePanel result={htftResult} />
+              <GoalEnginePanel metrics={goalEngine} actualScore={scoreConsensus?.actualScore ?? null} />
               <ScoreConsensusPanel consensus={scoreConsensus} />
             </>
           )}

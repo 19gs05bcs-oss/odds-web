@@ -289,6 +289,12 @@
 }
 
 /* ---------- Motorları yan yana dizme ---------- */
+@media (min-width: 760px) {
+  .htftGrid {
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 640px) {
   .htftGrid {
     grid-template-columns: repeat(3, 1fr);
