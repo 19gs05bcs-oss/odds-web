@@ -355,49 +355,49 @@ export function computeScoreConsensus(
 
   if (pH >= 0.85) {
     regimeCode = "DOM_H_SUPER";
-    regimeLabel = "Ağır Baskılı Ev Favori";
-    confidenceLabel = "ÇOK YÜKSEK (Tek Taraflı)";
+    regimeLabel = "Heavy Pressure Home Favorite";
+    confidenceLabel = "VERY HIGH (One-Sided)";
   } else if (pA >= 0.85) {
     regimeCode = "DOM_A_SUPER";
-    regimeLabel = "Ağır Baskılı Deplasman Favori";
-    confidenceLabel = "ÇOK YÜKSEK (Tek Taraflı)";
+    regimeLabel = "Heavy Pressure Away Favorite";
+    confidenceLabel = "VERY HIGH (One-Sided)";
   } else if (isHyperOver) {
     if (isHomeFav) {
       regimeCode = "DOM_H_HYPER";
-      regimeLabel = "Yüksek Tempolu Ev Favori";
-      confidenceLabel = "YÜKSEK (Gol Baskısı)";
+      regimeLabel = "High Tempo Home Favorite";
+      confidenceLabel = "HIGH (Goal Pressure)";
     } else if (isAwayFav) {
       regimeCode = "DOM_A_HYPER";
-      regimeLabel = "Yüksek Tempolu Deplasman Favori";
-      confidenceLabel = "YÜKSEK (Gol Baskısı)";
+      regimeLabel = "High Tempo Away Favorite";
+      confidenceLabel = "HIGH (Goal Pressure)";
     } else {
       regimeCode = "OPEN_HYPER";
-      regimeLabel = "Yüksek Tempolu Açık Maç";
-      confidenceLabel = "YÜKSEK (Açık Oyun)";
+      regimeLabel = "High Tempo Open Match";
+      confidenceLabel = "HIGH (Open Game)";
     }
   } else if (isHardUnder) {
     if (isHomeFav) {
       regimeCode = "DOM_H_UNDER";
-      regimeLabel = "Kısır Ev Favori";
-      confidenceLabel = "YÜKSEK (Alt Destekli)";
+      regimeLabel = "Low Scoring Home Favorite";
+      confidenceLabel = "HIGH (Under Backed)";
     } else if (isAwayFav) {
       regimeCode = "DOM_A_UNDER";
-      regimeLabel = "Kısır Deplasman Favori";
-      confidenceLabel = "YÜKSEK (Alt Destekli)";
+      regimeLabel = "Low Scoring Away Favorite";
+      confidenceLabel = "HIGH (Under Backed)";
     } else {
       regimeCode = "LOCK";
-      regimeLabel = "Kilit Alt";
-      confidenceLabel = "YÜKSEK (Piyasa Kilidi)";
+      regimeLabel = "Lock Under";
+      confidenceLabel = "HIGH (Market Lock)";
     }
   } else {
     if (isHomeFav) {
       regimeCode = "DOM_H";
-      regimeLabel = "Ev Favori";
-      confidenceLabel = pH >= 0.58 ? "YÜKSEK (Ağır Favori)" : "STANDART";
+      regimeLabel = "Home Favorite";
+      confidenceLabel = pH >= 0.58 ? "HIGH (Heavy Favorite)" : "STANDARD";
     } else if (isAwayFav) {
       regimeCode = "DOM_A";
-      regimeLabel = "Deplasman Favori";
-      confidenceLabel = pA >= 0.58 ? "YÜKSEK (Ağır Favori)" : "STANDART";
+      regimeLabel = "Away Favorite";
+      confidenceLabel = pA >= 0.58 ? "HIGH (Heavy Favorite)" : "STANDARD";
     }
   }
 
