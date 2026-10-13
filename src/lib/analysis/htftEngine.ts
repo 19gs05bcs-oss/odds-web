@@ -1,15 +1,16 @@
 import type { CompactOddsRow } from "@/lib/archiveCache";
 
 /**
- * HT/FT Matris Motoru — sync_engine_with_cli.py'deki evaluate_match_matrix ile
- * AYNI model: seçilen maçın kendi İlk Yarı / İkinci Yarı / Maç Sonu 1X2, O/U ve
- * BTTS oranlarından 9 HT/FT kombinasyonu (1/1 … 2/2) için ağırlıklı bir olasılık
- * dağılımı üretir. marketSignals.ts (dispersion/arbitraj) gibi ek bir API isteği
- * gerektirmez — saf client-side, bu maçın odds satırlarından hesaplanır.
+ * HT/FT Matrix Engine — same model as evaluate_match_matrix in sync_engine_with_cli.py:
+ * from the selected match's own First Half / Second Half / Full Time 1X2, O/U and
+ * BTTS odds it produces a weighted probability distribution over the 9 HT/FT
+ * combinations (1/1 … 2/2). Unlike marketSignals.ts (dispersion/arbitrage), it needs
+ * no extra API request — purely client-side, computed from this match's odds rows.
  *
- * NOT — YORUM SINIRI: bu bir olasılık dağılımı, kesin bir tahmin değil. "Dönüş
- * alarmı" (2/1, 1/2) yalnızca dar bir favori/İY/BTTS/2.Y baskı koşulu kümesi
- * karşılandığında tetiklenir ve nadir olayları işaretler — garanti değildir.
+ * NOTE — INTERPRETATION LIMIT: this is a probability distribution, not a definitive
+ * prediction. The "turnaround alert" (2/1, 1/2) only fires when a narrow set of
+ * favorite / HT / BTTS / 2H-pressure conditions is met and flags rare events — it is
+ * not a guarantee.
  */
 
 export type HtftCombo = "1/1" | "1/X" | "1/2" | "X/1" | "X/X" | "X/2" | "2/1" | "2/X" | "2/2";
@@ -17,7 +18,7 @@ export type HtftCombo = "1/1" | "1/X" | "1/2" | "X/1" | "X/X" | "X/2" | "2/1" | 
 export type HtftPick = { combo: HtftCombo; prob: number };
 
 export type HtftEngineResult = {
-  picks: HtftPick[]; // en yüksekten en düşüğe, 9 kombinasyonun tamamı
+  picks: HtftPick[]; // highest to lowest, all 9 combinations
   favSide: "HOME" | "AWAY";
   favOdd: number;
   turnaroundAlert: string | null;
@@ -47,7 +48,7 @@ function pushPool(p: PricePool, op: number | null, cur: number | null) {
   if (op != null) p.open.push(op);
   if (cur != null) p.cur.push(cur);
 }
-// Python get_med: eff = mc or mo (kapanış önce, yoksa açılışa düşülür); drift = mc/mo.
+// Python get_med: eff = mc or mo (closing first, falls back to opening if missing); drift = mc/mo.
 function effOf(p: PricePool): number | null {
   if (p.cur.length) return median(p.cur);
   if (p.open.length) return median(p.open);
@@ -183,7 +184,7 @@ export function computeHtftEngine(odds: CompactOddsRow[] | null | undefined): Ht
   matrix["1/X"] = pHt1 * pMsx * leadLossMult;
   matrix["2/X"] = pHt2 * pMsx * leadLossMult;
 
-  // TURNAROUND ANOMALİSİ KONTROLÜ
+  // TURNAROUND ANOMALY CHECK
   let turnaroundAlert: string | null = null;
 
   let turn1 = pHt2 * pMs1 * 0.25;

@@ -440,7 +440,7 @@ export function computeGoalEngine(
   };
     let matchedCase: MatchedCase | null = null;
 
-  // --- ÖNCELİK 0: HEGEMONYA PATLAMASI & ASİMETRİK KISIR AYRIMI (CLI motoruyla birebir sıra) ---
+  // --- PRIORITY 0: HEGEMONY BLOWOUT & ASYMMETRIC BARREN SPLIT (same order as the CLI engine) ---
   const isYouthOrReserve = /u19|u20|u21|u23|reserve|\bii\b|\b2\b|\bw\b|women|\bb\b/i.test(`${homeTeam} ${awayTeam}`);
 
   const isTrueEliteBlowout = Boolean(
@@ -460,20 +460,20 @@ export function computeGoalEngine(
 
   if (isTrueEliteBlowout) {
     matchedCase = {
-      name: "ELITE BLOWOUT (Feyenoord / Barcelona Hegemonya Patlaması)",
-      desc: "Ağır favorinin 3.5 Üst baremi diri (@2.10 altı) ve ilk yarı 0-0 barajı tamamen yıkılmış. Tek taraflı 4+ / 5+ gol fırtınası.",
-      ht: "🔥 FIRST HALF TEMPO (Erken Gol Yağmuru / HT 0.5 & 1.5 Over)",
-      ft: "🚀 ELITE BLOWOUT (3.5 Üst & 4+ Gol Beklentisi / Favori Yıkımı)",
-      team: "✅ Favori Kazanır & Favori Üst Baremleri (3.5 Üst / Handikap)",
+      name: "ELITE BLOWOUT (Feyenoord / Barcelona Hegemony Blowout)",
+      desc: "Heavy favorite's Over 3.5 line is live (under @2.10) and the first-half 0-0 barrier has been completely broken. One-sided 4+ / 5+ goal storm.",
+      ht: "🔥 FIRST HALF TEMPO (Early Goal Rush / HT 0.5 & 1.5 Over)",
+      ft: "🚀 ELITE BLOWOUT (Over 3.5 & 4+ Goal Expectation / Favorite Demolition)",
+      team: "✅ Favorite Wins & Favorite Over Lines (Over 3.5 / Handicap)",
       profile: "ELITE_BLOWOUT",
     };
   } else if (isAsymmetricBarrenTrap) {
     matchedCase = {
-      name: "ASYMMETRIC BARREN TRAP (Hammarby / Genk W Sahte Vitrin Tuzağı)",
-      desc: "Favori ve 2.5 Üst vitrinde çok düşük fakat rakibin gol katkısı piyasadan tamamen silinmiş (KG Var @1.78-2.30). 3.5 baremi boşlukta, 1-0 / 2-0 kilit riski!",
+      name: "ASYMMETRIC BARREN TRAP (Hammarby / Genk W False Showcase Trap)",
+      desc: "Favorite and Over 2.5 are priced very low in the showcase, but the opponent's goal contribution has been wiped from the market (BTTS Yes @1.78-2.30). The 3.5 line is hanging; 1-0 / 2-0 lock risk!",
       ht: "🔒 FIRST HALF CONTROL (0-0 / 1-0 Kilit)",
       ft: "🛡️ ASYMMETRIC BARREN LOCK (Maksimum 1-2 Gol / 1-0, 2-0 Koridoru)",
-      team: "⛔ GENEL ÜST OYNANMAZ (Deplasman katkısı yok; Sadece Favori Tek Fark / 2.5-3.5 Alt)",
+      team: "⛔ DO NOT PLAY GENERAL OVER (No away contribution; Favorite single-goal margin only / Under 2.5-3.5)",
       profile: "ASYMMETRIC_BARREN_TRAP",
     };
   }
@@ -864,7 +864,7 @@ export function computeGoalEngine(
   }
 
 
-  // --- 3 ANA PİYASA REJİMİ MOTORU ---
+  // --- 3 MAIN MARKET REGIMES ENGINE ---
   const isOrganicLadder = Boolean(
     ou45Eff != null && ou45Eff <= 2.25 &&
     (medHt00 != null && medHt00 >= 5.00) &&
@@ -898,29 +898,29 @@ export function computeGoalEngine(
 
   if (!matchedCase && isOrganicLadder) {
     matchedCase = {
-      name: "ORGANIC HIGH TOTAL LADDER (Doğal 5+ Gol Patlaması)",
-      desc: "Doğal barem zaten 4.5+ seviyesinde ve ilk yarı 0-0 ihtimali tamamen silinmiş. 4.5 / 5.5 Üst doğal koridorda.",
-      ht: "🔥 FIRST HALF TEMPO (Erken Gol Yağmuru / HT 0.5 & 1.5 Over)",
-      ft: "🎯 ORGANIC HIGH TOTAL LADDER (4.5 / 5.5 Üst Diri — 5+ Gol Beklentisi)",
-      team: "✅ 4.5 / 5.5 Üst Doğal Koridor (İki takım da yüksek tempoda)",
+      name: "ORGANIC HIGH TOTAL LADDER (Natural 5+ Goal Explosion)",
+      desc: "Natural line is already at 4.5+ and the first-half 0-0 probability has been completely wiped out. Over 4.5 / 5.5 sits in the natural corridor.",
+      ht: "🔥 FIRST HALF TEMPO (Early Goal Rush / HT 0.5 & 1.5 Over)",
+      ft: "🎯 ORGANIC HIGH TOTAL LADDER (Over 4.5 / 5.5 Live — 5+ Goal Expectation)",
+      team: "✅ Over 4.5 / 5.5 Natural Corridor (Both teams at high tempo)",
       profile: "HIGH_TOTAL_LADDER",
     };
   } else if (!matchedCase && isAsymmetricChoke) {
     matchedCase = {
-      name: "ASYMMETRIC CHOKE TRAP (Heerenveen/PSG Asimetrik Boğma Modeli)",
-      desc: "Favori handikapı çöktü ancak deplasman katkısı piyasadan silinmiş. Favori tek başına açamazsa 0-0, 1-0 kilit riski!",
+      name: "ASYMMETRIC CHOKE TRAP (Heerenveen/PSG Asymmetric Choke Model)",
+      desc: "Favorite handicap has collapsed but the away contribution has been wiped from the market. If the favorite can't break through alone: 0-0, 1-0 lock risk!",
       ht: "BALANCED FIRST HALF (0-0 / 1-0 Single-Team Domination)",
-      ft: "⚠️ ASYMMETRIC CHOKE TRAP (Rakip Yok / Kısır Kilit Tehdidi)",
-      team: "⛔ AVOID FULL TIME GENERAL OVER (Deplasman katkısı sıfırlandı; Sadece Favori Galibiyeti)",
+      ft: "⚠️ ASYMMETRIC CHOKE TRAP (No Opponent / Barren Lock Threat)",
+      team: "⛔ AVOID FULL TIME GENERAL OVER (Away contribution zeroed out; Favorite Win only)",
       profile: "ASYMMETRIC_CHOKE",
     };
   } else if (!matchedCase && isStaticRetailBait) {
     matchedCase = {
-      name: "STATIC RETAIL BAIT (Tijuana/Volendam Şablon Vitrin Tuzağı)",
-      desc: "Barem açılışta yüksek şablonla sunulmuş fakat ilk yarı 0-0 diri tutuluyor ve piyasa akışı yok. 0-2 gol riski tavan!",
+      name: "STATIC RETAIL BAIT (Tijuana/Volendam Template Showcase Trap)",
+      desc: "Line was offered at a high template at opening, but first-half 0-0 is kept live and there is no market flow. 0-2 goal risk is capped!",
       ht: "🔒 FIRST HALF HARD LOCK (0:0 Risk at Peak / Static Bait)",
-      ft: "🧊 STATIC RETAIL BAIT (Doğal Taban Düşük / Sahte 2.5 Üst — 0-2 Gol Riski)",
-      team: "❌ 2.5 Üst ve KG Var Oynanmaz (Statik vitrin, kurumsal akış yok)",
+      ft: "🧊 STATIC RETAIL BAIT (Natural Floor Low / False Over 2.5 — 0-2 Goal Risk)",
+      team: "❌ Do Not Play Over 2.5 or BTTS Yes (Static showcase, no institutional flow)",
       profile: "STATIC_RETAIL_BAIT",
     };
   }

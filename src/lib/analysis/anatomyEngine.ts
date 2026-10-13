@@ -3,7 +3,7 @@ import type { H2hForm, TwinFeatures, TwinResult } from "@/lib/analysis/m6Twins";
 
 /**
  * Anatomy Engine ("Market Detect") — ported from the Python odds radar
- * v6 (toplu_radart.py: "Toplu Radar / Saf OU Büro Gol Beklentisi").
+ * v6 (toplu_radart.py: "Bulk Radar / Pure OU Bureau Goal Expectancy").
  * File and export names are kept as `anatomyEngine.ts` / `computeAnatomyEngine`
  * on purpose — only the underlying model changed, not the wiring.
  *
@@ -49,13 +49,13 @@ export type TargetTempo =
   | "LOW_PACE"
   | "BALANCED";
 
-/** Hangi motorun kazandığı. Öncelik sırası: V23 -> M6 -> SAF_V23 üçlüsü -> nihai (v14) zinciri. */
+/** Which engine won. Priority order: V23 -> M6 -> SAF_V23 triple -> final (v14) chain. */
 export type EngineId =
-  | "V23_NUCLEAR" // super_radar_v23: 💥 Nükleer Patlama (3.5Ü) — form + 888 ikiz teyidi
-  | "M6_DOUBLE_HALF" // nihai: 💥 M6 çift yarı (4.5Ü/5.5Ü)
-  | "SAF_V23_DUELLO" // toplu_radar saf v23: 💎 Elit Düello
-  | "SAF_V23_KILIT" // toplu_radar saf v23: 🔒 Gerçek Kilit
-  | "SAF_V23_WALL" // toplu_radar saf v23: 🛡️ Rölanti Duvarı
+  | "V23_NUCLEAR" // super_radar_v23: 💥 Nuclear Blast (Over 3.5) — form + 888 twin confirmation
+  | "M6_DOUBLE_HALF" // final: 💥 M6 double half (Over 4.5/Over 5.5)
+  | "SAF_V23_DUELLO" // toplu_radar pure v23: 💎 Elite Duel
+  | "SAF_V23_KILIT" // toplu_radar pure v23: 🔒 True Lock
+  | "SAF_V23_WALL" // toplu_radar pure v23: 🛡️ Idle Wall
   | "STEAM_TRAP"
   | "V8_HOME_ROUT"
   | "NIHAI_DUELLO"
@@ -69,7 +69,7 @@ export type EngineId =
 
 export type EngineSource = "super_radar_v23" | "toplu_radar saf v23" | "toplu_radar nihai (v14)";
 
-/** /api/smart-analysis/market-detect cevabı: fixture.h2h formu + 888 M6 KNN ikizleri. */
+/** /api/smart-analysis/market-detect response: fixture.h2h form + 888 M6 KNN twins. */
 export type AnatomyEnrichment = { form: H2hForm | null; twins: TwinResult | null };
 
 /** Gold Signals — ported from the Python live radar (radar_supabase_gold.py, v24). Independent of the single-winner engine chain above: several can fire on the same match. */
@@ -105,13 +105,13 @@ export type AnatomyActualCheck = {
   htScore: string | null;
   totalGoals: number;
   htTotalGoals: number | null;
-  tempoHit: boolean | null; // motorun ana bahsi tuttu mu (yönsüz okumada null)
+  tempoHit: boolean | null; // did the engine's main bet land (null for non-directional reads)
   expDiff: number | null; // actual total goals - E_FT (calibration; null if E_FT unavailable)
 };
 
 export type AnatomyLambda = {
   market: number | null; // λ_Pzr — piyasa (Shin + Poisson) E_FT
-  form: number | null; // λ_F — fixture.h2h zaman ağırlıklı form
+  form: number | null; // λ_F — fixture.h2h time-weighted form
   blend: number | null; // λ_Snt = (1-γ)·λ_Pzr + γ·λ_F
   gamma: number | null;
   formN: number | null;
@@ -119,7 +119,7 @@ export type AnatomyLambda = {
 };
 
 export type AnatomyDrifts = {
-  d25: number; // Over 2.5 açılış -> güncel (oran değişimi, kesir)
+  d25: number; // Over 2.5 opening -> current (odds change, fraction)
   d35: number;
   dBtts: number;
   dCs00: number;
@@ -135,10 +135,10 @@ export type AnatomyEngineResult = {
   engineId: EngineId;
   engineSource: EngineSource;
   dnaU25: number; // opening Under 2.5 odd - opening Over 2.5 odd
-  mmsRating: number; // kazanan motorun modundaki MMS (v23 motorlarında Shin'li, nihai'de düz normalize)
+  mmsRating: number; // MMS in the winning engine's mode (Shin-adjusted in v23 engines, plain normalized in final)
   mmsV23: number;
   htRating: number;
-  kilitRating: number; // "Steel Lock" rating (kazanan motor moduna göre)
+  kilitRating: number; // "Steel Lock" rating (per winning engine mode)
   kilitV23: number;
   wallRating: number;
   driftTag: string; // "+3%/-5%" = ΔOver2.5 / ΔOver3.5 since opening
@@ -152,14 +152,14 @@ export type AnatomyEngineResult = {
   lambda: AnatomyLambda;
   similarity: TwinResult | null; // 888 M6 KNN (k=5)
   simDisplayPct: number | null; // kilit motorunda 100 - sim
-  twinProof: string | null; // "3/5 3.5Ü | 1/5 5.5Ü"
+  twinProof: string | null; // "3/5 Over 3.5 | 1/5 Over 5.5"
   shields: string[]; // devreye giren kalkanlar / vetolar
-  gateNotes: string[]; // V23 motorlarının hipotez ✓ ama teyit ✗ açıklamaları
+  gateNotes: string[]; // explanations where V23 engines' hypothesis ✓ but confirmation ✗
   enrichStatus: "ok" | "pending" | "unavailable";
-  twinFeatures: TwinFeatures | null; // route'a gönderilecek KNN vektörü
+  twinFeatures: TwinFeatures | null; // KNN vector to be sent to the route
   goldSignals: GoldSignal[]; // radar Gold Signals that fired on this match (empty = none / excluded league)
   goldMetrics: GoldMetrics;
-  mispricingAnomaly: boolean; // E_2H < 0 (bilgi amaçlı; sınıflamayı değiştirmez)
+  mispricingAnomaly: boolean; // E_2H < 0 (informational; does not change classification)
   isMajorLeague: boolean;
   actual: AnatomyActualCheck | null;
 };
@@ -387,7 +387,7 @@ const MIN_BOOKS_FOR_EXP = 3;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-/** Python `" W" in name` alt-string hatasını (West Ham, Wolves...) düzeltir: sadece kelime olarak W / (W) / Women. */
+/** Fixes the Python `" W" in name` substring bug (West Ham, Wolves...): only matches W / (W) / Women as a whole word. */
 function isWomenMatch(home: string | null | undefined, away: string | null | undefined): boolean {
   const t = `${home || ""} - ${away || ""}`;
   return /\sW(?=\s|-|$)/.test(t) || /\(W\)/.test(t) || /women/i.test(t);
@@ -398,8 +398,8 @@ function csPool(map: Map<string, PricePool>, key: string): PricePool {
 }
 
 /**
- * @param enrich  undefined = zenginleştirme yükleniyor, null = alınamadı,
- *                nesne = /api/smart-analysis/market-detect sonucu (form + ikizler).
+ * @param enrich  undefined = enrichment loading, null = unavailable,
+ *                object = /api/smart-analysis/market-detect result (form + twins).
  */
 export function computeAnatomyEngine(
   odds: CompactOddsRow[] | null | undefined,
@@ -487,7 +487,7 @@ export function computeAnatomyEngine(
     }
   }
 
-  // ---- Ham (fallback'siz) açılış medyanları — v23 motorları bunları kullanır ----
+  // ---- Raw (no-fallback) opening medians — v23 engines use these ----
   const rawU25o = openMedian(ou25.under);
   const rawO25o = openMedian(ou25.over);
   const rawU35o = openMedian(ou35.under);
@@ -539,7 +539,7 @@ export function computeAnatomyEngine(
   const h2Str = expGoals2h != null ? expGoals2h.toFixed(2) : "-";
   const expCol = `${ftStr} / ${h2Str}${confMark}`;
 
-  // ---- Nihai (v14) çalışma değerleri: eksik piyasada Python varsayılanları ----
+  // ---- Final (v14) working values: Python defaults for missing markets ----
   const tU25o = rawU25o ?? 1.8;
   const tO25o = rawO25o ?? 1.95;
   const tO25c = curMedian(ou25.over) ?? tO25o;
@@ -570,7 +570,7 @@ export function computeAnatomyEngine(
   const cs11o = rawCs11 ?? 6.5;
   const csHt00o = rawCsHt00 ?? 2.7;
 
-  // 1. STEEL LOCK RATING (nihai, düz normalize)
+  // 1. STEEL LOCK RATING (final, plain normalize)
   const probU25 = 1 / tU25o / (1 / tU25o + 1 / tO25o);
   const probHtu15 = 1 / tU15htO / (1 / tU15htO + 1 / tO15htO);
   const dBonus = tDo <= 3.1 ? 20.0 : tDo <= 3.3 ? 10.0 : 0.0;
@@ -598,7 +598,7 @@ export function computeAnatomyEngine(
   const favBonus = favOdd <= 1.25 ? 40.0 : favOdd <= 1.45 ? 30.0 : favOdd <= 1.65 ? 20.0 : 10.0;
   const wallRating = r1(probBttsNo * 60.0 + favBonus);
 
-  // 5. CS 2:1 / 1:2 koridoru (nihai: açılış <= 9.50 VEYA -%4 düşüş)
+  // 5. CS 2:1 / 1:2 corridor (final: opening <= 9.50 OR -4% drop)
   const cs21c = curMedian(csPool(csFt, "2:1")) ?? rawCs21;
   const dCs21 = rawCs21 && rawCs21 > 1.0 && cs21c != null ? (cs21c - rawCs21) / rawCs21 : 0;
   const cs12c = curMedian(csPool(csFt, "1:2")) ?? rawCs12;
@@ -609,7 +609,7 @@ export function computeAnatomyEngine(
   const isPublicSteamTrap = (tDeltaO25 <= -0.05 || tDeltaBtts <= -0.05) && dnaU25 < 0.2 && mmsNihai < 65.0;
 
   // =========================================================================
-  // v23 ÖZELLİK EVRENİ (super_radar_v23.parse_full_market_universe)
+  // v23 FEATURE UNIVERSE (super_radar_v23.parse_full_market_universe)
   // =========================================================================
   const hasFt1x2 = rawHo != null && rawAo != null;
   const v23Fav = hasFt1x2 ? Math.min(rawHo!, rawAo!) : null;
@@ -651,7 +651,7 @@ export function computeAnatomyEngine(
       ? { fav: v23Fav, dog: v23Dog, dna: v23Dna, o25: v23O25, o35: v23O35, o45: v23O45, htO15: v23HtO15 }
       : null;
 
-  // ---- Zenginleştirme: fixture.h2h formu + 888 M6 ikizleri ----
+  // ---- Enrichment: fixture.h2h form + 888 M6 twins ----
   const enrichStatus: "ok" | "pending" | "unavailable" =
     enrich === undefined ? "pending" : enrich === null ? "unavailable" : "ok";
   const form = enrich?.form ?? null;
@@ -684,7 +684,7 @@ export function computeAnatomyEngine(
         ? "twin check unavailable"
         : `twin gate failed (${need})`;
 
-  // ---- 1) 💥 NÜKLEER PATLAMA (super_radar_v23 ile birebir) ----
+  // ---- 1) 💥 NUCLEAR BLAST (identical to super_radar_v23) ----
   let explosion =
     !heavyFavBlind &&
     !womenUnverified &&
@@ -711,7 +711,7 @@ export function computeAnatomyEngine(
     );
   }
 
-  // ---- saf v23: 💎 ELİT DÜELLO ----
+  // ---- pure v23: 💎 ELITE DUEL ----
   const duelloHyp =
     v23Fav != null &&
     v23Dog != null &&
@@ -733,7 +733,7 @@ export function computeAnatomyEngine(
     );
   }
 
-  // ---- saf v23: 🔒 GERÇEK KİLİT ----
+  // ---- pure v23: 🔒 TRUE LOCK ----
   const lockHyp =
     v23U25 <= 1.55 &&
     v23Dna <= -0.6 &&
@@ -755,12 +755,12 @@ export function computeAnatomyEngine(
     );
   }
 
-  // ---- saf v23: 🛡️ RÖLANTİ DUVARI (ikiz teyidi yok) ----
+  // ---- pure v23: 🛡️ IDLE WALL (no twin confirmation) ----
   const wallOk =
     rawAo != null && rawHo != null && rawAo <= 1.2 && rawHo >= 7.0 && v23O45 >= 2.6 && pBtts != null && pBtts <= 0.4;
 
   // =========================================================================
-  // NİHAİ (v14) MOTOR ÇEKİRDEĞİ — v23 üçlüsü tutmazsa devreye girer
+  // FINAL (v14) ENGINE CORE — kicks in if the v23 triple doesn't match
   // =========================================================================
   const isM6 =
     rawHtO25 != null && rawHtO25 <= 4.2 && rawCs00 != null && rawCs00 >= 24.0 && rawO55o != null && rawO55o <= 3.8 && dogOdd <= 5.2;
@@ -880,7 +880,7 @@ export function computeAnatomyEngine(
         : "toplu_radar nihai (v14)";
   const v23Mode = engineSource !== "toplu_radar nihai (v14)";
 
-  // Kilit motorunda benzerlik ters okunur (düşük sim = kısır maçlara yakın değil → kilit teyidi)
+  // In the lock engine similarity is read inversely (low sim = not close to barren matches → lock confirmation)
   const simDisplayPct = twins ? (engineId === "SAF_V23_KILIT" ? 100 - twins.simPct : twins.simPct) : null;
   const twinProof = twins
     ? engineId === "SAF_V23_KILIT"
