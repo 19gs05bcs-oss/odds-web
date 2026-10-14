@@ -35,6 +35,7 @@ const PLANS = [
     id: "analyst" as const,
     name: "Analyst",
     price: 30,
+    oldPrice: 39,
     period: "month",
     yearly: 390,
     desc: "Heavy daily use and deeper archive limits.",
@@ -73,6 +74,9 @@ export function PricingSection() {
               <h3 className={styles.planName}>{plan.name}</h3>
               <p className={styles.planDesc}>{plan.desc}</p>
               <div className={styles.priceRow}>
+                {"oldPrice" in plan && plan.oldPrice ? (
+                  <span className={styles.oldPrice}>${plan.oldPrice}</span>
+                ) : null}
                 <span className={styles.price}>
                   <span className={styles.currency}>$</span>
                   {plan.price}

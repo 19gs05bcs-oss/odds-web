@@ -113,6 +113,14 @@
   line-height: 1;
 }
 
+.oldPrice {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--ink-faint);
+  text-decoration: line-through;
+  margin-right: 0.5rem;
+}
+
 .per {
   font-size: 0.9rem;
   color: var(--ink-faint);
