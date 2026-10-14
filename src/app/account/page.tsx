@@ -161,7 +161,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
           {active && !smartAccess ? (
             <div className={styles.plans}>
               <SubscribeButton plan="pro" featured label="Pro — $19/mo (Smart Analysis)" />
-              <SubscribeButton plan="analyst" label="Analyst — $39/mo" />
+              <SubscribeButton plan="analyst" label="Analyst — $30/mo" />
             </div>
           ) : null}
 
@@ -169,7 +169,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Sear
             <div className={styles.plans}>
               <SubscribeButton plan="starter" label="Starter — $9/mo" />
               <SubscribeButton plan="pro" featured label="Pro — $19/mo" />
-              <SubscribeButton plan="analyst" label="Analyst — $39/mo" />
+              <SubscribeButton plan="analyst" label="Analyst — $30/mo" />
             </div>
           ) : null}
         </section>
