@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnalyzeTable } from "@/components/AnalyzeTable";
+import { AnalyzePager } from "@/components/AnalyzePager";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { MarketFilterPanel } from "@/components/MarketFilterPanel";
 import styles from "@/components/AnalyzeFilters.module.css";
@@ -26,7 +27,17 @@ import {
 import type { BookmakerOption } from "@/lib/types";
 import type { FixtureRow } from "@/lib/archiveCache";
 
-type ProfileSearchResult = ProfileResult & { tableRows?: TableRow[] };
+type ProfileSearchResult = ProfileResult & {
+  tableRows?: TableRow[];
+  page?: number;
+  pageSize?: number;
+  pageCount?: number;
+  totalUnfiltered?: number;
+  capped?: boolean;
+  filterScanCapped?: boolean;
+};
+
+const ARCHIVE_PAGE_SIZE = 50;
 
 type Props = {
   bookmakers: BookmakerOption[];
@@ -77,6 +88,11 @@ export default function AnalyzeClient({
 
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<ProfileSearchResult | null>(null);
+  const [tableFilters, setTableFilters] = useState<Record<string, string>>({});
+  const tableFiltersRef = useRef<Record<string, string>>({});
+  const filterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSentFiltersRef = useRef("{}");
+  const tableTopRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | undefined>();
   const abortRef = useRef<AbortController | null>(null);
   const ranRef = useRef(false);
@@ -261,7 +277,10 @@ export default function AnalyzeClient({
   );
 
   const runSearch = useCallback(
-    async (nextCriteria: OddsCriterion[]) => {
+    async (
+      nextCriteria: OddsCriterion[],
+      opts?: { page?: number; filters?: Record<string, string>; scrollToTable?: boolean },
+    ) => {
       if (!nextCriteria.length) {
         setCriteria([]);
         setResult(null);
@@ -297,7 +316,9 @@ export default function AnalyzeClient({
             bookmakerId: bookmakerId || null,
             seasonSlugs: [],
             tolerance: Number.isFinite(Number(tolerance)) ? Number(tolerance) : 0,
-            limit: 200,
+            page: opts?.page ?? 1,
+            pageSize: ARCHIVE_PAGE_SIZE,
+            filters: opts?.filters ?? tableFiltersRef.current,
           }),
           signal: ac.signal,
         });
@@ -311,7 +332,11 @@ export default function AnalyzeClient({
           setError(json.error || `HTTP ${res.status}`);
           return;
         }
+        lastSentFiltersRef.current = JSON.stringify(opts?.filters ?? tableFiltersRef.current);
         setResult(json);
+        if (opts?.scrollToTable) {
+          tableTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
       } catch (e) {
         if (ac.signal.aborted) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -326,6 +351,40 @@ export default function AnalyzeClient({
       }
     },
     [bookmakerId, tolerance, bulletinDate, syncUrl, selectedFixture, bmNum],
+  );
+
+  const goToPage = useCallback(
+    (p: number) => {
+      if (!criteria.length) return;
+      void runSearch(criteria, { page: p, scrollToTable: true });
+    },
+    [criteria, runSearch],
+  );
+
+  // Sütun filtreleri: tüm eşleşmelere sunucuda uygulanır (yazma bitince, 450ms sonra).
+  const handleFiltersChange = useCallback(
+    (f: Record<string, string>) => {
+      const clean: Record<string, string> = {};
+      for (const [k, v] of Object.entries(f)) {
+        const t = v.trim();
+        if (t) clean[k] = t;
+      }
+      tableFiltersRef.current = clean;
+      setTableFilters(clean);
+      if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+      filterTimerRef.current = setTimeout(() => {
+        if (JSON.stringify(clean) === lastSentFiltersRef.current) return;
+        if (criteria.length) void runSearch(criteria, { page: 1, filters: clean });
+      }, 450);
+    },
+    [criteria, runSearch],
+  );
+
+  useEffect(
+    () => () => {
+      if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+    },
+    [],
   );
 
   useEffect(() => {
@@ -644,14 +703,24 @@ export default function AnalyzeClient({
               </div>
               <div className={styles.statusBar}>
                 <span className={styles.statusPill}>
-                  <strong>{archiveCount}</strong> archive
+                  <strong>
+                    {(result?.totalMatched ?? archiveCount).toLocaleString("en-US")}
+                    {result?.capped ? "+" : ""}
+                  </strong>{" "}
+                  archive
+                  {result?.totalUnfiltered != null &&
+                  result.totalUnfiltered !== result.totalMatched
+                    ? ` (of ${result.totalUnfiltered.toLocaleString("en-US")})`
+                    : ""}
                   {pending ? " · searching…" : ""}
                 </span>
               </div>
             </div>
 
+            <div ref={tableTopRef} />
             <AnalyzeTable
               mode="archive"
+              onFiltersChange={handleFiltersChange}
               rows={archiveDisplayRows}
               pending={pending}
               activeCriteria={resolvedCriteria}
@@ -662,8 +731,20 @@ export default function AnalyzeClient({
               emptyHint={
                 pending
                   ? "Searching archive…"
-                  : "No archive matches for this profile."
+                  : Object.keys(tableFilters).length
+                    ? "No archive matches for these filters."
+                    : "No archive matches for this profile."
               }
+            />
+            <AnalyzePager
+              page={result?.page ?? 1}
+              pageCount={result?.pageCount ?? 1}
+              pageSize={result?.pageSize ?? ARCHIVE_PAGE_SIZE}
+              total={result?.totalMatched ?? 0}
+              capped={result?.capped}
+              filterScanCapped={result?.filterScanCapped}
+              disabled={pending}
+              onPage={goToPage}
             />
           </div>
         )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   ALL_COLUMNS,
   COLUMN_GROUPS,
@@ -35,6 +35,11 @@ type Props = {
   compact?: boolean;
   /** Override default visible market groups (e.g. demo shows Correct Score). */
   initialGroupIds?: ColumnGroupId[];
+  /**
+   * Sunucu tarafı filtre modu: verilirse satırlar yerelde süzülmez (sunucu TÜM
+   * eşleşmelere uygulayıp sayfayı döner); sütun filtreleri değiştikçe bu çağrılır.
+   */
+  onFiltersChange?: (filters: Record<string, string>) => void;
 };
 
 function isActiveCol(
@@ -109,6 +114,7 @@ export function AnalyzeTable({
   pinnedRowIds,
   compact = false,
   initialGroupIds,
+  onFiltersChange,
 }: Props) {
   const [groups, setGroups] = useState<Set<ColumnGroupId>>(
     () => new Set(initialGroupIds ?? defaultVisibleGroupIds()),
@@ -133,10 +139,23 @@ export function AnalyzeTable({
     return out;
   }, [groups, extraMeta]);
 
+  const serverFiltered = !!onFiltersChange;
   const filtered = useMemo(
-    () => filterTableRows(rows, filters, columns),
-    [rows, filters, columns],
+    () => (serverFiltered ? rows : filterTableRows(rows, filters, columns)),
+    [serverFiltered, rows, filters, columns],
   );
+
+  // Sunucu modunda filtre değişimini üste bildir (ilk render hariç).
+  const firstFilterRun = useRef(true);
+  const onFiltersChangeRef = useRef(onFiltersChange);
+  onFiltersChangeRef.current = onFiltersChange;
+  useEffect(() => {
+    if (firstFilterRun.current) {
+      firstFilterRun.current = false;
+      return;
+    }
+    onFiltersChangeRef.current?.(filters);
+  }, [filters]);
 
   const metaCols = columns.filter((c): c is MetaColumnDef => c.kind === "meta");
   const marketCols = columns.filter((c): c is MarketColumnDef => c.kind === "market");

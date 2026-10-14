@@ -38,7 +38,11 @@ type SqlRow = Record<string, unknown>;
 
 type SqlBuild = { text: string; params: unknown[] };
 
-function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
+export function buildQuery(
+  query: ProfileQuery,
+  fetchLimit: number,
+  orderByKickoff = false,
+): SqlBuild | null {
   const criteria = query.criteria.filter((c) => c.targetOdds > 1);
   if (!criteria.length) return null;
 
@@ -115,6 +119,7 @@ function buildQuery(query: ProfileQuery, fetchLimit: number): SqlBuild | null {
       FROM ${EVENTS_TABLE}
       ${seasonWhere}
     ) e ON e.event_id = j.event_id
+    ${orderByKickoff ? "ORDER BY e.kickoff_at DESC NULLS LAST, e.event_id" : ""}
     LIMIT ${limitPh}
   `;
 
@@ -128,7 +133,18 @@ function num(v: unknown): number | null {
 }
 
 /** Postgres (match_odds) üzerinden çok kriterli profile araması. */
-export async function searchOddsProfileSQL(query: ProfileQuery): Promise<ProfileResult> {
+/** "Tümünü getir" modunda tek aramada okunacak azami aday satır (bellek/DB koruması). */
+export const MAX_ALL_CANDIDATES = 30000;
+
+export type SearchOddsProfileOpts = {
+  /** true: limit yok (yalnızca MAX_ALL_CANDIDATES güvenlik tavanı), tüm eşleşmeler döner. */
+  all?: boolean;
+};
+
+export async function searchOddsProfileSQL(
+  query: ProfileQuery,
+  opts: SearchOddsProfileOpts = {},
+): Promise<ProfileResult & { capped?: boolean }> {
   const t0 = Date.now();
   const criteria = query.criteria.filter((c) => c.targetOdds > 1);
   const tol = query.tolerance != null && query.tolerance >= 0 ? query.tolerance : 0;
@@ -140,8 +156,10 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
   }
 
   // JS tarafında kesin doğrulamada bir kısmı elenecek — biraz fazla çek.
-  const fetchLimit = Math.min(Math.max(limit * 4, 400), 3000);
-  const built = buildQuery(query, fetchLimit);
+  const fetchLimit = opts.all
+    ? MAX_ALL_CANDIDATES
+    : Math.min(Math.max(limit * 4, 400), 3000);
+  const built = buildQuery(query, fetchLimit, !!opts.all);
   if (!built) {
     return { matches: [], totalMatched: 0, truncated: false, tookMs: 0, criteria };
   }
@@ -150,6 +168,7 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
   const bmNames = await loadBookmakerNames();
 
   const matches: ProfileMatch[] = [];
+  const seenEvents = new Set<string>();
   for (const row of rows) {
     const hits: (CriterionHit | null)[] = new Array(criteria.length).fill(null);
     let ok = true;
@@ -217,6 +236,11 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
 
     if (!ok) continue;
 
+    // Aynı event birden çok satırla (ör. "OVER" ve "OVER:2.5") gelebilir — tekilleştir.
+    const evKey = String(row.event_id);
+    if (seenEvents.has(evKey)) continue;
+    seenEvents.add(evKey);
+
     matches.push({
       eventId: String(row.event_id),
       sourceEventId: String(row.source_event_id ?? ""),
@@ -243,8 +267,24 @@ export async function searchOddsProfileSQL(query: ProfileQuery): Promise<Profile
     const bb = b.hits[0]?.closing ?? b.hits[0]?.opening ?? 0;
     const da = Math.abs(aa - criteria[0].targetOdds);
     const db = Math.abs(bb - criteria[0].targetOdds);
-    return da - db;
+    if (da !== db) return da - db;
+    // Eşit yakınlıkta: yeni maç önce, sonra event id (sayfalar arası deterministik sıra).
+    const ka = a.kickoffAt ?? "";
+    const kb = b.kickoffAt ?? "";
+    if (ka !== kb) return ka < kb ? 1 : -1;
+    return a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0;
   });
+
+  if (opts.all) {
+    return {
+      matches,
+      totalMatched: matches.length,
+      truncated: rows.length >= fetchLimit,
+      capped: rows.length >= fetchLimit,
+      tookMs: Date.now() - t0,
+      criteria,
+    };
+  }
 
   const truncated = matches.length > limit || rows.length >= fetchLimit;
 

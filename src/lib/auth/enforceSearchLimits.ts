@@ -5,7 +5,7 @@ import { isAdminEmail } from "@/lib/auth/subscription";
 import { maxCriteriaForPlan, dailySearchLimitForPlan } from "@/lib/auth/planLimits";
 import { consumeSearchQuota } from "@/lib/searchUsage";
 
-type EnforceOk = { ok: true };
+type EnforceOk = { ok: true; userId: string };
 type EnforceFail = { ok: false; response: NextResponse };
 
 /**
@@ -17,8 +17,18 @@ type EnforceFail = { ok: false; response: NextResponse };
  * middleware'de zaten üyelik/Smart Analysis kontrolünden geçiyor — bu
  * fonksiyon sadece /api/analyze'e özel ek sınırları uygular.
  */
+export type EnforceOpts = {
+  /**
+   * Günlük arama hakkı bu çağrıda düşsün mü? Sayfa değiştirme / filtre gibi
+   * önbellekten servis edilen isteklerde false döndürülür (kullanıcı id'si verilir).
+   * Varsayılan: true.
+   */
+  consumeQuota?: boolean | ((userId: string) => boolean);
+};
+
 export async function enforceAnalyzeSearchLimits(
   criteriaCount: number,
+  opts: EnforceOpts = {},
 ): Promise<EnforceOk | EnforceFail> {
   const user = await getSessionUser();
   if (!user) {
@@ -29,7 +39,7 @@ export async function enforceAnalyzeSearchLimits(
   }
 
   if (isAdminEmail(user.email ?? "")) {
-    return { ok: true };
+    return { ok: true, userId: user.id };
   }
 
   const profile = await getProfile(user.id);
@@ -51,6 +61,12 @@ export async function enforceAnalyzeSearchLimits(
     };
   }
 
+  const shouldConsume =
+    typeof opts.consumeQuota === "function"
+      ? opts.consumeQuota(user.id)
+      : opts.consumeQuota !== false;
+  if (!shouldConsume) return { ok: true, userId: user.id };
+
   const dailyLimit = dailySearchLimitForPlan(plan);
   const quota = await consumeSearchQuota(user.id, dailyLimit);
   if (!quota.allowed) {
@@ -69,5 +85,5 @@ export async function enforceAnalyzeSearchLimits(
     };
   }
 
-  return { ok: true };
+  return { ok: true, userId: user.id };
 }

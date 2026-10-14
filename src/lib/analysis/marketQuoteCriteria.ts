@@ -66,14 +66,34 @@ export function buildQuoteCandidateCte(
   push: SqlParamPusher,
 ): string {
   const { exact, prefixes } = sideCandidates(opts.side);
-  const sideExactPh = exact.map((v) => push(v));
-  const sideConds = [`selection IN (${sideExactPh.join(", ")})`];
+  const hasLine = opts.line != null && String(opts.line) !== "";
+  const isOverUnder = opts.marketType === "OVER_UNDER";
+  const isOneXTwo = opts.marketType === "HOME_DRAW_AWAY";
+
+  // PERFORMANS: `selection LIKE 'p:%'` ve `market LIKE '...:%'` gibi OR'lu
+  // kalıplar Postgres'in satır tahminini 1'e düşürüp event_id indeksiyle
+  // "nested loop" kurmasına (ölçüm: ~24 sn) yol açıyordu. Veri biçimi bilinen
+  // marketlerde (O/U ve 1X2) kesin değerleri yazıyoruz (ölçüm: ~3 sn, aynı sonuç):
+  //  - O/U + line: selection "OVER" veya "OVER:2.5"
+  //  - 1X2: selection "H" / "D" / "A" (line yok)
+  // Diğer marketlerde eski (gevşek) davranış AYNEN korunur.
+  const exactSelections = new Set<string>(exact);
+  const sideConds: string[] = [];
+  const looseExtra: string[] = [];
   for (const p of prefixes) {
-    const ph = push(p);
-    const phPrefix = push(`${p}:%`);
-    sideConds.push(`selection = ${ph}`);
-    sideConds.push(`selection LIKE ${phPrefix}`);
+    if (isOverUnder && hasLine) {
+      exactSelections.add(p);
+      exactSelections.add(`${p}:${opts.line}`);
+    } else if (isOneXTwo && !hasLine) {
+      exactSelections.add(p);
+    } else {
+      looseExtra.push(`selection = ${push(p)}`);
+      looseExtra.push(`selection LIKE ${push(`${p}:%`)}`);
+    }
   }
+  const sideExactPh = [...exactSelections].map((v) => push(v));
+  sideConds.push(`selection IN (${sideExactPh.join(", ")})`);
+  sideConds.push(...looseExtra);
   const sideCond = `(${sideConds.join(" OR ")})`;
 
   const [lo, hi] = opts.oddsRange;
@@ -86,10 +106,28 @@ export function buildQuoteCandidateCte(
   // bilinmiyorsa TYPE:SCOPE ile başlayan (line'lı VEYA line'sız) her satırı
   // kabul ediyoruz.
   const marketBase = `${opts.marketType}:${opts.marketScope || "FULL_TIME"}`;
-  const hasLine = opts.line != null && String(opts.line) !== "";
+  // match_odds'ta O/U dışındaki tüm marketler 2 parçalı ("TYPE:SCOPE") saklanıyor
+  // (pg_stats: AH/EH dahil). Bu tipler için LIKE'lı OR yerine tam eşitlik.
+  const LINELESS_MARKET_TYPES = new Set([
+    "HOME_DRAW_AWAY",
+    "DOUBLE_CHANCE",
+    "BOTH_TEAMS_TO_SCORE",
+    "DRAW_NO_BET",
+    "HALF_FULL_TIME",
+    "CORRECT_SCORE",
+    "ODD_OR_EVEN",
+  ]);
+  const isHandicap =
+    opts.marketType === "ASIAN_HANDICAP" || opts.marketType === "EUROPEAN_HANDICAP";
   const marketCond = hasLine
-    ? `market = ${push(`${marketBase}:${opts.line}`)}`
-    : `(market = ${push(marketBase)} OR market LIKE ${push(`${marketBase}:%`)})`;
+    ? isHandicap
+      ? // AH/EH: pg_stats'ta market 2 parçalı ("ASIAN_HANDICAP:FULL_TIME"), line ayrı
+        // kolonda — iki biçimi de kabul et; line yine aşağıda line kolonuna karşı doğrulanır.
+        `market IN (${push(`${marketBase}:${opts.line}`)}, ${push(marketBase)})`
+      : `market = ${push(`${marketBase}:${opts.line}`)}`
+    : LINELESS_MARKET_TYPES.has(opts.marketType)
+      ? `market = ${push(marketBase)}`
+      : `(market = ${push(marketBase)} OR market LIKE ${push(`${marketBase}:%`)})`;
 
   // line zorunlu marketlerde (O/U, AH, EH) match_odds.line kolonuna karşı da
   // ayrıca doğrula — market string'i zaten line içeriyor ama bu ek kontrol
@@ -100,11 +138,10 @@ export function buildQuoteCandidateCte(
     lineCond = `AND line::text = ${linePh}`;
   }
 
-  // Nested (bookmaker dolu) satırlar bm filtresine tabi; bookmaker NULL
-  // olan satırlar (bookmaker bilgisi gelmemiş) over-inclusive kalır — JS'te
-  // quoteMatchesCriterion zaten bookmakerId null ise BM filtresini atlıyor.
+  // match_odds.bookmaker'da NULL yok (pg_stats null_frac=0); `bookmaker IS NULL OR`
+  // eşitliği indeks kullanımını bozuyordu. JS'te quoteMatchesCriterion ayrıca doğrular.
   const bmCond = opts.bookmakerId
-    ? `AND (bookmaker IS NULL OR bookmaker = ${push(String(opts.bookmakerId))})`
+    ? `AND bookmaker = ${push(String(opts.bookmakerId))}`
     : "";
 
   const seasons = (opts.seasonSlugs ?? []).filter(Boolean);
@@ -121,8 +158,10 @@ export function buildQuoteCandidateCte(
         ? `odds BETWEEN ${loPh} AND ${hiPh}`
         : `(odds BETWEEN ${loPh} AND ${hiPh} OR opening BETWEEN ${loPh} AND ${hiPh})`;
 
+  // MATERIALIZED: her kriter kendi indeksiyle bağımsız okunur, sonra hash join (ölçüm: 10.9sn → 6.4sn soğuk,
+  // plan kararlı). Planner'ın yanlış "1 satır" tahminiyle nested-loop kurmasını önler.
   return `
-    ${alias} AS (
+    ${alias} AS MATERIALIZED (
       SELECT event_id, bookmaker AS bookmaker_id, selection AS side, line, opening, odds AS current
       FROM ${MATCH_ODDS_TABLE}
       WHERE ${marketCond}

@@ -7,7 +7,7 @@
     "build": "NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "NODE_OPTIONS=--max-old-space-size=4096 next start",
     "lint": "next lint",
-    "test:analysis": "tsx --test src/lib/analysis/*.test.ts"
+    "test:analysis": "NODE_OPTIONS=--conditions=react-server DATABASE_URL=${DATABASE_URL:-postgres://x:y@localhost:5432/z} tsx --test src/lib/analysis/*.test.ts"
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.5-r.4",

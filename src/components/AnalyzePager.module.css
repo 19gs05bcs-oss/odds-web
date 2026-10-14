@@ -1,0 +1,49 @@
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+.info {
+  opacity: 0.75;
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.btn {
+  min-width: 2.1rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid rgba(128, 128, 128, 0.45);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  border-color: currentColor;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.active {
+  background: rgba(220, 108, 40, 0.15);
+  border-color: rgba(220, 108, 40, 0.9);
+  font-weight: 700;
+}
+.gap {
+  padding: 0 0.15rem;
+  opacity: 0.6;
+}
+.note {
+  flex-basis: 100%;
+  opacity: 0.7;
+  font-size: 0.8rem;
+}

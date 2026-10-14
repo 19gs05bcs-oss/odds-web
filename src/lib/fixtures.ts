@@ -4,7 +4,7 @@ import { parseFilterState } from "@/lib/analysis/filters";
 import { eventsMetaAndQuotesToTableRows, profileMatchToTableRow, PREFERRED_BM_NAME, type TableRow } from "@/lib/analysis/tableRows";
 import { fetchQuoteRowsByEventIds, listDistinctSeasonMarketTypes } from "@/lib/analysis/marketQuotes";
 import { loadBookmakerNames } from "@/lib/analysis/bookmakerNames";
-import type { ProfileQuery, ProfileResult } from "@/lib/analysis/profile";
+import type { ProfileMatch, ProfileQuery, ProfileResult } from "@/lib/analysis/profile";
 import type { AnalyzeResult, FilterState } from "@/lib/analysis/types";
 import type { FetchResult } from "@/lib/archive";
 import { sql } from "@/lib/db";
@@ -229,6 +229,81 @@ export async function searchProfile(
     return {
       ok: true,
       data: { ...result, tableRows, cacheStatus: "postgres:match_odds" },
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** UI'dan gelen bookmaker id'sini (sayısal Flashscore id veya isim) match_odds metin ismine çevirir. */
+export async function resolvePreferredBookmaker(bookmakerId?: string | null): Promise<string> {
+  let preferredBm = bookmakerId || PREFERRED_BM_NAME;
+  if (bookmakerId && /^\d+$/.test(bookmakerId)) {
+    const names = await loadBookmakerNames();
+    preferredBm = names.get(bookmakerId) || preferredBm;
+  }
+  return preferredBm;
+}
+
+/**
+ * Verilen eşleşmeler için tam tablo satırlarını kurar (tek bookmaker grid'i + kriter hücreleri).
+ * Yalnızca preferredBm'in satırlarını çeker — tüm bookmaker'lar yerine ~20x daha az veri.
+ */
+export async function buildTableRowsForMatches(
+  matches: ProfileMatch[],
+  preferredBm: string,
+): Promise<TableRow[]> {
+  if (!matches.length) return [];
+  const quoteRows = await fetchQuoteRowsByEventIds(
+    matches.map((m) => m.eventId),
+    preferredBm,
+  );
+  const fullRowsById = eventsMetaAndQuotesToTableRows(quoteRows, preferredBm);
+  return matches.map((m) => {
+    const hitsRow = profileMatchToTableRow(m);
+    const full = fullRowsById.get(m.eventId);
+    if (!full) return hitsRow;
+    for (const [colId, cell] of Object.entries(hitsRow.odds)) {
+      if (cell) full.odds[colId] = cell;
+    }
+    return full;
+  });
+}
+
+export type ProfileAllResult = {
+  matches: ProfileMatch[];
+  totalMatched: number;
+  /** Güvenlik tavanına (MAX_ALL_CANDIDATES) takıldıysa true — gerçek toplam daha fazla olabilir. */
+  capped: boolean;
+  tookMs: number;
+  criteria: ProfileResult["criteria"];
+  preferredBm: string;
+};
+
+/** Limit olmadan tüm eşleşen maçlar (sıralı). Tablo satırları sayfa bazında ayrıca kurulur. */
+export async function searchProfileAll(
+  query: ProfileQuery,
+): Promise<FetchResult<ProfileAllResult>> {
+  const preferredBm = await resolvePreferredBookmaker(query.bookmakerId);
+  if (!query.criteria.length) {
+    return {
+      ok: true,
+      data: { matches: [], totalMatched: 0, capped: false, tookMs: 0, criteria: [], preferredBm },
+    };
+  }
+  try {
+    const { searchOddsProfileSQL } = await import("@/lib/analysis/searchOddsProfileSQL");
+    const r = await searchOddsProfileSQL({ ...query, bookmakerId: preferredBm }, { all: true });
+    return {
+      ok: true,
+      data: {
+        matches: r.matches,
+        totalMatched: r.totalMatched,
+        capped: !!r.capped,
+        tookMs: r.tookMs,
+        criteria: r.criteria,
+        preferredBm,
+      },
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
