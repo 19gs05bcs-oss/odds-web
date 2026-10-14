@@ -34,7 +34,7 @@ const PLANS = [
   {
     id: "analyst" as const,
     name: "Analyst",
-    price: 39,
+    price: 30,
     period: "month",
     yearly: 390,
     desc: "Heavy daily use and deeper archive limits.",
