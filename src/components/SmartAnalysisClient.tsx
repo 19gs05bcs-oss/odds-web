@@ -213,25 +213,37 @@ const goalEngine = useMemo(
   }
 
   async function loadOddsShards(meta: FixtureRow[]) {
-    const ids = meta.map((f) => f.match_id);
-    const chunkSize = Math.ceil(ids.length / 8);
-    const slices: string[][] = [];
-    for (let i = 0; i < ids.length; i += chunkSize) slices.push(ids.slice(i, i + chunkSize));
-    await Promise.all(
-      slices.map(async (slice) => {
+  const ids = meta.map((f) => f.match_id);
+  const SIZE = 12;
+  const slices: string[][] = [];
+  for (let i = 0; i < ids.length; i += SIZE) slices.push(ids.slice(i, i + SIZE));
+
+  async function fetchSlice(slice: string[], tries = 3): Promise<void> {
+    let pending = slice;
+    for (let t = 0; t < tries && pending.length; t++) {
+      try {
         const res = await fetch(
-          `/api/fixtures?phase=odds&ids=${encodeURIComponent(slice.join(","))}`,
+          `/api/fixtures?phase=odds&ids=${encodeURIComponent(pending.join(","))}`,
           { cache: "no-store" },
         );
         if (res.ok) {
-          const j = (await res.json()) as {
-            fixtures?: Array<Pick<FixtureRow, "match_id" | "odds" | "bookmakers" | "odds_count">>;
-          };
-          await applyOddsPatches(j.fixtures ?? []);
+          const j = (await res.json()) as { fixtures?: Array<Pick<FixtureRow, "match_id" | "odds" | "bookmakers" | "odds_count">> };
+          const got = j.fixtures ?? [];
+          await applyOddsPatches(got);
+          const gotIds = new Set(got.map((g) => g.match_id));
+          pending = pending.filter((id) => !gotIds.has(id));
+          if (!pending.length) return;
         }
-      }),
-    );
+      } catch {}
+      await new Promise((r) => setTimeout(r, 400 * (t + 1)));
+    }
   }
+
+  // 4 istek paralel
+  for (let i = 0; i < slices.length; i += 4) {
+    await Promise.all(slices.slice(i, i + 4).map((s) => fetchSlice(s)));
+  }
+}
 
   async function loadFixturesForDate(date: string) {
     setFixturesLoading(true);
