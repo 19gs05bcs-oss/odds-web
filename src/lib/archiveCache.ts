@@ -113,6 +113,7 @@ async function fetchOddsSlice(slice: string[]): Promise<Map<string, OddsPatch>> 
     }
   } catch (error) {
     console.error("fetchOddsSlice error:", error instanceof Error ? error.message : String(error));
+    throw error;
   }
   return out;
 }
