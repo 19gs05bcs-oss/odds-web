@@ -26,13 +26,57 @@ function first(v: string | string[] | undefined): string {
   return v ?? "";
 }
 
+const MAX_PAST_DAYS = 3;
+
+/** Europe/Istanbul takvim günü (YYYY-MM-DD). */
+function todayIstanbul(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function shiftDate(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Seçilebilir günler: bugünden en fazla MAX_PAST_DAYS gün geriye + ileri tarihler.
+ * Varsayılan her zaman bugün; bugün bültende yoksa en yakın uygun gün.
+ * `dates` DESC sıralı gelir.
+ */
+function resolveDates(dates: string[], requested: string) {
+  const today = todayIstanbul();
+  const minDate = shiftDate(today, -MAX_PAST_DAYS);
+  const allowed = dates.filter((d) => d >= minDate);
+
+  let initial = "";
+  if (requested && allowed.includes(requested)) {
+    initial = requested;
+  } else if (allowed.includes(today)) {
+    initial = today;
+  } else {
+    // bugün yok: bugünden önceki en yakın gün, o da yoksa en yakın ileri gün
+    initial =
+      allowed.find((d) => d < today) ?? [...allowed].reverse().find((d) => d > today) ?? "";
+  }
+  return { allowed, initial };
+}
+
 export default async function SmartAnalysisPage({
   searchParams,
 }: {
   searchParams: SearchParams;
 }) {
   const [bookmakers, fixtureDates] = await Promise.all([listBookmakers(), listFixtureDates()]);
-  const defaultDate = first(searchParams.date) || fixtureDates[0] || "";
+  const { allowed: allowedDates, initial: defaultDate } = resolveDates(
+    fixtureDates,
+    first(searchParams.date),
+  );
 
   return (
     <div className={styles.page}>
@@ -40,7 +84,7 @@ export default async function SmartAnalysisPage({
       <main className={styles.main}>
         <SmartAnalysisClient
           bookmakers={bookmakers}
-          fixtureDates={fixtureDates}
+          fixtureDates={allowedDates}
           initialBulletinDate={defaultDate}
         />
       </main>
