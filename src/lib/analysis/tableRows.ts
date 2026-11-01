@@ -7,6 +7,7 @@ import type { MatchOddsWithMetaRow } from "@/lib/analysis/marketQuotes";
 import { splitMarket } from "@/lib/analysis/marketFormat";
 import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
 import type { MarketsBlob, OddsEvent } from "@/lib/types";
+import { zonedParts } from "@/lib/time";
 
 /** Canlı bülten (fixture.odds/markets_json) yolunda kullanılan Flashscore-numeric bookmaker id. */
 export const PREFERRED_BM = 16;
@@ -85,19 +86,20 @@ export function kickoffParts(iso: string | null | undefined): KickoffMeta {
     saat: "",
   };
   if (!iso) return empty;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return empty;
-  const yil = String(d.getFullYear());
-  const ay = String(d.getMonth() + 1).padStart(2, "0");
-  const gun = String(d.getDate()).padStart(2, "0");
-  const saat = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // Wall-clock in DISPLAY_TZ (European time), NOT the runtime's local zone.
+  const z = zonedParts(iso);
+  if (!z) return empty;
+  const yil = z.year;
+  const ay = z.month;
+  const gun = z.day;
+  const saat = `${z.hour}:${z.minute}`;
   return {
     // Short date so sticky/adjacent columns don't collide (YEAR is optional).
     tarih: `${gun}.${ay}.${yil.slice(-2)}`,
     yil,
     ay,
     gun,
-    gunAdi: DAY_NAMES[d.getDay()] || "",
+    gunAdi: DAY_NAMES[z.weekday] || "",
     saat,
   };
 }

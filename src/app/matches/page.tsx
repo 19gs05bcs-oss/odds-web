@@ -2,6 +2,7 @@ import Link from "next/link";
 import { MatchList } from "@/components/MatchList";
 import { SiteHeader } from "@/components/SiteHeader";
 import { listFixtures, listFixtureDates } from "@/lib/archiveCache";
+import { todayInTz } from "@/lib/time";
 import styles from "./page.module.css";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,6 @@ export const metadata = {
   description:
     "Today's and upcoming fixtures from the live bulletin, with odds pulled straight from Supabase. Pick a match to see the full bookmaker board.",
 };
-
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function formatDateLabel(date: string): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -32,7 +29,7 @@ type Props = {
 };
 
 export default async function MatchesPage({ searchParams }: Props) {
-  const today = todayUtc();
+  const today = todayInTz();
   const rawDates = await listFixtureDates(14);
   // listFixtureDates DESC döner; bugünden itibaren ileri tarihleri
   // artan sırada, sadece bugün ve sonrasını göster.

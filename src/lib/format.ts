@@ -1,3 +1,5 @@
+import { DISPLAY_TZ } from "@/lib/time";
+
 export function formatKickoff(iso: string | null | undefined): string {
   if (!iso) return "No date";
   const d = new Date(iso);
@@ -5,7 +7,7 @@ export function formatKickoff(iso: string | null | undefined): string {
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Europe/Istanbul",
+    timeZone: DISPLAY_TZ,
   }).format(d);
 }
 

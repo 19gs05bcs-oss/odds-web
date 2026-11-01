@@ -104,21 +104,21 @@ export function bookmakersSummary(rows: CalibrationRow[], limit = 20) {
 export function buildSmartInsights(m: SmartMemory): { title: string; body: string }[] {
   const out: { title: string; body: string }[] = [];
   out.push({
-    title: "Veri seti",
-    body: `${m.sampleFinished.toLocaleString()} bitmiş maç · ${Object.keys(m.bookmakersSeen).length} bookmaker · 1X2 profil ${m.sample1x2Profiles.toLocaleString()}`,
+    title: "Dataset",
+    body: `${m.sampleFinished.toLocaleString()} finished matches · ${Object.keys(m.bookmakersSeen).length} bookmakers · 1X2 profiles ${m.sample1x2Profiles.toLocaleString()}`,
   });
 
   const drift1x2 = m.pillar2_marketDrift.filter((r) => r.market === "HOME_DRAW_AWAY:FULL_TIME");
   for (const row of drift1x2) {
     const label =
       row.move === "shortened"
-        ? "Kısalan oran (steam)"
+        ? "Shortening odds (steam)"
         : row.move === "lengthened"
-          ? "Uzayan oran (drift)"
-          : "Stabil";
+          ? "Lengthening odds (drift)"
+          : "Stable";
     out.push({
-      title: `MS 1X2 · ${label}`,
-      body: `n=${row.n} · gerçek ${fmtPct(row.winPct)} vs kapanış implied ${fmtPct(row.impliedClosePct)} (${fmtPp(row.edgeClosePp)})`,
+      title: `FT 1X2 · ${label}`,
+      body: `n=${row.n} · actual ${fmtPct(row.winPct)} vs closing implied ${fmtPct(row.impliedClosePct)} (${fmtPp(row.edgeClosePp)})`,
     });
   }
 
@@ -126,8 +126,8 @@ export function buildSmartInsights(m: SmartMemory): { title: string; body: strin
     const side = key.replace("1X2:", "");
     const lift = v.avgSameOutcomePct - m.pillar3_similarOdds.baselineRandom1x2;
     out.push({
-      title: `Benzer oran kümesi · MS ${side}`,
-      body: `±${(m.similarOddsTolerance * 100).toFixed(0)}% bandında ortalama %${v.avgSameOutcomePct.toFixed(1)} aynı sonuç (n=${v.anchors}, baseline +${lift.toFixed(1)} pp)`,
+      title: `Similar odds cluster · FT ${side}`,
+      body: `Within a ±${(m.similarOddsTolerance * 100).toFixed(0)}% band, ${v.avgSameOutcomePct.toFixed(1)}% on average ended with the same outcome (n=${v.anchors}, baseline +${lift.toFixed(1)} pp)`,
     });
   }
 
@@ -164,6 +164,6 @@ export function signalsFromCompactOdds(
 export function hintForSignal(sig: OddsSignal, m: SmartMemory): string {
   const mkey = `${sig.market}:${sig.scope}`;
   const drift = m.pillar2_marketDrift.find((r) => r.market === mkey && r.move === sig.move);
-  if (!drift) return "Arşivde bu market/hareket için yeterli örnek yok.";
-  return `Arşiv (${drift.n} seçim): ${sig.move === "shortened" ? "kısalma" : "uzama"} sonrası isabet ${fmtPct(drift.winPct)} · implied ${fmtPct(drift.impliedClosePct)}`;
+  if (!drift) return "Not enough archive samples for this market/move.";
+  return `Archive (${drift.n} selections): hit rate after ${sig.move === "shortened" ? "shortening" : "lengthening"} ${fmtPct(drift.winPct)} · implied ${fmtPct(drift.impliedClosePct)}`;
 }

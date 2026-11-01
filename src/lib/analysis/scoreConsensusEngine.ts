@@ -350,8 +350,8 @@ export function computeScoreConsensus(
   const isAwayFav = pA >= 0.43 && pA > pH * 1.12;
 
   let regimeCode = "OPEN";
-  let regimeLabel = "Dengeli / Açık";
-  let confidenceLabel = "STANDART";
+  let regimeLabel = "Balanced / Open";
+  let confidenceLabel = "STANDARD";
 
   if (pH >= 0.85) {
     regimeCode = "DOM_H_SUPER";

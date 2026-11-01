@@ -471,8 +471,8 @@ export function computeGoalEngine(
     matchedCase = {
       name: "ASYMMETRIC BARREN TRAP (Hammarby / Genk W False Showcase Trap)",
       desc: "Favorite and Over 2.5 are priced very low in the showcase, but the opponent's goal contribution has been wiped from the market (BTTS Yes @1.78-2.30). The 3.5 line is hanging; 1-0 / 2-0 lock risk!",
-      ht: "🔒 FIRST HALF CONTROL (0-0 / 1-0 Kilit)",
-      ft: "🛡️ ASYMMETRIC BARREN LOCK (Maksimum 1-2 Gol / 1-0, 2-0 Koridoru)",
+      ht: "🔒 FIRST HALF CONTROL (0-0 / 1-0 Lock)",
+      ft: "🛡️ ASYMMETRIC BARREN LOCK (Max 1-2 Goals / 1-0, 2-0 Corridor)",
       team: "⛔ DO NOT PLAY GENERAL OVER (No away contribution; Favorite single-goal margin only / Under 2.5-3.5)",
       profile: "ASYMMETRIC_BARREN_TRAP",
     };

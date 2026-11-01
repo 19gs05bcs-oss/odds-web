@@ -8,6 +8,7 @@ import {
   PREFERRED_BM_NAME,
 } from "@/lib/analysis/tableRows";
 import type { CompactOddsRow, FixtureRow } from "@/lib/archiveCache";
+import { dayKeyInTz } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -71,7 +72,7 @@ export async function POST(req: Request) {
 
   const fixtureRow: FixtureRow = {
     match_id: fixture.match_id,
-    bulletin_date: fixture.kickoff_at?.slice(0, 10) || "",
+    bulletin_date: dayKeyInTz(fixture.kickoff_at),
     day_offset: 0,
     league: fixture.league ?? null,
     league_country: null,

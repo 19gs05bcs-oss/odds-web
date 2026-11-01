@@ -185,7 +185,7 @@ function round3(n: number) {
 }
 
 export const SIDE_LABEL_TR: Record<Side, string> = {
-  H: "Ev Sahibi (1)",
-  D: "Beraberlik (X)",
-  A: "Deplasman (2)",
+  H: "Home (1)",
+  D: "Draw (X)",
+  A: "Away (2)",
 };

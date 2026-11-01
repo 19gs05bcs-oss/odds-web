@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { FixtureRow } from "@/lib/fixtures";
+import { clockInTz } from "@/lib/time";
 import filterStyles from "./AnalyzeFilters.module.css";
 import styles from "./FixtureMatchStrip.module.css";
 
@@ -20,10 +21,7 @@ function hasBmOdds(f: FixtureRow, bmId: number): boolean {
 }
 
 function kickoffLabel(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return clockInTz(iso);
 }
 
 function matchLabel(f: FixtureRow): string {

@@ -36,6 +36,7 @@ type SimilarityCardState = {
 };
 import type { BookmakerOption } from "@/lib/types";
 import type { FixtureRow } from "@/lib/fixtures";
+import { DISPLAY_TZ } from "@/lib/time";
 import filterStyles from "./AnalyzeFilters.module.css";
 import styles from "./SmartAnalysisClient.module.css";
 
@@ -577,7 +578,7 @@ const goalEngine = useMemo(
                       {simState.computedAt ? (
                         <span className={styles.muted}>
                           {" "}
-                          · computed {new Date(simState.computedAt).toLocaleString()}
+                          · computed {new Date(simState.computedAt).toLocaleString("en-GB", { timeZone: DISPLAY_TZ })}
                         </span>
                       ) : null}
                     </p>

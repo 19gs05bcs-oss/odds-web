@@ -129,8 +129,8 @@ export function getSmartRecommendation(
   insights.push({
     id: "data-source",
     severity: "info",
-    title: "Veri kaynağı",
-    body: "Analyze zaten events.markets_json kullanıyor — ayrı event_quotes tablosu şart değil. O tablo yalnızca 20 bookmaker'ın tam grid'ini SQL'de sorgulamak istersen (opsiyonel performans optimizasyonu).",
+    title: "Data source",
+    body: "Analyze already uses events.markets_json — a separate event_quotes table is not required. That table only matters if you want to query the full grid of 20 bookmakers in SQL (optional performance optimization).",
   });
 
   return {

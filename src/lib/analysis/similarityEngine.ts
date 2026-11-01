@@ -386,12 +386,12 @@ export function readBoard(opts: {
   const openShare = tot ? openN / tot : 0.5;
 
   const veto: string[] = [];
-  if (goalSteam === "SHUT") veto.push("4+ gol / 3-2 / 4-3 kilidi yok");
-  if (goalSteam === "FLAT" && (p.ou25?.odds ?? 0) >= 1.85) veto.push("patlama skoru yok");
-  if (bttsSteam === "OFF") veto.push("2-1 / 1-2 / 3-2 BTTS kilidi yok");
-  if (sideSteam === "AWAY") veto.push("3-1 / 2-0 ev kilidi yok");
-  if (sideSteam === "HOME") veto.push("0-1 / 1-3 dep kilidi yok");
-  if (side === "PICKEM") veto.push("tek taraf kilidi yok");
+  if (goalSteam === "SHUT") veto.push("no 4+ goals / 3-2 / 4-3 lock");
+  if (goalSteam === "FLAT" && (p.ou25?.odds ?? 0) >= 1.85) veto.push("no blowout score");
+  if (bttsSteam === "OFF") veto.push("no 2-1 / 1-2 / 3-2 BTTS lock");
+  if (sideSteam === "AWAY") veto.push("no 3-1 / 2-0 home lock");
+  if (sideSteam === "HOME") veto.push("no 0-1 / 1-3 away lock");
+  if (side === "PICKEM") veto.push("no one-sided lock");
 
   // --- YENİ: CS 3:3 gol enflasyonu sinyali (bkz. CS33_STEAM_PCT tanımı) ---
   const cs33Row =
@@ -409,10 +409,10 @@ export function readBoard(opts: {
         odds: cs33Row.odds,
         opening: cs33Row.opening,
         note: cs33Active
-          ? `CS 3:3 oranı açılıştan %${(cs33Pct! * 100).toFixed(1)} kısaldı VE OU2.5 (likit pazar) aynı yönde (Over favori) teyit ediyor — ham backtestte (n=13713, OU teyidi aranmadan) bu grupta 5+ gol %15.5 (baz %12.0) ve Over 2.5 %53.8 (baz %48.4) çıkıyor. Çift onay isabeti ayrıca ölçülmedi, muhtemelen daha yüksek. 3-3'ün kendisi gelme ihtimali ~sabit (%1.2); sinyal "gollü kaos" için, doğrudan skor için değil.`
+          ? `CS 3:3 odds shortened ${(cs33Pct! * 100).toFixed(1)}% from opening AND OU2.5 (liquid market) confirms in the same direction (Over favourite) — in the raw backtest (n=13713, no OU confirmation required) this group shows 5+ goals at 15.5% (baseline 12.0%) and Over 2.5 at 53.8% (baseline 48.4%). The double-confirmation hit rate was not measured separately and is likely higher. The chance of an actual 3-3 stays roughly flat (1.2%); the signal points to "goal-heavy chaos", not to the exact score.`
           : cs33RawTrigger
-            ? "CS 3:3 kısaldı ama OU2.5 aynı yönde teyit etmiyor — tek başına düşük likiditeli CS hareketine güvenilmiyor, uyarı bastırıldı."
-            : "CS 3:3 hareketi eşik altında (uyarı yok).",
+            ? "CS 3:3 shortened but OU2.5 does not confirm in the same direction — a low-liquidity CS move alone is not trusted, alert suppressed."
+            : "CS 3:3 move below threshold (no alert).",
       }
     : null;
 
@@ -432,10 +432,10 @@ export function readBoard(opts: {
         odds: cs00Row.odds,
         opening: cs00Row.opening,
         note: cs00Active
-          ? `CS 0:0 oranı açılıştan %${(cs00Pct! * 100).toFixed(1)} kısaldı VE OU2.5 (likit pazar) aynı yönde (Under favori) teyit ediyor — ham backtestte (OU teyidi aranmadan) 0-0 ihtimali %5.1 -> %9.5, Under 2.5 %40.6 -> %56.3'e çıkıyor. Çift onay isabeti ayrıca ölçülmedi, muhtemelen daha yüksek. Bu maçlarda %51.5 ihtimalle BTTS NO gerçekleşiyor; Over 2.5 / BTTS YES önerilmemeli.`
+          ? `CS 0:0 odds shortened ${(cs00Pct! * 100).toFixed(1)}% from opening AND OU2.5 (liquid market) confirms in the same direction (Under favourite) — in the raw backtest (no OU confirmation required) the 0-0 chance rises 5.1% -> 9.5% and Under 2.5 rises 40.6% -> 56.3%. The double-confirmation hit rate was not measured separately and is likely higher. BTTS NO lands in 51.5% of these matches; Over 2.5 / BTTS YES should not be recommended.`
           : cs00RawTrigger
-            ? "CS 0:0 kısaldı ama OU2.5 aynı yönde teyit etmiyor — tek başına düşük likiditeli CS hareketine güvenilmiyor, uyarı bastırıldı."
-            : "CS 0:0 hareketi eşik altında (uyarı yok).",
+            ? "CS 0:0 shortened but OU2.5 does not confirm in the same direction — a low-liquidity CS move alone is not trusted, alert suppressed."
+            : "CS 0:0 move below threshold (no alert).",
       }
     : null;
 
@@ -453,8 +453,8 @@ export function readBoard(opts: {
         odds: favRow.odds,
         opening: favRow.opening,
         note: favDriftActive
-          ? `Favori (${favSideForDrift}) oranı açılıştan %${(favDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta 0-0 ihtimali %8.3, Under 2.5 %52.9'a çıkıyor. Sürpriz gol düellosu değil, favorinin kilit açamadığı bir "alt/kısır" senaryosu daha olası.`
-          : "Favori oranı hareketi eşik altında (uyarı yok).",
+          ? `Favourite (${favSideForDrift}) odds lengthened ${(favDriftPct! * 100).toFixed(1)}% from opening — in the backtest this group shows a 0-0 chance of 8.3% and Under 2.5 at 52.9%. A "low-scoring / barren" scenario where the favourite fails to break the lock is more likely than a surprise goal duel.`
+          : "Favourite odds move below threshold (no alert).",
       }
     : null;
 
@@ -473,12 +473,12 @@ export function readBoard(opts: {
         opening: xxRow.opening,
         oneOneSteam: oneOneSteamForXx,
         note: xxDriftActive
-          ? `X/X (Berabere/Berabere) oranı açılıştan %${(xxDriftPct! * 100).toFixed(1)} uzadı — backtestte bu grupta beraberlik ihtimali %27 -> %19.6'ya düşüyor, favorinin kazanma ihtimali %47 -> %65.5'e çıkıyor. Tek başına ~%65 isabetli MS (favori) sinyali.${
+          ? `X/X (Draw/Draw) odds lengthened ${(xxDriftPct! * 100).toFixed(1)}% from opening — in the backtest this group's draw chance drops 27% -> 19.6% while the favourite's win chance rises 47% -> 65.5%. A ~65% hit-rate FT (favourite) signal on its own.${
               oneOneSteamForXx === "DOWN"
-                ? " Aynı anda 1/1 de kısalıyor — bu kombinasyonda favori %62.9 kazanıyor ama sadece %10.8'i 2-1/1-2 bitiyor: 'temiz/dominant' galibiyet sinyali, 2-1 avı için kullanılmamalı."
+                ? " 1/1 is shortening at the same time — in this combination the favourite wins 62.9% but only 10.8% finish 2-1/1-2: a 'clean/dominant' win signal, not to be used for chasing 2-1."
                 : ""
             }`
-          : "X/X hareketi eşik altında (uyarı yok).",
+          : "X/X move below threshold (no alert).",
       }
     : null;
 
@@ -510,10 +510,10 @@ export function readBoard(opts: {
           ouPct,
           csSniper,
           note: htRadarBrakeOn
-            ? "Fren devrede: X/X (İY Berabere/MS Berabere) kısalıyor — piyasa maçın kilitleneceğini fiyatlıyor, İY gol sinyali bastırıldı."
+            ? "Brake engaged: X/X (HT Draw/FT Draw) is shortening — the market is pricing a locked match, HT goal signal suppressed."
             : htGoalRadarActive
-              ? `Erken Gol Radarı AKTİF: ${ouTrigger === "BOTH" ? "MS 3.5 Üst ve İY 1.5 Üst" : ouTrigger === "FT_3.5" ? "MS 3.5 Üst" : "İY 1.5 Üst"} %${(ouPct! * 100).toFixed(1)} kısaldı VE İY Doğru Skor ${csSniper === "BOTH" ? "2-1 ve 2-0" : csSniper} kısalma trendinde — backtestte İY CS 2-1 tek başına +%4.1 ile en güçlü tetikleyicilerden (MS CS 2-1 ise nötr, +%0.1). Bu üç şart bir arada en yüksek ihtimalli 'İlk Yarı 2+ Gol' adayı.`
-              : "Erken Gol Radarı şartları eksik (tetik veya keskin nişancı sinyali yok).",
+              ? `Early Goal Radar ACTIVE: ${ouTrigger === "BOTH" ? "FT Over 3.5 and HT Over 1.5" : ouTrigger === "FT_3.5" ? "FT Over 3.5" : "HT Over 1.5"} shortened ${(ouPct! * 100).toFixed(1)}% AND HT Correct Score ${csSniper === "BOTH" ? "2-1 and 2-0" : csSniper} is trending shorter — in the backtest HT CS 2-1 alone is one of the strongest triggers at +4.1% (FT CS 2-1 is neutral, +0.1%). These three conditions together make the most likely 'First Half 2+ Goals' candidate.`
+              : "Early Goal Radar conditions not met (no trigger or sniper signal).",
         }
       : null;
 
@@ -563,11 +563,11 @@ export function readBoard(opts: {
   }
 
   const reason = [
-    `aile ${p.family}`,
-    `taraf ${side} steam ${sideSteam}`,
-    `gol ${goalSteam} btts ${bttsSteam}`,
-    `açık ${openN} kilit ${shutN}`,
-    `duruş ${stance}`,
+    `family ${p.family}`,
+    `side ${side} steam ${sideSteam}`,
+    `goals ${goalSteam} btts ${bttsSteam}`,
+    `open ${openN} lock ${shutN}`,
+    `stance ${stance}`,
   ].join(" · ");
 
   const csLadder: BoardCall["csLadder"] = (() => {
@@ -839,20 +839,20 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
 
   if (p.family === "AWAY_SHUTOUT") {
     const ahA = pickClosestAH(fixtureOdds, "AWAY", -1.5);
-    if (ahA && ahA.odds >= 2.1) return { family: p.family, primary: "0-1", backup: "0-2", reason: "AWAY_SHUTOUT + AH-1.5 uzun" };
+    if (ahA && ahA.odds >= 2.1) return { family: p.family, primary: "0-1", backup: "0-2", reason: "AWAY_SHUTOUT + AH-1.5 long" };
     return { family: p.family, primary: "0-2", backup: "0-1", reason: "AWAY_SHUTOUT" };
   }
   if (p.family === "CLEAN_AWAY") {
-    return { family: p.family, primary: "0-2", backup: "0-1", reason: "CLEAN_AWAY OU kapanır" };
+    return { family: p.family, primary: "0-2", backup: "0-1", reason: "CLEAN_AWAY OU closes" };
   }
   if (p.family === "HOME_BURST") {
     if (awayGoalPriced || (p.bttsYes && p.bttsYes.odds <= 1.75)) {
       const tightAh = ahM15 != null && ahM15.odds <= 2.05;
-      if (p.ou35 && p.ou35.odds <= 1.9) return { family: p.family, primary: "4-2", backup: "5-1", reason: "HOME_BURST OU35 çok kısa" };
+      if (p.ou35 && p.ou35.odds <= 1.9) return { family: p.family, primary: "4-2", backup: "5-1", reason: "HOME_BURST OU35 very short" };
       if (tightAh) return { family: p.family, primary: "4-2", backup: "5-2", reason: "HOME_BURST BTTS + -1.5" };
-      return { family: p.family, primary: "3-1", backup: "2-1", reason: "HOME_BURST BTTS, -1.5 sınır" };
+      return { family: p.family, primary: "3-1", backup: "2-1", reason: "HOME_BURST BTTS, -1.5 borderline" };
     }
-    if (p.ou25 && p.ou25.odds <= 1.55) return { family: p.family, primary: "3-0", backup: "2-0", reason: "HOME_BURST clean-sheet eğilim" };
+    if (p.ou25 && p.ou25.odds <= 1.55) return { family: p.family, primary: "3-0", backup: "2-0", reason: "HOME_BURST clean-sheet lean" };
     return { family: p.family, primary: "2-0", backup: "3-0", reason: "HOME_BURST" };
   }
   if (p.family === "HOME_NUDGE") {
@@ -867,9 +867,9 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
         return r?.opening != null && r.odds > r.opening;
       })();
     if (twoOneDown || oneNilUp) {
-      return { family: p.family, primary: "2-1", backup: "1-1", reason: "HOME_NUDGE BTTS flip + CS 2-1 kısalır / 1-0 uzar" };
+      return { family: p.family, primary: "2-1", backup: "1-1", reason: "HOME_NUDGE BTTS flip + CS 2-1 shortens / 1-0 lengthens" };
     }
-    return { family: p.family, primary: "2-1", backup: "1-0", reason: "HOME_NUDGE ev ~2.15 + gol açılır" };
+    return { family: p.family, primary: "2-1", backup: "1-0", reason: "HOME_NUDGE home ~2.15 + goals open up" };
   }
   if (p.family === "OPEN_DRAW") {
     if (p.ou35 && p.ou35.odds <= 3.25 && (p.bttsYes?.odds ?? 99) <= 1.75) {
@@ -879,7 +879,7 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   }
   if (p.family === "OPEN_GAME") {
     if (p.ou25 && p.ou25.odds <= 1.55 && (p.bttsYes?.odds ?? 99) <= 1.5) {
-      return { family: p.family, primary: "2-2", backup: "3-2", reason: "OPEN_GAME OU25/BTTS çok kısa; 1-1 totals ile çelişir" };
+      return { family: p.family, primary: "2-2", backup: "3-2", reason: "OPEN_GAME OU25/BTTS very short; 1-1 conflicts with totals" };
     }
     if (awayGoalPriced && p.ou35 && p.ou35.odds <= 2.55) {
       return { family: p.family, primary: "2-1", backup: "3-2", reason: "OPEN_GAME CS(2-1)≈CS(2-0) + OU35" };
@@ -891,7 +891,7 @@ export function predictScoreline(fixtureOdds: FixtureOddsRow[]): {
   }
 
   if (cs11 != null && cs21 != null && cs11 <= cs21 && (p.ou25?.odds ?? 0) > 1.7) {
-    return { family: p.family, primary: "1-1", backup: "2-1", reason: "CS 1-1 en kısa" };
+    return { family: p.family, primary: "1-1", backup: "2-1", reason: "CS 1-1 shortest" };
   }
   return { family: p.family, primary: "2-1", backup: "1-1", reason: "BASE" };
 }
@@ -1046,7 +1046,7 @@ export function predictScorelineV2(
       family: p.family,
       primary: "2-1",
       backup: "1-1",
-      reason: "V2: CS verisi yetersiz, fallback",
+      reason: "V2: insufficient CS data, fallback",
       top: dist,
       goalTotals,
     };
@@ -1518,12 +1518,12 @@ export async function findSimilarForBookmaker(opts: {
     const add = (label: string, n: number) => {
       insights.push({ label, n, d, pct: Math.round((100 * n) / d) });
     };
-    add("ev kazanır", scored.filter((s) => s.hs > s.as).length);
-    add("ev 2+ fark", scored.filter((s) => s.hs - s.as >= 2).length);
-    add("ev 3.5+ gol (ev golleri)", scored.filter((s) => s.hs >= 4).length);
-    add("maç 3.5 üst", scored.filter((s) => s.hs + s.as > 3.5).length);
+    add("home wins", scored.filter((s) => s.hs > s.as).length);
+    add("home wins by 2+", scored.filter((s) => s.hs - s.as >= 2).length);
+    add("home 3.5+ goals (home goals)", scored.filter((s) => s.hs >= 4).length);
+    add("match over 3.5", scored.filter((s) => s.hs + s.as > 3.5).length);
     add("BTTS", scored.filter((s) => s.hs > 0 && s.as > 0).length);
-    add("clean sheet ev", scored.filter((s) => s.as === 0 && s.hs > 0).length);
+    add("home clean sheet", scored.filter((s) => s.as === 0 && s.hs > 0).length);
   }
 
   const board = readBoard({ fixtureOdds, regimes });

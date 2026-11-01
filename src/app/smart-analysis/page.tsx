@@ -2,6 +2,7 @@ import nextDynamic from "next/dynamic";
 import { SiteHeader } from "@/components/SiteHeader";
 import { listBookmakers } from "@/lib/fixtures";
 import { listFixtureDates } from "@/lib/archiveCache";
+import { shiftDayKey, todayInTz } from "@/lib/time";
 import styles from "./page.module.css";
 
 export const metadata = {
@@ -28,21 +29,6 @@ function first(v: string | string[] | undefined): string {
 
 const MAX_PAST_DAYS = 3;
 
-/** Europe/Istanbul takvim günü (YYYY-MM-DD). */
-function todayIstanbul(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Istanbul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
-function shiftDate(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
 
 /**
  * Seçilebilir günler: bugünden en fazla MAX_PAST_DAYS gün geriye + ileri tarihler.
@@ -50,8 +36,8 @@ function shiftDate(date: string, days: number): string {
  * `dates` DESC sıralı gelir.
  */
 function resolveDates(dates: string[], requested: string) {
-  const today = todayIstanbul();
-  const minDate = shiftDate(today, -MAX_PAST_DAYS);
+  const today = todayInTz(); // European calendar day (DISPLAY_TZ)
+  const minDate = shiftDayKey(today, -MAX_PAST_DAYS);
   const allowed = dates.filter((d) => d >= minDate);
 
   let initial = "";

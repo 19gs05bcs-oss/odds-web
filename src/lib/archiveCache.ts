@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { sql } from "@/lib/db";
+import { DISPLAY_TZ, shiftDayKey, todayInTz } from "@/lib/time";
 
 /** Compact odds row from fetchday / season schema_version=2. */
 export type CompactOddsRow = [
@@ -35,8 +36,17 @@ export type FixtureRow = {
 };
 
 function todayUtcDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Kept under its old name for call sites; the day is now the European (DISPLAY_TZ) day.
+  return todayInTz();
 }
+
+/**
+ * A fixture's day is the calendar day of its kickoff in DISPLAY_TZ, NOT the stored
+ * `bulletin_date` (which follows the scraper's zone, so e.g. a 23:00 CET kickoff
+ * lands in the next day's bulletin). We still use `bulletin_date` to narrow the scan
+ * (±1 day is always enough), then bucket by kickoff.
+ */
+const DAY_SQL = "(kickoff_at::timestamptz AT TIME ZONE $5::text)::date = $6::date";
 
 const FIXTURE_META_HT =
   "match_id,bulletin_date,day_offset,league,league_country,kickoff_at,kickoff_ts,home_name,away_name,home_id,away_id,home_score,away_score,home_ht_score,away_ht_score,match_url,odds_count";
@@ -153,9 +163,33 @@ export async function fetchFixturesMeta(date: string): Promise<FixtureRow[]> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const cols = useHt ? FIXTURE_META_HT : FIXTURE_META_BASE;
     try {
-      const query = `SELECT ${cols} FROM fixture WHERE bulletin_date = $1 ORDER BY kickoff_at ASC`;
-      const data = await withTimeout(sql.unsafe<FixtureRow[]>(query, [date]), 18000, "fixture-meta");
-      
+      // Re-bucket by kickoff day in DISPLAY_TZ. A match can sit in two bulletins, so
+      // DISTINCT ON match_id (latest bulletin wins), then sort by kickoff.
+      const query =
+        `SELECT * FROM (` +
+        `SELECT DISTINCT ON (match_id) ${cols} FROM fixture ` +
+        `WHERE bulletin_date IN ($2, $1, $3) AND (` +
+        `(kickoff_at IS NOT NULL AND ${DAY_SQL}) OR (kickoff_at IS NULL AND bulletin_date = $4)` +
+        `) ORDER BY match_id, bulletin_date DESC` +
+        `) t ORDER BY kickoff_at ASC`;
+      let data: FixtureRow[];
+      try {
+        data = await withTimeout(
+          sql.unsafe<FixtureRow[]>(query, [date, shiftDayKey(date, -1), shiftDayKey(date, 1), date, DISPLAY_TZ, date]),
+          18000,
+          "fixture-meta",
+        );
+      } catch (inner) {
+        if (useHt && isMissingHtColumn(inner)) throw inner;
+        // Never take the page down over the re-bucketing: fall back to the stored bulletin day.
+        console.warn("fetchFixturesMeta: kickoff-day query failed, using bulletin_date:", inner instanceof Error ? inner.message : inner);
+        data = await withTimeout(
+          sql.unsafe<FixtureRow[]>(`SELECT ${cols} FROM fixture WHERE bulletin_date = $1 ORDER BY kickoff_at ASC`, [date]),
+          18000,
+          "fixture-meta-fallback",
+        );
+      }
+
       return data.map((row) => ({
         ...row,
         odds: null,
@@ -224,6 +258,23 @@ export async function getFixtureById(matchId: string): Promise<FixtureRow | null
 }
 
 async function fetchFixtureDatesUncached(limit = 14): Promise<string[]> {
+  // Day list in DISPLAY_TZ (kickoff-based), derived from the most recent bulletins only.
+  try {
+    const query =
+      `SELECT DISTINCT to_char((kickoff_at::timestamptz AT TIME ZONE $1::text)::date, 'YYYY-MM-DD') AS d ` +
+      `FROM fixture WHERE kickoff_at IS NOT NULL AND bulletin_date IN (` +
+      `SELECT bulletin_date FROM (SELECT DISTINCT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 30) b` +
+      `) ORDER BY d DESC`;
+    const rows = await withTimeout(
+      sql.unsafe<{ d: string }[]>(query, [DISPLAY_TZ]),
+      8000,
+      "fixture-dates-tz",
+    );
+    const days = rows.map((r) => r.d).filter(Boolean).slice(0, limit);
+    if (days.length) return days;
+  } catch (e) {
+    console.warn("listFixtureDates: kickoff-day query failed, using bulletin_date:", e instanceof Error ? e.message : e);
+  }
   try {
         const query = "SELECT DISTINCT bulletin_date FROM fixture ORDER BY bulletin_date DESC LIMIT 300";
     const data = await withTimeout(

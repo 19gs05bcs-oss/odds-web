@@ -141,31 +141,31 @@ export function describeMovement(
   side: string,
   line?: string | null,
 ): { marketLabel: string; sideLabel: string } {
-  const scopeTag = scope === "FIRST_HALF" ? "İY " : "";
+  const scopeTag = scope === "FIRST_HALF" ? "HT " : "";
   if (mtype === "HOME_DRAW_AWAY") {
     return { marketLabel: `${scopeTag}1X2`, sideLabel: sideLabel(side) };
   }
   if (mtype === "BOTH_TEAMS_TO_SCORE") {
-    return { marketLabel: "KG (BTTS)", sideLabel: /YES/i.test(side) ? "Var" : "Yok" };
+    return { marketLabel: "BTTS", sideLabel: /YES/i.test(side) ? "Yes" : "No" };
   }
   if (mtype === "OVER_UNDER") {
     const base = side.split(":")[0];
     const ln = line ?? side.split(":")[1] ?? "";
-    return { marketLabel: `${scopeTag}A/Ü ${ln}`, sideLabel: base === "OVER" ? "Üst" : "Alt" };
+    return { marketLabel: `${scopeTag}O/U ${ln}`, sideLabel: base === "OVER" ? "Over" : "Under" };
   }
   if (mtype === "DOUBLE_CHANCE") {
-    return { marketLabel: "Çifte Şans", sideLabel: side.replace(/^DC:/, "") };
+    return { marketLabel: "Double Chance", sideLabel: side.replace(/^DC:/, "") };
   }
   if (mtype === "ASIAN_HANDICAP") {
     const n = line != null ? Number(line) : NaN;
     const lnLabel = Number.isFinite(n) ? (n > 0 ? `+${n}` : String(n)) : String(line ?? "");
-    return { marketLabel: `Asian Handikap ${lnLabel}`, sideLabel: "Ev" };
+    return { marketLabel: `Asian Handicap ${lnLabel}`, sideLabel: "Home" };
   }
   if (mtype === "HALF_FULL_TIME") {
-    return { marketLabel: "İY/MS", sideLabel: side.replace(/^htft:/, "") };
+    return { marketLabel: "HT/FT", sideLabel: side.replace(/^htft:/, "") };
   }
   if (mtype === "CORRECT_SCORE") {
-    return { marketLabel: "Kesin Skor", sideLabel: side.replace(/^score:/, "") };
+    return { marketLabel: "Correct Score", sideLabel: side.replace(/^score:/, "") };
   }
   return { marketLabel: marketTypeLabel(mtype), sideLabel: side };
 }
@@ -387,8 +387,8 @@ function historicalForMove(
   const reversedPct = reversed / n;
   const note =
     move === "shortened"
-      ? `Oran düştü (steam) — geçmişte bu seçim ${(winPct * 100).toFixed(0)}% isabet; tersine ${(reversedPct * 100).toFixed(0)}%`
-      : `Oran uzadı (drift) — geçmişte ${(winPct * 100).toFixed(0)}% isabet; beklenenin tersi ${(reversedPct * 100).toFixed(0)}%`;
+      ? `Odds shortened (steam) — historically this selection hit ${(winPct * 100).toFixed(0)}%; the opposite outcome ${(reversedPct * 100).toFixed(0)}%`
+      : `Odds lengthened (drift) — historically ${(winPct * 100).toFixed(0)}% hit; the contrary outcome ${(reversedPct * 100).toFixed(0)}%`;
   return { n, winPct, impliedPct, reversedPct, note };
 }
 
@@ -554,20 +554,20 @@ export function buildSmartMatchReport(input: {
   const summary: string[] = [];
   if (profile && similar1x2.n >= 5) {
     summary.push(
-      `MS 1X2 profiline ±${(tol * 100).toFixed(0)}% uyan ${similar1x2.n} maçta en sık sonuç MS ${sideLabel(similar1x2.top || "D")} (%${similar1x2.topPct.toFixed(0)}).`,
+      `Among ${similar1x2.n} matches within ±${(tol * 100).toFixed(0)}% of the FT 1X2 profile, the most frequent outcome is FT ${sideLabel(similar1x2.top || "D")} (${similar1x2.topPct.toFixed(0)}%).`,
     );
   } else if (profile) {
-    summary.push(`MS 1X2 profiline uyan yeterli arşiv maçı yok (n=${similar1x2.n}). Toleransı artırın.`);
+    summary.push(`Not enough archive matches fit the FT 1X2 profile (n=${similar1x2.n}). Increase the tolerance.`);
   }
   if (aligned && totalBm) {
     summary.push(
-      `${alignedCount}/${totalBm} bookmaker favoriyi MS ${sideLabel(topFav)} olarak gösteriyor.` +
+      `${alignedCount}/${totalBm} bookmakers show FT ${sideLabel(topFav)} as the favourite.` +
         (consensusHist
-          ? ` Geçmişte aynı BM uyumunda MS ${sideLabel(consensusHist.top || topFav)} %${consensusHist.topPct.toFixed(0)}.`
+          ? ` Historically, with the same bookmaker alignment, FT ${sideLabel(consensusHist.top || topFav)} came in ${consensusHist.topPct.toFixed(0)}% of cases.`
           : ""),
     );
   } else if (totalBm) {
-    summary.push(`Bookmaker'lar dağılmış — tek yönde güçlü konsensüs yok (en çok MS ${sideLabel(topFav)}: ${alignedCount}/${totalBm}).`);
+    summary.push(`Bookmakers are split — no strong one-sided consensus (most common FT ${sideLabel(topFav)}: ${alignedCount}/${totalBm}).`);
   }
   const topMove = movements[0];
   if (topMove?.historical) {
