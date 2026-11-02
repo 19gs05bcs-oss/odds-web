@@ -31,7 +31,9 @@ export type MetaField =
   | "ev"
   | "dep"
   | "skor1y"
-  | "skor";
+  | "skor"
+  | "htRes"
+  | "ftRes";
 
 export type MarketColumnDef = {
   kind: "market";
@@ -88,6 +90,9 @@ const META: MetaColumnDef[] = [
   { kind: "meta", id: "dep", header: "AWAY", group: "meta", defaultOn: true },
   { kind: "meta", id: "skor1y", header: "HT", group: "meta", defaultOn: true },
   { kind: "meta", id: "skor", header: "FT", group: "meta", defaultOn: true },
+  // Home / Draw / Away result derived from the HT and FT scores (coloured in the table).
+  { kind: "meta", id: "htRes", header: "HT RES", group: "meta", defaultOn: true },
+  { kind: "meta", id: "ftRes", header: "FT RES", group: "meta", defaultOn: true },
 ];
 
 function m(

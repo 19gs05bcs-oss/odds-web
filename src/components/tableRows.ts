@@ -1,6 +1,7 @@
 /** Build analyze table rows from fixtures / archive profile matches. */
 
 import type { MarketColumnDef, MetaField, TableColumnDef } from "@/lib/analysis/tableColumns";
+import { resultFromScore } from "@/lib/analysis/tableRows";
 import { ALL_COLUMNS, criterionMatchesColumn } from "@/lib/analysis/tableColumns";
 import type { OddsCriterion, ProfileMatch } from "@/lib/analysis/profile";
 import type { CompactOddsRow, FixtureRow } from "@/lib/fixtures";
@@ -439,6 +440,8 @@ export function fixtureToTableRow(
       dep: f.away_name || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      htRes: resultFromScore(skor1yOut),
+      ftRes: resultFromScore(skorOut),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, f.kickoff_at, htH, htA),
@@ -644,6 +647,8 @@ export function eventToTableRow(
       dep: event.away_team || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      htRes: resultFromScore(skor1yOut),
+      ftRes: resultFromScore(skorOut),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, event.kickoff_at, htH, htA),
@@ -746,6 +751,8 @@ export function profileMatchToTableRow(m: ProfileMatch): TableRow {
       dep: m.awayTeam || "",
       skor1y: m.htScore || "",
       skor: m.score || "",
+      htRes: resultFromScore(m.htScore || ""),
+      ftRes: resultFromScore(m.score || ""),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, m.kickoffAt, htH, htA),

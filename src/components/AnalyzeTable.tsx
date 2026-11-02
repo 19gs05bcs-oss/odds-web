@@ -100,6 +100,7 @@ function metaCellClass(id: string, sticky: boolean): string | undefined {
   if (id === "dep") parts.push(styles.colAway);
   if (id === "lig" || id === "altLig") parts.push(styles.colLeague);
   if (id === "skor" || id === "skor1y") parts.push(styles.colScore);
+  if (id === "htRes" || id === "ftRes") parts.push(styles.colResult);
   return parts.length ? parts.join(" ") : undefined;
 }
 
@@ -338,11 +339,27 @@ export function AnalyzeTable({
                 key={row.id}
                 className={row.source === "fixture" ? styles.rowFixture : styles.rowArchive}
               >
-                {metaCols.map((c) => (
-                  <td key={c.id} className={metaCellClass(c.id, c.id === stickySrcId)}>
-                    {row.meta[c.id]}
-                  </td>
-                ))}
+                {metaCols.map((c) => {
+                  const value = row.meta[c.id];
+                  const resultClass =
+                    c.id === "htRes" || c.id === "ftRes"
+                      ? value === "Home"
+                        ? styles.resHome
+                        : value === "Draw"
+                          ? styles.resDraw
+                          : value === "Away"
+                            ? styles.resAway
+                            : undefined
+                      : undefined;
+                  const cls = [metaCellClass(c.id, c.id === stickySrcId), resultClass]
+                    .filter(Boolean)
+                    .join(" ");
+                  return (
+                    <td key={c.id} className={cls || undefined}>
+                      {value}
+                    </td>
+                  );
+                })}
                 {marketCols.map((c) => {
                   const cell = row.odds[c.id];
                   const open = cell?.opening ?? null;

@@ -61,6 +61,15 @@ function parseOddsNum(v: unknown): number | null {
   return Number.isFinite(n) && n >= 1.01 ? n : null;
 }
 
+/** "2-1" → "Home", "1-1" → "Draw", "0-3" → "Away"; "" when the score is missing/unparseable. */
+export function resultFromScore(score: string | null | undefined): "Home" | "Draw" | "Away" | "" {
+  const m = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(score || "");
+  if (!m) return "";
+  const h = Number(m[1]);
+  const a = Number(m[2]);
+  return h > a ? "Home" : h < a ? "Away" : "Draw";
+}
+
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function splitLeague(league: string | null | undefined): { lig: string; altLig: string } {
@@ -460,6 +469,8 @@ export function fixtureToTableRow(
       dep: f.away_name || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      htRes: resultFromScore(skor1yOut),
+      ftRes: resultFromScore(skorOut),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, f.kickoff_at, htH, htA),
@@ -665,6 +676,8 @@ export function eventToTableRow(
       dep: event.away_team || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      htRes: resultFromScore(skor1yOut),
+      ftRes: resultFromScore(skorOut),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, event.kickoff_at, htH, htA),
@@ -772,6 +785,8 @@ export function profileMatchToTableRow(m: ProfileMatch): TableRow {
       dep: m.awayTeam || "",
       skor1y: m.htScore || "",
       skor: m.score || "",
+      htRes: resultFromScore(m.htScore || ""),
+      ftRes: resultFromScore(m.score || ""),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, m.kickoffAt, htH, htA),
@@ -1031,6 +1046,8 @@ export function eventMetaToTableRow(
       dep: meta.away_team || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      htRes: resultFromScore(skor1yOut),
+      ftRes: resultFromScore(skorOut),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, meta.kickoff_at, htH, htA),

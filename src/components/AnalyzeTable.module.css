@@ -203,6 +203,29 @@
   font-weight: 650;
 }
 
+/* HT / FT result (Home · Draw · Away) — palette matches the reference sheet. */
+.colResult {
+  min-width: 3.6rem;
+  text-align: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.resHome {
+  background: #9bb87e !important;
+  color: #fff;
+}
+
+.resDraw {
+  background: #f0a93c !important;
+  color: #fff;
+}
+
+.resAway {
+  background: #d1714b !important;
+  color: #fff;
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
