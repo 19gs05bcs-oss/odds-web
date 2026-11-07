@@ -120,7 +120,6 @@ const META: MetaColumnDef[] = [
   { kind: "meta", id: "skor", header: "FT", group: "meta", defaultOn: true },
   // Home / Draw / Away result derived from the HT, FT and 2H scores (coloured in the table).
   { kind: "meta", id: "htRes", header: "HT RES", group: "meta", defaultOn: true },
-  { kind: "meta", id: "shRes", header: "2H RES", group: "meta", defaultOn: true },
   { kind: "meta", id: "ftRes", header: "FT RES", group: "meta", defaultOn: true },
 ];
 
