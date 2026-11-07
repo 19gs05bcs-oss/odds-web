@@ -115,13 +115,13 @@ const META: MetaColumnDef[] = [
   { kind: "meta", id: "ev", header: "HOME", group: "meta", defaultOn: true },
   { kind: "meta", id: "dep", header: "AWAY", group: "meta", defaultOn: true },
   { kind: "meta", id: "skor1y", header: "HT", group: "meta", defaultOn: true },
-  { kind: "meta", id: "skor", header: "FT", group: "meta", defaultOn: true },
   // 2nd-half score = FT − HT (only when both are known).
   { kind: "meta", id: "skor2y", header: "2H", group: "meta", defaultOn: true },
+  { kind: "meta", id: "skor", header: "FT", group: "meta", defaultOn: true },
   // Home / Draw / Away result derived from the HT, FT and 2H scores (coloured in the table).
   { kind: "meta", id: "htRes", header: "HT RES", group: "meta", defaultOn: true },
-  { kind: "meta", id: "ftRes", header: "FT RES", group: "meta", defaultOn: true },
   { kind: "meta", id: "shRes", header: "2H RES", group: "meta", defaultOn: true },
+  { kind: "meta", id: "ftRes", header: "FT RES", group: "meta", defaultOn: true },
 ];
 
 function m(
