@@ -204,6 +204,10 @@ function compactMatchesCol(
   if (col.marketType === "CORRECT_SCORE") {
     return sideTok === col.side || sideTok === `score:${col.side.replace(/^score:/, "")}`;
   }
+  if (col.marketType === "ODD_OR_EVEN") {
+    // archive token "sel:ODD" / "sel:EVEN"; tolerate bare / lower-case spellings
+    return sideTok.replace(/^sel:/i, "").toUpperCase() === col.side.replace(/^sel:/, "");
+  }
   // 1X2 / DNB
   return parsed.side === col.side || sideTok === col.side;
 }
@@ -281,6 +285,19 @@ function fillHdaFromParticipantOrder(
   }
 }
 
+/** Market columns grouped by "TYPE|SCOPE" so each odds row is only tested against its own candidates. */
+const MARKET_COLS_BY_KEY: Map<string, MarketColumnDef[]> = (() => {
+  const map = new Map<string, MarketColumnDef[]>();
+  for (const c of ALL_COLUMNS) {
+    if (c.kind !== "market") continue;
+    const key = `${c.marketType}|${c.marketScope}`;
+    const arr = map.get(key);
+    if (arr) arr.push(c);
+    else map.set(key, [c]);
+  }
+  return map;
+})();
+
 export function oddsByColumn(
   odds: CompactOddsRow[] | null | undefined,
   bookmakerIdOrOpts: number | OddsOpts = PREFERRED_BM,
@@ -309,7 +326,9 @@ export function oddsByColumn(
     const prefer = Number(bmId) === bookmakerId ? 2 : 1;
     const side = normalizeSideToken(String(sideTok), homeId, awayId);
 
-    for (const col of marketCols) {
+    const candidates = MARKET_COLS_BY_KEY.get(`${String(mtype)}|${String(scope)}`);
+    if (!candidates) continue;
+    for (const col of candidates) {
       if (!compactMatchesCol(String(mtype), String(scope), side, col)) continue;
       const prev = score[col.id] ?? 0;
       if (prefer < prev) continue;
@@ -347,7 +366,35 @@ export function isMatchSettled(
   return Date.now() > t + 100 * 60 * 1000;
 }
 
-/** Outcome coloring for settled 1X2 / OU / BTTS columns. */
+type GoalPair = { h: number; a: number };
+
+const sgn = (n: number): -1 | 0 | 1 => (n > 0 ? 1 : n < 0 ? -1 : 0);
+
+/**
+ * Settle a line bet. `margin(l)` is the bet's margin when the line is `l`
+ * (>0 win, <0 loss, 0 push). Quarter lines are split into the two neighbouring
+ * half-stakes; only a clean win on both ("hit") or clean loss on both ("miss")
+ * is painted, a push / half result stays unpainted.
+ */
+function settleLine(margin: (l: number) => number, line: number): "hit" | "miss" | null {
+  const quarter = Math.abs(Math.round(line * 4)) % 2 === 1;
+  const parts = quarter ? [line - 0.25, line + 0.25] : [line];
+  const signs = parts.map((l) => sgn(margin(l)));
+  if (signs.every((x) => x > 0)) return "hit";
+  if (signs.every((x) => x < 0)) return "miss";
+  return null;
+}
+
+const symOf = (r: "H" | "D" | "A") => (r === "H" ? "1" : r === "D" ? "X" : "2");
+const resOf = (g: GoalPair): "H" | "D" | "A" => (g.h > g.a ? "H" : g.h < g.a ? "A" : "D");
+
+/**
+ * Outcome colouring for settled matches. Covers every market column:
+ * 1X2 / DC / BTTS / O-U / Odd-Even / Correct Score for FT, HT and 2H, plus HT/FT,
+ * DNB, European Handicap and the HOME side of Asian Handicap.
+ * 2H goals = FT − HT. Asian Handicap AWAY columns are intentionally left unpainted:
+ * the archive's A:<line> token semantics (own vs home perspective) are not confirmed.
+ */
 export function outcomeForColumns(
   homeScore: number | null,
   awayScore: number | null,
@@ -364,78 +411,104 @@ export function outcomeForColumns(
   if (!isMatchSettled(kickoffAt, homeScore, awayScore)) return out;
   if (homeScore == null || awayScore == null) return out;
 
-  const total = homeScore + awayScore;
-  const result = homeScore > awayScore ? "H" : homeScore < awayScore ? "A" : "D";
-  const btts = homeScore > 0 && awayScore > 0;
+  const ft: GoalPair = { h: homeScore, a: awayScore };
   const htReady = homeHtScore != null && awayHtScore != null;
-  const htTotal = htReady ? homeHtScore! + awayHtScore! : null;
-  const htResult = htReady
-    ? homeHtScore! > awayHtScore!
-      ? "H"
-      : homeHtScore! < awayHtScore!
-        ? "A"
-        : "D"
-    : null;
+  const ht: GoalPair | null = htReady ? { h: homeHtScore!, a: awayHtScore! } : null;
+  const sh: GoalPair | null =
+    ht && ft.h >= ht.h && ft.a >= ht.a ? { h: ft.h - ht.h, a: ft.a - ht.a } : null;
+  const byScope: Record<string, GoalPair | null> = {
+    FULL_TIME: ft,
+    FIRST_HALF: ht,
+    SECOND_HALF: sh,
+  };
 
   for (const c of cols) {
     if (c.kind !== "market") continue;
-    if (c.marketType === "HOME_DRAW_AWAY" && c.marketScope === "FULL_TIME") {
-      out[c.id] = c.side === result ? "hit" : "miss";
-    } else if (c.marketType === "HOME_DRAW_AWAY" && c.marketScope === "FIRST_HALF" && htResult) {
-      out[c.id] = c.side === htResult ? "hit" : "miss";
-    } else if (c.marketType === "OVER_UNDER" && c.marketScope === "FULL_TIME" && c.line) {
-      const line = Number(c.line);
-      if (!Number.isFinite(line)) continue;
-      const over = total > line;
-      const under = total < line;
-      if (total === line) {
-        out[c.id] = null;
-      } else if (c.side === "OVER") {
-        out[c.id] = over ? "hit" : "miss";
-      } else if (c.side === "UNDER") {
-        out[c.id] = under ? "hit" : "miss";
+
+    if (c.marketType === "HALF_FULL_TIME") {
+      if (c.marketScope !== "FULL_TIME" || !ht || !c.side.startsWith("htft:")) continue;
+      out[c.id] = c.side.slice(5) === `${symOf(resOf(ht))}/${symOf(resOf(ft))}` ? "hit" : "miss";
+      continue;
+    }
+
+    const g = byScope[c.marketScope];
+    if (!g) continue;
+    const total = g.h + g.a;
+    const res = resOf(g);
+
+    switch (c.marketType) {
+      case "HOME_DRAW_AWAY":
+        out[c.id] = c.side === res ? "hit" : "miss";
+        break;
+      case "DOUBLE_CHANCE": {
+        const ok =
+          (c.side === "DC:1X" && res !== "A") ||
+          (c.side === "DC:12" && res !== "D") ||
+          (c.side === "DC:X2" && res !== "H");
+        out[c.id] = ok ? "hit" : "miss";
+        break;
       }
-    } else if (
-      c.marketType === "OVER_UNDER" &&
-      c.marketScope === "FIRST_HALF" &&
-      c.line &&
-      htTotal != null
-    ) {
-      const line = Number(c.line);
-      if (!Number.isFinite(line)) continue;
-      if (htTotal === line) {
-        out[c.id] = null;
-      } else if (c.side === "OVER") {
-        out[c.id] = htTotal > line ? "hit" : "miss";
-      } else if (c.side === "UNDER") {
-        out[c.id] = htTotal < line ? "hit" : "miss";
+      case "BOTH_TEAMS_TO_SCORE": {
+        const both = g.h > 0 && g.a > 0;
+        out[c.id] = c.side.endsWith("YES") === both ? "hit" : "miss";
+        break;
       }
-    } else if (c.marketType === "BOTH_TEAMS_TO_SCORE" && c.marketScope === "FULL_TIME") {
-      const wantYes = c.side.endsWith("YES");
-      out[c.id] = wantYes === btts ? "hit" : "miss";
-    } else if (c.marketType === "DOUBLE_CHANCE" && c.marketScope === "FULL_TIME") {
-      const ok =
-        (c.side === "DC:1X" && (result === "H" || result === "D")) ||
-        (c.side === "DC:12" && (result === "H" || result === "A")) ||
-        (c.side === "DC:X2" && (result === "D" || result === "A"));
-      out[c.id] = ok ? "hit" : "miss";
-    } else if (c.marketType === "CORRECT_SCORE" && c.marketScope === "FULL_TIME") {
-      const actual = `${homeScore}:${awayScore}`;
-      const want = c.side.replace(/^score:/, "");
-      out[c.id] = want === actual ? "hit" : "miss";
-    } else if (
-      c.marketType === "HALF_FULL_TIME" &&
-      c.marketScope === "FULL_TIME" &&
-      htResult &&
-      c.side.startsWith("htft:")
-    ) {
-      const want = c.side.slice(5);
-      const htSym = htResult === "H" ? "1" : htResult === "D" ? "X" : "2";
-      const ftSym = result === "H" ? "1" : result === "D" ? "X" : "2";
-      out[c.id] = want === `${htSym}/${ftSym}` ? "hit" : "miss";
+      case "ODD_OR_EVEN": {
+        const odd = total % 2 === 1;
+        out[c.id] = c.side.endsWith("ODD") === odd ? "hit" : "miss";
+        break;
+      }
+      case "OVER_UNDER": {
+        const line = Number(c.line);
+        if (c.line == null || c.line === "" || !Number.isFinite(line)) break;
+        out[c.id] = settleLine(
+          c.side === "OVER" ? (l) => total - l : (l) => l - total,
+          line,
+        );
+        break;
+      }
+      case "CORRECT_SCORE":
+        out[c.id] = c.side.replace(/^score:/, "") === `${g.h}:${g.a}` ? "hit" : "miss";
+        break;
+      case "DRAW_NO_BET":
+        if (res === "D") break; // stake returned
+        out[c.id] = c.side === res ? "hit" : "miss";
+        break;
+      case "ASIAN_HANDICAP": {
+        if (c.side !== "H") break; // see doc comment: away token semantics unconfirmed
+        const line = Number(c.line);
+        if (c.line == null || c.line === "" || !Number.isFinite(line)) break;
+        out[c.id] = settleLine((l) => g.h + l - g.a, line);
+        break;
+      }
+      case "EUROPEAN_HANDICAP": {
+        // `line` is the home handicap for H / D columns and the away team's own
+        // handicap (the negation) for A columns — see tableColumns.ts.
+        const line = Number(c.line);
+        if (c.line == null || c.line === "" || !Number.isFinite(line)) break;
+        const hit =
+          c.side === "H" ? g.h + line > g.a : c.side === "D" ? g.h + line === g.a : g.a + line > g.h;
+        out[c.id] = hit ? "hit" : "miss";
+        break;
+      }
+      default:
+        break;
     }
   }
   return out;
+}
+
+/** "2-1" style 2nd-half score (FT − HT); "" unless both scores are present and consistent. */
+export function secondHalfScore(
+  ft: string | null | undefined,
+  ht: string | null | undefined,
+): string {
+  const f = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(ft || "");
+  const h = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(ht || "");
+  if (!f || !h) return "";
+  const dh = Number(f[1]) - Number(h[1]);
+  const da = Number(f[2]) - Number(h[2]);
+  return dh >= 0 && da >= 0 ? `${dh}-${da}` : "";
 }
 
 export function fixtureToTableRow(
@@ -469,8 +542,10 @@ export function fixtureToTableRow(
       dep: f.away_name || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      skor2y: secondHalfScore(skorOut, skor1yOut),
       htRes: resultFromScore(skor1yOut),
       ftRes: resultFromScore(skorOut),
+      shRes: resultFromScore(secondHalfScore(skorOut, skor1yOut)),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, f.kickoff_at, htH, htA),
@@ -676,8 +751,10 @@ export function eventToTableRow(
       dep: event.away_team || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      skor2y: secondHalfScore(skorOut, skor1yOut),
       htRes: resultFromScore(skor1yOut),
       ftRes: resultFromScore(skorOut),
+      shRes: resultFromScore(secondHalfScore(skorOut, skor1yOut)),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, event.kickoff_at, htH, htA),
@@ -785,8 +862,10 @@ export function profileMatchToTableRow(m: ProfileMatch): TableRow {
       dep: m.awayTeam || "",
       skor1y: m.htScore || "",
       skor: m.score || "",
+      skor2y: secondHalfScore(m.score, m.htScore),
       htRes: resultFromScore(m.htScore || ""),
       ftRes: resultFromScore(m.score || ""),
+      shRes: resultFromScore(secondHalfScore(m.score, m.htScore)),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, m.kickoffAt, htH, htA),
@@ -1046,8 +1125,10 @@ export function eventMetaToTableRow(
       dep: meta.away_team || "",
       skor1y: skor1yOut,
       skor: skorOut,
+      skor2y: secondHalfScore(skorOut, skor1yOut),
       htRes: resultFromScore(skor1yOut),
       ftRes: resultFromScore(skorOut),
+      shRes: resultFromScore(secondHalfScore(skorOut, skor1yOut)),
     },
     odds,
     outcome: outcomeForColumns(h, a, ALL_COLUMNS, meta.kickoff_at, htH, htA),

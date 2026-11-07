@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ALL_COLUMNS,
   COLUMN_GROUPS,
+  CS_SCORES,
   columnToCriterion,
   type ColumnGroupId,
   type MarketColumnDef,
@@ -22,6 +23,7 @@ const FILTER_GROUPS: ColumnGroupId[] = [
   "btts",
   "dc",
   "htft",
+  "oe",
   "ah",
   "cs",
   "dnb",
@@ -66,7 +68,8 @@ export function MarketFilterPanel({
       (c): c is MarketColumnDef =>
         c.kind === "market" &&
         FILTER_GROUPS.includes(c.group) &&
-        (c.defaultOn || c.group === "cs"),
+        // CS is opt-in in the table (full grid); the picker keeps only the common scores.
+        (c.defaultOn || (c.group === "cs" && CS_SCORES.includes(c.side.replace(/^score:/, "")))),
     );
     const byGroup = COLUMN_GROUPS.filter((g) => FILTER_GROUPS.includes(g.id));
     const out: MarketOption[] = [];

@@ -99,8 +99,8 @@ function metaCellClass(id: string, sticky: boolean): string | undefined {
   if (id === "ev") parts.push(styles.colHome);
   if (id === "dep") parts.push(styles.colAway);
   if (id === "lig" || id === "altLig") parts.push(styles.colLeague);
-  if (id === "skor" || id === "skor1y") parts.push(styles.colScore);
-  if (id === "htRes" || id === "ftRes") parts.push(styles.colResult);
+  if (id === "skor" || id === "skor1y" || id === "skor2y") parts.push(styles.colScore);
+  if (id === "htRes" || id === "ftRes" || id === "shRes") parts.push(styles.colResult);
   return parts.length ? parts.join(" ") : undefined;
 }
 
@@ -342,7 +342,7 @@ export function AnalyzeTable({
                 {metaCols.map((c) => {
                   const value = row.meta[c.id];
                   const resultClass =
-                    c.id === "htRes" || c.id === "ftRes"
+                    c.id === "htRes" || c.id === "ftRes" || c.id === "shRes"
                       ? value === "Home"
                         ? styles.resHome
                         : value === "Draw"

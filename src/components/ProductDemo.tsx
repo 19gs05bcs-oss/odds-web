@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { MarketFilterPanel } from "@/components/MarketFilterPanel";
 import filterStyles from "@/components/AnalyzeFilters.module.css";
-import { COLUMN_GROUPS, type ColumnGroupId } from "@/lib/analysis/tableColumns";
+import { defaultVisibleGroupIds, type ColumnGroupId } from "@/lib/analysis/tableColumns";
 import {
   criterionLabel,
   marketSlotKey,
@@ -25,7 +25,8 @@ import {
 } from "@/lib/demo/fixtures";
 import styles from "./ProductDemo.module.css";
 
-const DEMO_GROUPS: ColumnGroupId[] = COLUMN_GROUPS.map((g) => g.id);
+// Default groups plus Correct Score (the heavy opt-in groups stay off in the public demo).
+const DEMO_GROUPS: ColumnGroupId[] = [...defaultVisibleGroupIds(), "cs"];
 
 export function ProductDemo() {
   const [selectedFixtureId, setSelectedFixtureId] = useState(DEMO_BULLETIN[0].match_id);
