@@ -17,8 +17,8 @@ export function SportSelect({
     <label className={filterStyles.field}>
       <span>Sport</span>
       <select value={value} onChange={(e) => onChange(e.target.value as Sport)} disabled={disabled}>
-        <option value="football">Futbol</option>
-        <option value="handball">Hentbol</option>
+        <option value="football">Football</option>
+        <option value="handball">Handball</option>
       </select>
     </label>
   );
