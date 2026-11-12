@@ -170,15 +170,15 @@ export function HandballPanel({
       <div className={styles.panel}>
         {error && <p className={`${styles.msg} ${styles.err}`}>{error}</p>}
         {!loading && !error && !fixtures.length && (
-          <p className={styles.msg}>Bu gün için hentbol maçı yok (fixtureh boş).</p>
+          <p className={styles.msg}>No handball matches for this day.</p>
         )}
         {sim.status === "idle" && fixtures.length > 0 && (
-          <p className={styles.msg}>Bir maç seçin — arşivdeki (R2) en benzer maçlar listelenir.</p>
+          <p className={styles.msg}>Select a match to list the most similar matches from the archive.</p>
         )}
-        {sim.status === "loading" && <p className={styles.msg}>Arşiv R2&apos;den okunuyor…</p>}
+        {sim.status === "loading" && <p className={styles.msg}>Loading archive…</p>}
         {sim.status === "notfound" && (
           <p className={styles.msg}>
-            Bu maç R2 arşiv indeksinde yok (match_id eşleşmedi), bu yüzden benzer maç hesaplanamadı.
+            This match is not in the archive index (match_id not found), so similar matches could not be computed.
           </p>
         )}
         {sim.status === "error" && <p className={`${styles.msg} ${styles.err}`}>{sim.message}</p>}
@@ -188,20 +188,20 @@ export function HandballPanel({
             {stats && (
               <div className={styles.summary}>
                 <span>
-                  Ev {stats.h} · Beraberlik {stats.d} · Deplasman {stats.a} ({stats.n} maç)
+                  Home {stats.h} · Draw {stats.d} · Away {stats.a} ({stats.n} matches)
                 </span>
-                <span>Ortalama toplam gol: {stats.avg.toFixed(1)}</span>
+                <span>Avg total goals: {stats.avg.toFixed(1)}</span>
               </div>
             )}
             <div className={styles.tableWrap}>
               <table className={styles.table}>
                 <thead>
                   <tr>
-                    <th>Tarih</th>
-                    <th>Sezon</th>
-                    <th>Maç</th>
-                    <th className={styles.num}>Skor</th>
-                    <th className={styles.num}>Mesafe</th>
+                    <th>Date</th>
+                    <th>Season</th>
+                    <th>Match</th>
+                    <th className={styles.num}>Score</th>
+                    <th className={styles.num}>Distance</th>
                   </tr>
                 </thead>
                 <tbody>
