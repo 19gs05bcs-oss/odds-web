@@ -236,7 +236,16 @@ export function extract1x2Columns(
   odds: any[],
   preferredBid?: number | null,
 ): { o1: number | null; c1: number | null; ox: number | null; cx: number | null; o2: number | null; c2: number | null; usedBid: number | null } {
-  const empty = { o1: null, c1: null, ox: null, cx: null, o2: null, c2: null, usedBid: null };
+  const empty: {
+    o1: number | null;
+    c1: number | null;
+    ox: number | null;
+    cx: number | null;
+    o2: number | null;
+    c2: number | null;
+    usedBid: number | null;
+  } = { o1: null, c1: null, ox: null, cx: null, o2: null, c2: null, usedBid: null };
+
   if (!Array.isArray(odds) || !odds.length) return empty;
 
   let targetBid = preferredBid ?? null;
@@ -284,6 +293,7 @@ export function extract1x2Columns(
   }
   return out;
 }
+
 
 /** Supabase fixtureh tablosundan maçın oranlarını oku */
 export async function fetchFixtureHOdds(matchId: string): Promise<CompactOddsRow[] | null> {
