@@ -62,6 +62,11 @@ export type HandballTableRow = HandballMeta & {
   time: string;
   ft: string;
   ftRes: "Home" | "Draw" | "Away" | "-";
+  /** Half-time scores from raw archive (meta.json'da yok) */
+  hts: string | null;
+  ats: string | null;
+  /** FT total goals */
+  total: number | null;
   // 1X2
   o1: number | null;
   c1: number | null;
@@ -889,6 +894,17 @@ async function hydrateMatchesFromRaw(
     }
 
     const { date, time } = formatTs(m.ts);
+    const hts =
+      rawMatch?.home_ht_score != null && rawMatch.home_ht_score !== ""
+        ? String(rawMatch.home_ht_score)
+        : null;
+    const ats =
+      rawMatch?.away_ht_score != null && rawMatch.away_ht_score !== ""
+        ? String(rawMatch.away_ht_score)
+        : null;
+    const hsN = m.hs != null && m.hs !== "" ? Number(m.hs) : NaN;
+    const asN = m.as != null && m.as !== "" ? Number(m.as) : NaN;
+    const total = Number.isFinite(hsN) && Number.isFinite(asN) ? hsN + asN : null;
     scored.push({
       ...m,
       distance,
@@ -897,6 +913,9 @@ async function hydrateMatchesFromRaw(
       time,
       ft: m.hs != null && m.as != null ? `${m.hs}-${m.as}` : "-",
       ftRes: getFtRes(m.hs, m.as),
+      hts,
+      ats,
+      total,
       o1,
       c1,
       ox,

@@ -52,6 +52,9 @@ type Similar = {
   time?: string;
   ft?: string;
   ftRes?: string;
+  hts?: string | null;
+  ats?: string | null;
+  total?: number | null;
 };
 
 type SimState =
@@ -97,6 +100,72 @@ function resClass(res: string): string {
 function fmtOdd(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v) || v < 1.01) return "—";
   return formatOdds(v);
+}
+
+/** hit | miss | void | null (bilinmiyor) */
+type Outcome = "hit" | "miss" | "void" | null;
+
+function oddClass(oc: Outcome): string {
+  if (oc === "hit") return styles.outcomeWin;
+  if (oc === "miss") return styles.outcomeLose;
+  if (oc === "void") return styles.outcomeVoid;
+  return "";
+}
+
+function settle1x2(side: "H" | "D" | "A", hs: number | null, as_: number | null): Outcome {
+  if (hs == null || as_ == null || !Number.isFinite(hs) || !Number.isFinite(as_)) return null;
+  const res = hs > as_ ? "H" : hs < as_ ? "A" : "D";
+  return res === side ? "hit" : "miss";
+}
+
+function settleOu(
+  side: "O" | "U",
+  total: number | null,
+  line: number | null,
+): Outcome {
+  if (total == null || line == null || !Number.isFinite(total) || !Number.isFinite(line)) return null;
+  if (total === line) return "void";
+  const over = total > line;
+  if (side === "O") return over ? "hit" : "miss";
+  return over ? "miss" : "hit";
+}
+
+function settleAh(
+  side: "H" | "A",
+  hs: number | null,
+  as_: number | null,
+  line: number | null,
+): Outcome {
+  if (hs == null || as_ == null || line == null) return null;
+  if (!Number.isFinite(hs) || !Number.isFinite(as_) || !Number.isFinite(line)) return null;
+  // line is home handicap (e.g. -3.5 means home gives 3.5)
+  const adj = hs + line - as_;
+  if (adj === 0) return "void";
+  if (side === "H") return adj > 0 ? "hit" : "miss";
+  return adj < 0 ? "hit" : "miss";
+}
+
+function settleDc(side: "1X" | "12" | "X2", hs: number | null, as_: number | null): Outcome {
+  if (hs == null || as_ == null || !Number.isFinite(hs) || !Number.isFinite(as_)) return null;
+  const res = hs > as_ ? "H" : hs < as_ ? "A" : "D";
+  if (side === "1X") return res === "H" || res === "D" ? "hit" : "miss";
+  if (side === "12") return res === "H" || res === "A" ? "hit" : "miss";
+  return res === "A" || res === "D" ? "hit" : "miss";
+}
+
+function settleDnb(side: "H" | "A", hs: number | null, as_: number | null): Outcome {
+  if (hs == null || as_ == null || !Number.isFinite(hs) || !Number.isFinite(as_)) return null;
+  if (hs === as_) return "void";
+  if (side === "H") return hs > as_ ? "hit" : "miss";
+  return hs < as_ ? "hit" : "miss";
+}
+
+function cellOdd(v: number | null | undefined, oc: Outcome) {
+  return (
+    <td className={`${styles.num} ${oddClass(oc)}`.trim()}>
+      {fmtOdd(v)}
+    </td>
+  );
 }
 
 /** Seçili bookmaker için 1X2 açılış/kapanış oranlarını çıkarır (tek satırlık fikstür tablosu için). */
@@ -569,6 +638,8 @@ export function HandballPanel({
                           <th>AWAY</th>
                           <th className={styles.num}>FT</th>
                           <th>FT RES</th>
+                          <th className={styles.num}>Total</th>
+                          <th className={styles.num}>HT</th>
                           <th className={styles.num}>1 O</th>
                           <th className={styles.num}>1 C</th>
                           <th className={styles.num}>X O</th>
@@ -598,6 +669,8 @@ export function HandballPanel({
                           <td>{(selectedFixture as any).away_team || (selectedFixture as any).away || "—"}</td>
                           <td className={styles.num}>—</td>
                           <td>—</td>
+                          <td className={styles.num}>—</td>
+                          <td className={styles.num}>—</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.home.o)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.home.c)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.draw.o)}</td>
@@ -666,6 +739,8 @@ export function HandballPanel({
                             <th>AWAY</th>
                             <th className={styles.num}>FT</th>
                             <th>FT RES</th>
+                            <th className={styles.num}>Total</th>
+                            <th className={styles.num}>HT</th>
                             <th className={styles.num}>1 O</th>
                             <th className={styles.num}>1 C</th>
                             <th className={styles.num}>X O</th>
@@ -695,6 +770,16 @@ export function HandballPanel({
                             const cx = o?.draw?.c ?? r.cx;
                             const o2 = o?.away?.o ?? r.o2;
                             const c2 = o?.away?.c ?? r.c2;
+                            const hsN = r.hs != null && r.hs !== "" ? Number(r.hs) : null;
+                            const asN = r.as != null && r.as !== "" ? Number(r.as) : null;
+                            const total =
+                              r.total != null
+                                ? r.total
+                                : hsN != null && asN != null && Number.isFinite(hsN) && Number.isFinite(asN)
+                                  ? hsN + asN
+                                  : null;
+                            const ht =
+                              r.hts != null && r.ats != null ? `${r.hts}-${r.ats}` : "—";
                             return (
                               <tr key={r.id}>
                                 <td>archive</td>
@@ -715,23 +800,25 @@ export function HandballPanel({
                                     "—"
                                   )}
                                 </td>
-                                <td className={styles.num}>{fmtOdd(o1)}</td>
-                                <td className={styles.num}>{fmtOdd(c1)}</td>
-                                <td className={styles.num}>{fmtOdd(ox)}</td>
-                                <td className={styles.num}>{fmtOdd(cx)}</td>
-                                <td className={styles.num}>{fmtOdd(o2)}</td>
-                                <td className={styles.num}>{fmtOdd(c2)}</td>
+                                <td className={styles.num}>{total != null ? total : "—"}</td>
+                                <td className={styles.num}>{ht}</td>
+                                {cellOdd(o1, settle1x2("H", hsN, asN))}
+                                {cellOdd(c1, settle1x2("H", hsN, asN))}
+                                {cellOdd(ox, settle1x2("D", hsN, asN))}
+                                {cellOdd(cx, settle1x2("D", hsN, asN))}
+                                {cellOdd(o2, settle1x2("A", hsN, asN))}
+                                {cellOdd(c2, settle1x2("A", hsN, asN))}
                                 <td className={styles.num}>{r.ahLine != null ? r.ahLine : "—"}</td>
-                                <td className={styles.num}>{fmtOdd(r.ahH_c ?? r.ahH_o)}</td>
-                                <td className={styles.num}>{fmtOdd(r.ahA_c ?? r.ahA_o)}</td>
+                                {cellOdd(r.ahH_c ?? r.ahH_o, settleAh("H", hsN, asN, r.ahLine ?? null))}
+                                {cellOdd(r.ahA_c ?? r.ahA_o, settleAh("A", hsN, asN, r.ahLine ?? null))}
                                 <td className={styles.num}>{r.ouLine != null ? r.ouLine : "—"}</td>
-                                <td className={styles.num}>{fmtOdd(r.ouO_c ?? r.ouO_o)}</td>
-                                <td className={styles.num}>{fmtOdd(r.ouU_c ?? r.ouU_o)}</td>
-                                <td className={styles.num}>{fmtOdd(r.dc1x)}</td>
-                                <td className={styles.num}>{fmtOdd(r.dc12)}</td>
-                                <td className={styles.num}>{fmtOdd(r.dcx2)}</td>
-                                <td className={styles.num}>{fmtOdd(r.dnbH)}</td>
-                                <td className={styles.num}>{fmtOdd(r.dnbA)}</td>
+                                {cellOdd(r.ouO_c ?? r.ouO_o, settleOu("O", total, r.ouLine ?? null))}
+                                {cellOdd(r.ouU_c ?? r.ouU_o, settleOu("U", total, r.ouLine ?? null))}
+                                {cellOdd(r.dc1x, settleDc("1X", hsN, asN))}
+                                {cellOdd(r.dc12, settleDc("12", hsN, asN))}
+                                {cellOdd(r.dcx2, settleDc("X2", hsN, asN))}
+                                {cellOdd(r.dnbH, settleDnb("H", hsN, asN))}
+                                {cellOdd(r.dnbA, settleDnb("A", hsN, asN))}
                               </tr>
                             );
                           })}

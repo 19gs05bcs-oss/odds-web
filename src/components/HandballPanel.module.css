@@ -135,3 +135,21 @@
 .oddsClose {
   font-weight: 650;
 }
+
+
+/* Settled odds — futbol AnalyzeTable ile aynı mantık */
+.outcomeWin {
+  background: #dcfce7 !important;
+  color: #166534;
+  font-weight: 650;
+}
+
+.outcomeLose {
+  background: #fee2e2 !important;
+  color: #991b1b;
+}
+
+.outcomeVoid {
+  background: #f1f5f9 !important;
+  color: #64748b;
+}
