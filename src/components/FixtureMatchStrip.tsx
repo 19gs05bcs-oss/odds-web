@@ -12,6 +12,8 @@ type Props = {
   bookmakerId: number;
   loading?: boolean;
   oddsLoading?: boolean;
+  /** Oran şartı arama (ör. hentbol: maç yalnızca match_id ile R2'de aranır). */
+  ignoreOdds?: boolean;
   onSelect: (matchId: string) => void;
 };
 
@@ -42,9 +44,10 @@ export function FixtureMatchStrip({
   bookmakerId,
   loading,
   oddsLoading,
+  ignoreOdds,
   onSelect,
 }: Props) {
-  const withOdds = fixtures.filter((f) => hasBmOdds(f, bookmakerId));
+  const withOdds = ignoreOdds ? fixtures : fixtures.filter((f) => hasBmOdds(f, bookmakerId));
   const list = withOdds.length ? withOdds : fixtures;
 
   const [query, setQuery] = useState("");
@@ -106,7 +109,7 @@ export function FixtureMatchStrip({
   }, []);
 
   function pick(f: FixtureRow) {
-    const ready = hasBmOdds(f, bookmakerId);
+    const ready = ignoreOdds || hasBmOdds(f, bookmakerId);
     if (!ready && !oddsLoading) return;
     onSelect(f.match_id);
     setQuery(matchLabel(f));
@@ -182,7 +185,7 @@ export function FixtureMatchStrip({
       {open && !loading && filtered.length ? (
         <ul className={styles.dropdown} role="listbox" ref={listRef}>
           {filtered.map((f, i) => {
-            const ready = hasBmOdds(f, bookmakerId);
+            const ready = ignoreOdds || hasBmOdds(f, bookmakerId);
             const isSelected = f.match_id === selectedId;
             return (
               <li

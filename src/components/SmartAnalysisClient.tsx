@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
+import { HandballPanel } from "@/components/HandballPanel";
+import { SportSelect, type Sport } from "@/components/SportSelect";
 import { HtftEnginePanel } from "@/components/HtftEnginePanel";
 import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
 import type { TableRow } from "@/lib/analysis/tableRows";
@@ -96,6 +98,7 @@ export function SmartAnalysisClient({
   fixtureDates,
   initialBulletinDate,
 }: Props) {
+  const [sport, setSport] = useState<Sport>("football");
   const [archiveSort, setArchiveSort] = useState<ArchiveSortMode>("date");
   const [bulletinDate, setBulletinDate] = useState(initialBulletinDate);
   const [fixtures, setFixtures] = useState<FixtureRow[]>([]);
@@ -419,6 +422,18 @@ const goalEngine = useMemo(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFixtureId, bmsKey, selectedFixture?.odds?.length]);
 
+  if (sport === "handball") {
+    return (
+      <div className={styles.wrap}>
+        <header className={styles.hero}>
+          <p className={styles.kicker}>Smart Analysis · Pro</p>
+          <h1 className={styles.title}>Select match → similar matches</h1>
+        </header>
+        <HandballPanel sport={sport} onSportChange={setSport} />
+      </div>
+    );
+  }
+
   return (
     <div className={styles.wrap}>
       <header className={styles.hero}>
@@ -433,6 +448,7 @@ const goalEngine = useMemo(
       <div className={filterStyles.wrap}>
         <div className={filterStyles.topBar}>
           <div className={filterStyles.topBarRow}>
+            <SportSelect value={sport} onChange={setSport} />
             <label className={filterStyles.field}>
               <span>Day</span>
               <select

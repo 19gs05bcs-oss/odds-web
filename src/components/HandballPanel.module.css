@@ -1,0 +1,8 @@
+.panel { margin-top: 1.25rem; }
+.msg { margin: 0.75rem 0; font-size: 0.9rem; opacity: 0.85; }
+.err { color: #b91c1c; }
+.summary { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin: 0.75rem 0; font-size: 0.9rem; }
+.tableWrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.table th, .table td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid rgba(128,128,128,0.25); white-space: nowrap; }
+.num { text-align: right !important; font-variant-numeric: tabular-nums; }

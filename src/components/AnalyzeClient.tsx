@@ -5,6 +5,8 @@ import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { AnalyzePager } from "@/components/AnalyzePager";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { MarketFilterPanel } from "@/components/MarketFilterPanel";
+import { HandballPanel } from "@/components/HandballPanel";
+import { SportSelect, type Sport } from "@/components/SportSelect";
 import styles from "@/components/AnalyzeFilters.module.css";
 import {
   criterionLabel,
@@ -70,6 +72,7 @@ export default function AnalyzeClient({
   controlledTolerance,
   hideBookmakerSelect = false,
 }: Props) {
+  const [sport, setSport] = useState<Sport>("football");
   const [criteria, setCriteria] = useState<OddsCriterion[]>(initialCriteria);
   const [bookmakerIdState, setBookmakerIdState] = useState(
     initialBookmakerId || String(PREFERRED_BM),
@@ -575,11 +578,16 @@ export default function AnalyzeClient({
     pickMarketSlot(c);
   }
 
+  if (sport === "handball") {
+    return <HandballPanel sport={sport} onSportChange={setSport} />;
+  }
+
   return (
     <>
       <div className={styles.wrap}>
         <div className={styles.topBar}>
           <div className={styles.topBarRow}>
+            <SportSelect value={sport} onChange={setSport} />
             <label className={styles.field}>
               <span>Day</span>
               <select
