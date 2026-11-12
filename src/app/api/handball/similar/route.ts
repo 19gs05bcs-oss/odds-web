@@ -9,6 +9,10 @@ export async function GET(req: Request) {
     const r = await similar(id, 10);
     return r ? Response.json(r) : Response.json({ error: "maç bulunamadı" }, { status: 404 });
   } catch (e) {
-    return Response.json({ error: "veri okunamadı" }, { status: 500 });
+    console.error("handball similar:", e);
+    return Response.json(
+      { error: e instanceof Error ? `${e.name}: ${e.message}` : "veri okunamadı" },
+      { status: 500 },
+    );
   }
 }
