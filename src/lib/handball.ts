@@ -3,19 +3,37 @@ import { gunzipSync } from "zlib";
 import { sql } from "@/lib/db";
 
 const BUCKET = "handball-odds";
+
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(
+      `R2 env eksik: ${name}. Railway/hosting ortamında R2_ACCOUNT_ID, R2_KEY, R2_SECRET tanımlı olmalı.`,
+    );
+  }
+  return v;
+}
+
 const s3 = new S3Client({
   region: "auto",
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  endpoint: `https://${requireEnv("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com`,
   credentials: {
-    accessKeyId: process.env.R2_KEY!,
-    secretAccessKey: process.env.R2_SECRET!,
+    accessKeyId: requireEnv("R2_KEY"),
+    secretAccessKey: requireEnv("R2_SECRET"),
   },
 });
 
-const get = async (key: string) =>
-  Buffer.from(
-    await (await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))).Body!.transformToByteArray(),
-  );
+const get = async (key: string) => {
+  try {
+    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+    if (!out.Body) throw new Error(`R2 boş body: ${key}`);
+    return Buffer.from(await out.Body.transformToByteArray());
+  } catch (e: any) {
+    const code = e?.name || e?.Code || e?.code || "";
+    const msg = e?.message || String(e);
+    throw new Error(`R2 okuma hatası [${BUCKET}/${key}] ${code}: ${msg}`);
+  }
+};
 
 export type HandballMeta = {
   id: string;
@@ -74,12 +92,33 @@ let cache: Promise<Store> | null = null;
 const load = () =>
   (cache ??= (async () => {
     const [m, b] = await Promise.all([get("meta.json"), get("features.bin")]);
-    const meta = JSON.parse(m.toString());
+
+    let meta: any;
+    try {
+      meta = JSON.parse(m.toString("utf8"));
+    } catch (e: any) {
+      throw new Error(`meta.json JSON.parse başarısız: ${e?.message || e}`);
+    }
+
     const matches = meta.matches as HandballMeta[];
-    const vec = new Float32Array(new Uint8Array(b).buffer);
+    if (!Array.isArray(matches) || !matches.length) {
+      throw new Error("meta.json içinde matches dizisi yok veya boş.");
+    }
+
+    const dim = Number(meta.dim ?? 7);
+    const expectedBytes = matches.length * dim * 4;
+    if (b.byteLength !== expectedBytes) {
+      throw new Error(
+        `features.bin boyutu uyuşmuyor: got=${b.byteLength} expected=${expectedBytes} (matches=${matches.length} dim=${dim})`,
+      );
+    }
+
+    // Node Buffer byteOffset güvenli okuma
+    const u8 = new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+    const vec = new Float32Array(u8.buffer, u8.byteOffset, u8.byteLength / 4);
+
     const index = new Map<string, number>(matches.map((x, i) => [x.id, i]));
     const haystack = matches.map((x) => fold(`${x.home} ${x.away} ${x.season}`));
-    const dim = Number(meta.dim ?? 7);
     const cols: string[] = Array.isArray(meta.cols)
       ? meta.cols.map(String)
       : ["open_H", "open_D", "open_A", "close_H", "close_D", "close_A", "ah_line"];
@@ -91,13 +130,49 @@ const load = () =>
   }));
 
 const rawCache = new Map<string, any>();
+
 async function loadRawSeason(file: string) {
   let d = rawCache.get(file);
-  if (!d) {
-    d = JSON.parse(gunzipSync(await get(`raw/${file}`)).toString());
-    if (rawCache.size >= 25) rawCache.delete(rawCache.keys().next().value!);
-    rawCache.set(file, d);
+  if (d) return d;
+
+  // Önce raw/, yoksa kök dene (yükleme hatası için)
+  let buf: Buffer;
+  let usedKey = `raw/${file}`;
+  try {
+    buf = await get(usedKey);
+  } catch (e1: any) {
+    try {
+      usedKey = file;
+      buf = await get(usedKey);
+    } catch (e2: any) {
+      throw new Error(
+        `Sezon dosyası bulunamadı. Denenen keyler: raw/${file}, ${file}. Son hata: ${e2?.message || e2}`,
+      );
+    }
   }
+
+  let text: string;
+  try {
+    // gzip değilse düz JSON da kabul et
+    try {
+      text = gunzipSync(buf).toString("utf8");
+    } catch {
+      text = buf.toString("utf8");
+    }
+  } catch (e: any) {
+    throw new Error(`Sezon dosyası açılamadı (${usedKey}): ${e?.message || e}`);
+  }
+
+  try {
+    d = JSON.parse(text);
+  } catch (e: any) {
+    throw new Error(
+      `Sezon JSON.parse başarısız (${usedKey}), ilk 120 char: ${text.slice(0, 120)} — ${e?.message || e}`,
+    );
+  }
+
+  if (rawCache.size >= 25) rawCache.delete(rawCache.keys().next().value!);
+  rawCache.set(file, d);
   return d;
 }
 
@@ -156,8 +231,12 @@ export function buildFeatureVector(
 
   const bmRows = odds.filter((r) => Number(r[0]) === targetBm);
 
-  let openH = 0, openD = 0, openA = 0;
-  let closeH = 0, closeD = 0, closeA = 0;
+  let openH = 0,
+    openD = 0,
+    openA = 0;
+  let closeH = 0,
+    closeD = 0,
+    closeA = 0;
 
   for (const row of bmRows) {
     const t = String(row[1]).toLowerCase();
@@ -201,7 +280,11 @@ export function buildFeatureVector(
     const t = String(row[1]).toLowerCase();
     const s = String(row[2]).toLowerCase();
     const side = String(row[3]).toLowerCase();
-    if ((t === "asian_handicap" || t === "ah") && s === "full_time" && (side.startsWith("h:") || side.startsWith("home:"))) {
+    if (
+      (t === "asian_handicap" || t === "ah") &&
+      s === "full_time" &&
+      (side.startsWith("h:") || side.startsWith("home:"))
+    ) {
       const line = Number(side.split(":")[1]);
       const odd = Number(row[5] ?? row[4]);
       if (Number.isFinite(line) && odd > 1) {
@@ -235,16 +318,24 @@ export function buildFeatureVector(
 export function extract1x2Columns(
   odds: any[],
   preferredBid?: number | null,
-): { o1: number | null; c1: number | null; ox: number | null; cx: number | null; o2: number | null; c2: number | null; usedBid: number | null } {
-  const empty: {
-    o1: number | null;
-    c1: number | null;
-    ox: number | null;
-    cx: number | null;
-    o2: number | null;
-    c2: number | null;
-    usedBid: number | null;
-  } = { o1: null, c1: null, ox: null, cx: null, o2: null, c2: null, usedBid: null };
+): {
+  o1: number | null;
+  c1: number | null;
+  ox: number | null;
+  cx: number | null;
+  o2: number | null;
+  c2: number | null;
+  usedBid: number | null;
+} {
+  const empty = {
+    o1: null as number | null,
+    c1: null as number | null,
+    ox: null as number | null,
+    cx: null as number | null,
+    o2: null as number | null,
+    c2: null as number | null,
+    usedBid: null as number | null,
+  };
 
   if (!Array.isArray(odds) || !odds.length) return empty;
 
@@ -253,7 +344,11 @@ export function extract1x2Columns(
     targetBid != null &&
     odds.some((r) => {
       const t = String(r[1]).toLowerCase();
-      return Number(r[0]) === targetBid && (t === "home_draw_away" || t === "1x2") && String(r[2]).toLowerCase() === "full_time";
+      return (
+        Number(r[0]) === targetBid &&
+        (t === "home_draw_away" || t === "1x2") &&
+        String(r[2]).toLowerCase() === "full_time"
+      );
     });
 
   if (!hasPreferred) {
@@ -293,7 +388,6 @@ export function extract1x2Columns(
   }
   return out;
 }
-
 
 /** Supabase fixtureh tablosundan maçın oranlarını oku */
 export async function fetchFixtureHOdds(matchId: string): Promise<CompactOddsRow[] | null> {
@@ -344,7 +438,22 @@ async function hydrateMatchesFromRaw(
   preferredBmName?: string,
 ): Promise<HandballTableRow[]> {
   const uniqueFiles = [...new Set(items.map((x) => x.file))];
-  await Promise.all(uniqueFiles.map((f) => loadRawSeason(f)));
+  // Paralel yükle; tek dosya hatası tüm sonucu düşürmesin diye ayrı try
+  const loadErrors: string[] = [];
+  await Promise.all(
+    uniqueFiles.map(async (f) => {
+      try {
+        await loadRawSeason(f);
+      } catch (e: any) {
+        loadErrors.push(`${f}: ${e?.message || e}`);
+      }
+    }),
+  );
+  if (loadErrors.length === uniqueFiles.length) {
+    throw new Error(
+      `Hiçbir sezon dosyası yüklenemedi (${uniqueFiles.length} dosya). Örnek: ${loadErrors[0]}`,
+    );
+  }
 
   const targetName = preferredBmName?.toLowerCase().trim() ?? "";
 
@@ -362,12 +471,15 @@ async function hydrateMatchesFromRaw(
     }
 
     const rawMatch = d?.matches?.find((x: any) => x.match_id === m.id);
-    const { o1, c1, ox, cx, o2, c2, usedBid } = extract1x2Columns(rawMatch?.odds ?? [], preferredBid);
+    const { o1, c1, ox, cx, o2, c2, usedBid } = extract1x2Columns(
+      rawMatch?.odds ?? [],
+      preferredBid,
+    );
     const { date, time } = formatTs(m.ts);
 
     return {
       ...m,
-      src: "archive",
+      src: "archive" as const,
       date,
       time,
       ft: m.hs != null && m.as != null ? `${m.hs}-${m.as}` : "-",
