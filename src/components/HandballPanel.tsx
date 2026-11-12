@@ -98,7 +98,7 @@ export function HandballPanel({
     };
   }, [date]);
 
-  // 3) Maç seçilince R2 arşivinden benzer maçlar
+  // 3) Maç seçilince benzer maçlar: R2 vektör indeksi VEYA (canlı fikstür) oran profili
   useEffect(() => {
     if (!selectedId) {
       setSim({ status: "idle" });
@@ -108,13 +108,29 @@ export function HandballPanel({
     setSim({ status: "loading" });
     (async () => {
       try {
-        const res = await fetch(`/api/handball/similar?id=${encodeURIComponent(selectedId)}`, {
-          cache: "no-store",
-        });
+        const fx = fixtures.find((f) => f.match_id === selectedId);
+        const odds = fx?.odds ?? null;
+        const res = odds?.length
+          ? await fetch("/api/handball/similar", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({ id: selectedId, odds }),
+            })
+          : await fetch(`/api/handball/similar?id=${encodeURIComponent(selectedId)}`, {
+              cache: "no-store",
+            });
         if (off) return;
-        if (res.status === 404) return setSim({ status: "notfound" });
         const j = await res.json();
-        if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
+        if (res.status === 404) {
+          const msg =
+            typeof j?.message === "string"
+              ? j.message
+              : "Benzer maç hesaplanamadı (arşivde yok veya oran yok).";
+          return setSim({ status: "error", message: msg });
+        }
+        if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
+        if (!Array.isArray(j)) throw new Error(j?.message || "Beklenmeyen yanıt");
         setSim({ status: "done", rows: j as Similar[] });
       } catch (e) {
         if (!off) setSim({ status: "error", message: e instanceof Error ? e.message : String(e) });
@@ -123,7 +139,7 @@ export function HandballPanel({
     return () => {
       off = true;
     };
-  }, [selectedId]);
+  }, [selectedId, fixtures]);
 
   const stats = useMemo(() => {
     if (sim.status !== "done") return null;
@@ -178,7 +194,7 @@ export function HandballPanel({
         {sim.status === "loading" && <p className={styles.msg}>Loading archive…</p>}
         {sim.status === "notfound" && (
           <p className={styles.msg}>
-            This match is not in the archive index (match_id not found), so similar matches could not be computed.
+            Benzer maç bulunamadı. Canlı fikstür için fixtureh.odds dolu olmalı; benzerlik oran profiline göre yapılır (aynı match_id gerekmez).
           </p>
         )}
         {sim.status === "error" && <p className={`${styles.msg} ${styles.err}`}>{sim.message}</p>}

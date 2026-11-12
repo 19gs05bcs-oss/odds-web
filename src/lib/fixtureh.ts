@@ -16,12 +16,34 @@ export async function listFixtureHDates(limit = 30): Promise<string[]> {
   return rows.map((r) => r.d).filter(Boolean);
 }
 
+/**
+ * Seçili günün hentbol fikstürleri.
+ * odds varsa birlikte döner (benzer maç hesabı için); kolon yoksa null bırakılır.
+ */
 export async function fetchFixtureHMeta(date: string): Promise<FixtureRow[]> {
-  const rows = await sql.unsafe<FixtureRow[]>(
-    `SELECT ${META} FROM fixtureh
-      WHERE kickoff_at IS NOT NULL AND (kickoff_at AT TIME ZONE $1::text)::date = $2::date
-      ORDER BY kickoff_at ASC`,
-    [DISPLAY_TZ, date],
-  );
-  return rows.map((r) => ({ ...r, odds: null, bookmakers: null, odds_count: r.odds_count ?? 0 }));
+  try {
+    const rows = await sql.unsafe<FixtureRow[]>(
+      `SELECT ${META}, odds, bookmakers FROM fixtureh
+        WHERE kickoff_at IS NOT NULL AND (kickoff_at AT TIME ZONE $1::text)::date = $2::date
+        ORDER BY kickoff_at ASC`,
+      [DISPLAY_TZ, date],
+    );
+    return rows.map((r) => ({
+      ...r,
+      odds: r.odds ?? null,
+      bookmakers: r.bookmakers ?? null,
+      odds_count: r.odds_count ?? (Array.isArray(r.odds) ? r.odds.length : 0),
+    }));
+  } catch (e) {
+    // odds / bookmakers kolonu yoksa meta ile devam
+    const message = e instanceof Error ? e.message : String(e);
+    if (!/odds|bookmakers|42703/i.test(message)) throw e;
+    const rows = await sql.unsafe<FixtureRow[]>(
+      `SELECT ${META} FROM fixtureh
+        WHERE kickoff_at IS NOT NULL AND (kickoff_at AT TIME ZONE $1::text)::date = $2::date
+        ORDER BY kickoff_at ASC`,
+      [DISPLAY_TZ, date],
+    );
+    return rows.map((r) => ({ ...r, odds: null, bookmakers: null, odds_count: r.odds_count ?? 0 }));
+  }
 }
