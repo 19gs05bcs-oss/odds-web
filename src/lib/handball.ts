@@ -46,7 +46,7 @@ const fold = (s: string) =>
 let cache: Promise<Store> | null = null;
 const load = () =>
   (cache ??= (async () => {
-    const [m, b] = await Promise.all([get("meta.v2.json"), get("features.v2.bin")]);
+    const [m, b] = await Promise.all([get("meta.json"), get("features.bin")]);
     const meta = JSON.parse(m.toString());
     const matches = meta.matches as HandballMeta[];
     const vec = new Float32Array(new Uint8Array(b).buffer); // kopya: hizalama güvenli
