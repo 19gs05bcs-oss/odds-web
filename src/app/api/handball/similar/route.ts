@@ -46,16 +46,17 @@ async function runSimilar(params: SimilarParams) {
 function errorResponse(error: unknown) {
   const details =
     error instanceof Error
-      ? { name: error.name, message: error.message }
+      ? { name: error.name, message: error.message, stack: error.stack?.split("\n").slice(0, 6) }
       : { message: String(error) };
 
-  // İstek gövdesi veya R2 kimlik bilgileri loglanmaz.
   console.error("[api/handball/similar] request failed", details);
 
+  // Artık gerçek mesajı da dön — log bakmadan teşhis edilebilsin
   return NextResponse.json(
     {
       error: "handball_similar_failed",
-      message: "Benzer maçlar hesaplanamadı. Sunucu loglarını kontrol edin.",
+      message: details.message || "Benzer maçlar hesaplanamadı.",
+      details,
     },
     { status: 500 },
   );
