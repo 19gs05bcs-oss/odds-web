@@ -62,12 +62,32 @@ export type HandballTableRow = HandballMeta & {
   time: string;
   ft: string;
   ftRes: "Home" | "Draw" | "Away" | "-";
+  // 1X2
   o1: number | null;
   c1: number | null;
   ox: number | null;
   cx: number | null;
   o2: number | null;
   c2: number | null;
+  // Asian Handicap (main line ~1.90)
+  ahLine: number | null;
+  ahH_o: number | null;
+  ahH_c: number | null;
+  ahA_o: number | null;
+  ahA_c: number | null;
+  // Over/Under (main line ~1.90)
+  ouLine: number | null;
+  ouO_o: number | null;
+  ouO_c: number | null;
+  ouU_o: number | null;
+  ouU_c: number | null;
+  // Double Chance (current)
+  dc1x: number | null;
+  dc12: number | null;
+  dcx2: number | null;
+  // Draw No Bet (current)
+  dnbH: number | null;
+  dnbA: number | null;
   bmUsed?: string;
   distance?: number;
 };
@@ -318,6 +338,8 @@ export function buildFeatureVector(
 export function extract1x2Columns(
   odds: any[],
   preferredBid?: number | null,
+  /** true ise preferredBid yoksa veya satırı yoksa başka BM'ye düşme */
+  strict = false,
 ): {
   o1: number | null;
   c1: number | null;
@@ -352,6 +374,7 @@ export function extract1x2Columns(
     });
 
   if (!hasPreferred) {
+    if (strict) return empty; // başka BM'ye düşme
     targetBid = null;
     for (const r of odds) {
       const t = String(r[1]).toLowerCase();
@@ -387,6 +410,178 @@ export function extract1x2Columns(
     }
   }
   return out;
+}
+
+
+/** Seçilen BM için ana marketleri çıkar (1X2 zaten extract1x2Columns'ta). */
+export function extractMarkets(
+  odds: any[],
+  preferredBid: number | null,
+): {
+  ahLine: number | null;
+  ahH_o: number | null;
+  ahH_c: number | null;
+  ahA_o: number | null;
+  ahA_c: number | null;
+  ouLine: number | null;
+  ouO_o: number | null;
+  ouO_c: number | null;
+  ouU_o: number | null;
+  ouU_c: number | null;
+  dc1x: number | null;
+  dc12: number | null;
+  dcx2: number | null;
+  dnbH: number | null;
+  dnbA: number | null;
+} {
+  const empty = {
+    ahLine: null as number | null,
+    ahH_o: null as number | null,
+    ahH_c: null as number | null,
+    ahA_o: null as number | null,
+    ahA_c: null as number | null,
+    ouLine: null as number | null,
+    ouO_o: null as number | null,
+    ouO_c: null as number | null,
+    ouU_o: null as number | null,
+    ouU_c: null as number | null,
+    dc1x: null as number | null,
+    dc12: null as number | null,
+    dcx2: null as number | null,
+    dnbH: null as number | null,
+    dnbA: null as number | null,
+  };
+  if (!Array.isArray(odds) || !odds.length || preferredBid == null) return empty;
+
+  const bmRows = odds.filter((r) => Number(r[0]) === preferredBid);
+  if (!bmRows.length) return empty;
+
+  const num = (v: any) => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 1 ? n : null;
+  };
+
+  // --- Asian Handicap: line closest to odd 1.90 on home side ---
+  let bestAh = Infinity;
+  let ahLine: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]);
+    if (!((t === "asian_handicap" || t === "ah" || t === "handicap") && s === "full_time")) continue;
+    const sideL = side.toLowerCase();
+    if (!(sideL.startsWith("h:") || sideL.startsWith("home:"))) continue;
+    const line = Number(side.split(":")[1]);
+    const odd = num(row[5]) ?? num(row[4]);
+    if (!Number.isFinite(line) || odd == null) continue;
+    const diff = Math.abs(odd - 1.9);
+    if (diff < bestAh) {
+      bestAh = diff;
+      ahLine = line;
+    }
+  }
+  let ahH_o: number | null = null, ahH_c: number | null = null;
+  let ahA_o: number | null = null, ahA_c: number | null = null;
+  if (ahLine != null) {
+    const hSides = new Set([`h:${ahLine}`, `home:${ahLine}`, `H:${ahLine}`]);
+    const aSides = new Set([`a:${-ahLine}`, `away:${-ahLine}`, `A:${-ahLine}`, `a:${ahLine}`, `A:${ahLine}`]);
+    // also try opposite sign conventions
+    for (const row of bmRows) {
+      const t = String(row[1]).toLowerCase();
+      const s = String(row[2]).toLowerCase();
+      const side = String(row[3]);
+      if (!((t === "asian_handicap" || t === "ah" || t === "handicap") && s === "full_time")) continue;
+      const sideL = side.toLowerCase();
+      const op = num(row[4]);
+      const cl = num(row[5]);
+      if (sideL === `h:${ahLine}` || sideL === `home:${ahLine}`) {
+        if (ahH_o == null) ahH_o = op ?? cl;
+        if (ahH_c == null) ahH_c = cl ?? op;
+      }
+      // away side is typically opposite line
+      if (
+        sideL === `a:${-ahLine}` ||
+        sideL === `away:${-ahLine}` ||
+        sideL === `a:${ahLine}` ||
+        sideL === `away:${ahLine}`
+      ) {
+        if (ahA_o == null) ahA_o = op ?? cl;
+        if (ahA_c == null) ahA_c = cl ?? op;
+      }
+    }
+  }
+
+  // --- Over/Under: line closest to odd 1.90 on over ---
+  let bestOu = Infinity;
+  let ouLine: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]).toLowerCase();
+    if (!((t === "over_under" || t === "totals" || t === "total" || t === "ou") && s === "full_time")) continue;
+    if (!(side.startsWith("over:") || side.startsWith("o:"))) continue;
+    const line = Number(side.split(":")[1]);
+    const odd = num(row[5]) ?? num(row[4]);
+    if (!Number.isFinite(line) || odd == null) continue;
+    const diff = Math.abs(odd - 1.9);
+    if (diff < bestOu) {
+      bestOu = diff;
+      ouLine = line;
+    }
+  }
+  let ouO_o: number | null = null, ouO_c: number | null = null;
+  let ouU_o: number | null = null, ouU_c: number | null = null;
+  if (ouLine != null) {
+    for (const row of bmRows) {
+      const t = String(row[1]).toLowerCase();
+      const s = String(row[2]).toLowerCase();
+      const side = String(row[3]).toLowerCase();
+      if (!((t === "over_under" || t === "totals" || t === "total" || t === "ou") && s === "full_time")) continue;
+      const op = num(row[4]);
+      const cl = num(row[5]);
+      if (side === `over:${ouLine}` || side === `o:${ouLine}`) {
+        if (ouO_o == null) ouO_o = op ?? cl;
+        if (ouO_c == null) ouO_c = cl ?? op;
+      }
+      if (side === `under:${ouLine}` || side === `u:${ouLine}`) {
+        if (ouU_o == null) ouU_o = op ?? cl;
+        if (ouU_c == null) ouU_c = cl ?? op;
+      }
+    }
+  }
+
+  // --- Double Chance (current preferred) ---
+  let dc1x: number | null = null, dc12: number | null = null, dcx2: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]).toLowerCase();
+    if (!(t === "double_chance" || t === "dc") || s !== "full_time") continue;
+    const odd = num(row[5]) ?? num(row[4]);
+    if (side === "dc:1x" || side === "1x" || side === "home_draw") dc1x = dc1x ?? odd;
+    if (side === "dc:12" || side === "12" || side === "home_away") dc12 = dc12 ?? odd;
+    if (side === "dc:x2" || side === "x2" || side === "draw_away") dcx2 = dcx2 ?? odd;
+  }
+
+  // --- Draw No Bet ---
+  let dnbH: number | null = null, dnbA: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]).toLowerCase();
+    if (!(t === "draw_no_bet" || t === "dnb") || s !== "full_time") continue;
+    const odd = num(row[5]) ?? num(row[4]);
+    if (side === "h" || side === "home" || side === "1") dnbH = dnbH ?? odd;
+    if (side === "a" || side === "away" || side === "2") dnbA = dnbA ?? odd;
+  }
+
+  return {
+    ahLine, ahH_o, ahH_c, ahA_o, ahA_c,
+    ouLine, ouO_o, ouO_c, ouU_o, ouU_c,
+    dc1x, dc12, dcx2,
+    dnbH, dnbA,
+  };
 }
 
 /** Supabase fixtureh tablosundan maçın oranlarını oku */
@@ -429,16 +624,211 @@ function nearestFromVector(
   return sc.slice(0, k).map(([d, j]) => ({ ...matches[j], distance: Math.sqrt(d) }));
 }
 
+/** Bookmaker adını sezon dosyasındaki id'ye çevir (esnek eşleşme). */
+function resolveBookmakerId(
+  bookmakers: Record<string, string> | undefined,
+  preferredName: string,
+  preferredId?: number | null,
+): number | null {
+  if (preferredId != null && Number.isFinite(preferredId) && bookmakers) {
+    if (bookmakers[String(preferredId)] != null) return preferredId;
+  }
+  const target = preferredName?.toLowerCase().trim() ?? "";
+  if (!target || !bookmakers) return preferredId ?? null;
+
+  // 1) exact
+  for (const [bid, name] of Object.entries(bookmakers)) {
+    if (String(name).toLowerCase() === target) return Number(bid);
+  }
+  // 2) includes
+  for (const [bid, name] of Object.entries(bookmakers)) {
+    const n = String(name).toLowerCase();
+    if (n.includes(target) || target.includes(n)) return Number(bid);
+  }
+  return preferredId ?? null;
+}
+
 /**
- * Meta'dan eşleşen maçların detaylarını R2'deki raw/{file} (.json.gz) dosyalarından okur
- * ve 1 O, 1 C, X O, X C, 2 O, 2 C sütunlarını doldurur.
+ * Seçilen BM'ye özel zengin vektör:
+ * 1X2 open/close implied (6) + AH line + OU line + OU over/under close probs
+ * features.bin ile aynı boyutta olmak zorunda değil — sadece BM re-rank için.
+ */
+function buildBmRichVector(
+  odds: any[],
+  preferredBid: number | null,
+): Float32Array {
+  // [openH, openD, openA, closeH, closeD, closeA, ahLine, ouLine, ouOver, ouUnder]
+  const out = new Float32Array(10);
+  if (!odds?.length || preferredBid == null) return out;
+
+  const bmRows = odds.filter((r) => Number(r[0]) === preferredBid);
+  if (!bmRows.length) return out;
+
+  let openH = 0, openD = 0, openA = 0;
+  let closeH = 0, closeD = 0, closeA = 0;
+
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]).toLowerCase();
+    if ((t !== "home_draw_away" && t !== "1x2") || s !== "full_time") continue;
+
+    const op = row[4] != null && Number(row[4]) > 1 ? Number(row[4]) : null;
+    const cl = row[5] != null && Number(row[5]) > 1 ? Number(row[5]) : null;
+
+    if (side === "h" || side === "home") {
+      if (!openH && (op || cl)) openH = 1 / (op ?? cl)!;
+      if (!closeH && (cl || op)) closeH = 1 / (cl ?? op)!;
+    } else if (side === "d" || side === "draw") {
+      if (!openD && (op || cl)) openD = 1 / (op ?? cl)!;
+      if (!closeD && (cl || op)) closeD = 1 / (cl ?? op)!;
+    } else if (side === "a" || side === "away") {
+      if (!openA && (op || cl)) openA = 1 / (op ?? cl)!;
+      if (!closeA && (cl || op)) closeA = 1 / (cl ?? op)!;
+    }
+  }
+
+  const sumOpen = openH + openD + openA;
+  if (sumOpen > 0) {
+    openH /= sumOpen;
+    openD /= sumOpen;
+    openA /= sumOpen;
+  }
+  const sumClose = closeH + closeD + closeA;
+  if (sumClose > 0) {
+    closeH /= sumClose;
+    closeD /= sumClose;
+    closeA /= sumClose;
+  }
+
+  // AH line closest to 1.90 (home side)
+  let ahLine = 0;
+  let bestAh = Infinity;
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]).toLowerCase();
+    if (
+      (t === "asian_handicap" || t === "ah" || t === "handicap") &&
+      s === "full_time" &&
+      (side.startsWith("h:") || side.startsWith("home:"))
+    ) {
+      const line = Number(side.split(":")[1]);
+      const odd = Number(row[5] ?? row[4]);
+      if (Number.isFinite(line) && odd > 1) {
+        const diff = Math.abs(odd - 1.9);
+        if (diff < bestAh) {
+          bestAh = diff;
+          ahLine = line;
+        }
+      }
+    }
+  }
+
+  // OU main line closest to 1.90 over
+  let ouLine = 0;
+  let ouOver = 0;
+  let ouUnder = 0;
+  let bestOu = Infinity;
+  for (const row of bmRows) {
+    const t = String(row[1]).toLowerCase();
+    const s = String(row[2]).toLowerCase();
+    const side = String(row[3]).toLowerCase();
+    if (
+      (t === "over_under" || t === "totals" || t === "total" || t === "ou") &&
+      s === "full_time" &&
+      (side.startsWith("over:") || side.startsWith("o:"))
+    ) {
+      const line = Number(side.split(":")[1]);
+      const odd = Number(row[5] ?? row[4]);
+      if (Number.isFinite(line) && odd > 1) {
+        const diff = Math.abs(odd - 1.9);
+        if (diff < bestOu) {
+          bestOu = diff;
+          ouLine = line;
+          ouOver = 1 / odd;
+        }
+      }
+    }
+  }
+  if (ouLine !== 0) {
+    for (const row of bmRows) {
+      const t = String(row[1]).toLowerCase();
+      const s = String(row[2]).toLowerCase();
+      const side = String(row[3]).toLowerCase();
+      if (
+        (t === "over_under" || t === "totals" || t === "total" || t === "ou") &&
+        s === "full_time" &&
+        (side === `under:${ouLine}` || side === `u:${ouLine}`)
+      ) {
+        const odd = Number(row[5] ?? row[4]);
+        if (odd > 1) ouUnder = 1 / odd;
+      }
+    }
+    // normalize ou probs
+    const sOu = ouOver + ouUnder;
+    if (sOu > 0) {
+      ouOver /= sOu;
+      ouUnder /= sOu;
+    }
+  }
+
+  out[0] = openH;
+  out[1] = openD;
+  out[2] = openA;
+  out[3] = closeH;
+  out[4] = closeD;
+  out[5] = closeA;
+  out[6] = ahLine;
+  out[7] = ouLine;
+  out[8] = ouOver;
+  out[9] = ouUnder;
+  return out;
+}
+
+function vectorDistance(a: Float32Array, b: Float32Array): number {
+  const n = Math.min(a.length, b.length);
+  let d = 0;
+  for (let i = 0; i < n; i++) {
+    const t = a[i] - b[i];
+    d += t * t;
+  }
+  return Math.sqrt(d);
+}
+
+/** Seçilen BM'nin 1X2 satırı var mı? */
+function hasBm1x2(odds: any[], bid: number): boolean {
+  for (const r of odds) {
+    if (Number(r[0]) !== bid) continue;
+    const t = String(r[1]).toLowerCase();
+    const s = String(r[2]).toLowerCase();
+    if ((t === "home_draw_away" || t === "1x2") && s === "full_time") return true;
+  }
+  return false;
+}
+
+/**
+ * Meta adaylarını R2 raw dosyalarından doldurur.
+ * strictBm=true ise: sadece seçilen BM'nin oranının olduğu maçlar kalır,
+ * distance o BM'nin rich vektörüne göre yeniden hesaplanır.
  */
 async function hydrateMatchesFromRaw(
   items: (HandballMeta & { distance?: number })[],
-  preferredBmName?: string,
+  opts?: {
+    preferredBmName?: string;
+    preferredBmId?: number | null;
+    queryOdds?: CompactOddsRow[] | null;
+    strictBm?: boolean;
+    k?: number;
+  },
 ): Promise<HandballTableRow[]> {
+  const preferredBmName = opts?.preferredBmName ?? "";
+  const preferredBmId = opts?.preferredBmId ?? null;
+  const strictBm = opts?.strictBm ?? false;
+  const k = opts?.k ?? items.length;
+  const queryOdds = opts?.queryOdds ?? null;
+
   const uniqueFiles = [...new Set(items.map((x) => x.file))];
-  // Paralel yükle; tek dosya hatası tüm sonucu düşürmesin diye ayrı try
   const loadErrors: string[] = [];
   await Promise.all(
     uniqueFiles.map(async (f) => {
@@ -449,37 +839,60 @@ async function hydrateMatchesFromRaw(
       }
     }),
   );
-  if (loadErrors.length === uniqueFiles.length) {
+  if (loadErrors.length === uniqueFiles.length && uniqueFiles.length > 0) {
     throw new Error(
       `Hiçbir sezon dosyası yüklenemedi (${uniqueFiles.length} dosya). Örnek: ${loadErrors[0]}`,
     );
   }
 
-  const targetName = preferredBmName?.toLowerCase().trim() ?? "";
+  // Query tarafı rich vektör (seçilen BM)
+  let queryVec: Float32Array | null = null;
+  if (queryOdds?.length && (preferredBmId != null || preferredBmName)) {
+    // Query odds genelde tek havuz; id ile filtrele
+    queryVec = buildBmRichVector(queryOdds, preferredBmId);
+    // id ile hiç satır yoksa isim zaten resolve edilemez (farklı sezon dosyası yok)
+    let nz = 0;
+    for (let i = 0; i < queryVec.length; i++) if (queryVec[i] !== 0) nz++;
+    if (nz === 0) queryVec = null;
+  }
 
-  return items.map((m) => {
+  type Scored = HandballTableRow & { _hasBm: boolean };
+  const scored: Scored[] = [];
+
+  for (const m of items) {
     const d = rawCache.get(m.file);
-    let preferredBid: number | null = null;
-    if (d?.bookmakers && targetName) {
-      for (const [bid, name] of Object.entries(d.bookmakers)) {
-        const n = String(name).toLowerCase();
-        if (n === targetName || n.includes(targetName) || targetName.includes(n)) {
-          preferredBid = Number(bid);
-          break;
-        }
-      }
+    if (!d) continue;
+
+    const bid = resolveBookmakerId(d.bookmakers, preferredBmName, preferredBmId);
+    const rawMatch = d?.matches?.find((x: any) => x.match_id === m.id);
+    const rawOdds: any[] = rawMatch?.odds ?? [];
+
+    const bmPresent = bid != null && hasBm1x2(rawOdds, bid);
+
+    // strict: seçilen BM yoksa atla
+    if (strictBm && preferredBmName && !bmPresent) continue;
+
+    // Sadece bu BM'nin oranları (fallback yok)
+    const extractBid = bmPresent ? bid : null;
+    const { o1, c1, ox, cx, o2, c2, usedBid } = extract1x2Columns(
+      rawOdds,
+      extractBid,
+      true, // strict: sadece seçilen BM
+    );
+    const markets = extractMarkets(rawOdds, extractBid);
+
+    // BM özel distance
+    let distance = m.distance ?? 0;
+    if (queryVec && bmPresent && bid != null) {
+      const archVec = buildBmRichVector(rawOdds, bid);
+      distance = vectorDistance(queryVec, archVec);
     }
 
-    const rawMatch = d?.matches?.find((x: any) => x.match_id === m.id);
-    const { o1, c1, ox, cx, o2, c2, usedBid } = extract1x2Columns(
-      rawMatch?.odds ?? [],
-      preferredBid,
-    );
     const { date, time } = formatTs(m.ts);
-
-    return {
+    scored.push({
       ...m,
-      src: "archive" as const,
+      distance,
+      src: "archive",
       date,
       time,
       ft: m.hs != null && m.as != null ? `${m.hs}-${m.as}` : "-",
@@ -490,9 +903,20 @@ async function hydrateMatchesFromRaw(
       cx,
       o2,
       c2,
-      bmUsed: usedBid != null && d?.bookmakers ? d.bookmakers[String(usedBid)] : undefined,
-    };
-  });
+      ...markets,
+      bmUsed:
+        usedBid != null && d?.bookmakers
+          ? d.bookmakers[String(usedBid)]
+          : undefined,
+      _hasBm: bmPresent,
+    });
+  }
+
+  // BM'ye göre yeniden sırala
+  scored.sort((a, b) => (a.distance ?? 99) - (b.distance ?? 99));
+
+  // strict modda yetersiz kaldıysa (çok az maç) gevşetme yok — kullanıcı BM istiyor
+  return scored.slice(0, k).map(({ _hasBm, ...rest }) => rest);
 }
 
 export async function similar(
@@ -507,34 +931,71 @@ export async function similar(
   const { matches, dim: D, cols, vec, index } = await load();
   const i = index.get(eventId);
 
+  const bmName = opts?.bookmakerName ?? "";
+  const bmId = opts?.bookmakerId ?? null;
+  const strictBm = !!(bmName || bmId != null);
+
+  // Aday havuzu: BM filtre + re-rank için daha geniş çek
+  const candidateK = strictBm ? Math.max(k * 8, 80) : k;
+
+  let nearest: (HandballMeta & { distance?: number })[];
+  let queryOdds: CompactOddsRow[] | null = opts?.oddsOverride ?? null;
+
   if (i !== undefined) {
+    // Arşiv maçı: features.bin vektörü ile aday bul
     const q = new Float32Array(D);
     for (let c = 0; c < D; c++) q[c] = vec[i * D + c];
-    const nearest = nearestFromVector(q, matches, D, vec, k, eventId);
-    return hydrateMatchesFromRaw(nearest, opts?.bookmakerName);
+    nearest = nearestFromVector(q, matches, D, vec, candidateK, eventId);
+
+    // Arşiv maçının kendi odds'unu da al (BM re-rank query için)
+    if (!queryOdds?.length) {
+      try {
+        const d = await loadRawSeason(matches[i].file);
+        const rawMatch = d?.matches?.find((x: any) => x.match_id === eventId);
+        if (rawMatch?.odds) queryOdds = rawMatch.odds;
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    if (!queryOdds?.length) queryOdds = await fetchFixtureHOdds(eventId);
+    if (!queryOdds?.length) {
+      return {
+        error: "not_in_archive_no_odds",
+        message: "Bu maç R2 arşivinde yok ve fixtureh içinde oran bulunamadı.",
+      } as const;
+    }
+
+    const q = buildFeatureVector(queryOdds, cols, D, bmId);
+    let nonzero = 0;
+    for (let c = 0; c < D; c++) if (q[c] !== 0) nonzero++;
+    if (nonzero === 0) {
+      return {
+        error: "odds_features_empty",
+        message: "Oranlar feature anahtarlarıyla eşleşmedi.",
+      } as const;
+    }
+
+    nearest = nearestFromVector(q, matches, D, vec, candidateK);
   }
 
-  let odds = opts?.oddsOverride ?? null;
-  if (!odds?.length) odds = await fetchFixtureHOdds(eventId);
-  if (!odds?.length) {
+  const rows = await hydrateMatchesFromRaw(nearest, {
+    preferredBmName: bmName,
+    preferredBmId: bmId,
+    queryOdds,
+    strictBm,
+    k,
+  });
+
+  // strict BM ile hiç sonuç yoksa anlamlı hata
+  if (strictBm && rows.length === 0) {
     return {
-      error: "not_in_archive_no_odds",
-      message: "Bu maç R2 arşivinde yok ve fixtureh içinde oran bulunamadı.",
+      error: "no_matches_for_bookmaker",
+      message: `Seçilen bahis şirketi (${bmName || bmId}) için arşivde yeterli benzer maç bulunamadı.`,
     } as const;
   }
 
-  const q = buildFeatureVector(odds, cols, D, opts?.bookmakerId);
-  let nonzero = 0;
-  for (let c = 0; c < D; c++) if (q[c] !== 0) nonzero++;
-  if (nonzero === 0) {
-    return {
-      error: "odds_features_empty",
-      message: "Oranlar feature anahtarlarıyla eşleşmedi.",
-    } as const;
-  }
-
-  const nearest = nearestFromVector(q, matches, D, vec, k);
-  return hydrateMatchesFromRaw(nearest, opts?.bookmakerName);
+  return rows;
 }
 
 export async function searchMatches(q: string, limit = 20) {

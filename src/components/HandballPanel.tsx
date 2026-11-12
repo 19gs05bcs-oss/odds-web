@@ -32,6 +32,26 @@ type Similar = {
   cx?: number | null;
   o2?: number | null;
   c2?: number | null;
+  ahLine?: number | null;
+  ahH_o?: number | null;
+  ahH_c?: number | null;
+  ahA_o?: number | null;
+  ahA_c?: number | null;
+  ouLine?: number | null;
+  ouO_o?: number | null;
+  ouO_c?: number | null;
+  ouU_o?: number | null;
+  ouU_c?: number | null;
+  dc1x?: number | null;
+  dc12?: number | null;
+  dcx2?: number | null;
+  dnbH?: number | null;
+  dnbA?: number | null;
+  bmUsed?: string;
+  date?: string;
+  time?: string;
+  ft?: string;
+  ftRes?: string;
 };
 
 type SimState =
@@ -113,6 +133,148 @@ function extractFixture1x2ForBm(odds: CompactOddsRow[] | null | undefined, bmId:
     }
   }
   return out;
+}
+
+
+/** Seçilen BM için AH / O/U / DC / DNB ana hatları (fixture odds). */
+function extractFixtureMarkets(odds: CompactOddsRow[] | null | undefined, bmId: number) {
+  const empty = {
+    ahLine: null as number | null,
+    ahH_o: null as number | null,
+    ahH_c: null as number | null,
+    ahA_o: null as number | null,
+    ahA_c: null as number | null,
+    ouLine: null as number | null,
+    ouO_o: null as number | null,
+    ouO_c: null as number | null,
+    ouU_o: null as number | null,
+    ouU_c: null as number | null,
+    dc1x: null as number | null,
+    dc12: null as number | null,
+    dcx2: null as number | null,
+    dnbH: null as number | null,
+    dnbA: null as number | null,
+  };
+  if (!odds?.length) return empty;
+  const num = (v: any) => {
+    if (v == null || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n > 1 ? n : null;
+  };
+  const bmRows = odds.filter((r) => Number(r[0]) === bmId);
+  if (!bmRows.length) return empty;
+
+  let bestAh = Infinity;
+  let ahLine: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1] || "").toLowerCase();
+    const s = String(row[2] || "").toLowerCase();
+    const side = String(row[3] || "");
+    const sideL = side.toLowerCase();
+    if (!((t === "asian_handicap" || t === "ah" || t === "handicap") && (s === "full_time" || s === "ft"))) continue;
+    if (!(sideL.startsWith("h:") || sideL.startsWith("home:"))) continue;
+    const line = Number(side.split(":")[1]);
+    const odd = num(row[5]) ?? num(row[4]);
+    if (!Number.isFinite(line) || odd == null) continue;
+    const diff = Math.abs(odd - 1.9);
+    if (diff < bestAh) {
+      bestAh = diff;
+      ahLine = line;
+    }
+  }
+  let ahH_o: number | null = null, ahH_c: number | null = null;
+  let ahA_o: number | null = null, ahA_c: number | null = null;
+  if (ahLine != null) {
+    for (const row of bmRows) {
+      const t = String(row[1] || "").toLowerCase();
+      const s = String(row[2] || "").toLowerCase();
+      const sideL = String(row[3] || "").toLowerCase();
+      if (!((t === "asian_handicap" || t === "ah" || t === "handicap") && (s === "full_time" || s === "ft"))) continue;
+      const op = num(row[4]);
+      const cl = num(row[5]);
+      if (sideL === `h:${ahLine}` || sideL === `home:${ahLine}`) {
+        if (ahH_o == null) ahH_o = op ?? cl;
+        if (ahH_c == null) ahH_c = cl ?? op;
+      }
+      if (
+        sideL === `a:${-ahLine}` ||
+        sideL === `away:${-ahLine}` ||
+        sideL === `a:${ahLine}` ||
+        sideL === `away:${ahLine}`
+      ) {
+        if (ahA_o == null) ahA_o = op ?? cl;
+        if (ahA_c == null) ahA_c = cl ?? op;
+      }
+    }
+  }
+
+  let bestOu = Infinity;
+  let ouLine: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1] || "").toLowerCase();
+    const s = String(row[2] || "").toLowerCase();
+    const side = String(row[3] || "").toLowerCase();
+    if (!((t === "over_under" || t === "totals" || t === "total" || t === "ou") && (s === "full_time" || s === "ft"))) continue;
+    if (!(side.startsWith("over:") || side.startsWith("o:"))) continue;
+    const line = Number(side.split(":")[1]);
+    const odd = num(row[5]) ?? num(row[4]);
+    if (!Number.isFinite(line) || odd == null) continue;
+    const diff = Math.abs(odd - 1.9);
+    if (diff < bestOu) {
+      bestOu = diff;
+      ouLine = line;
+    }
+  }
+  let ouO_o: number | null = null, ouO_c: number | null = null;
+  let ouU_o: number | null = null, ouU_c: number | null = null;
+  if (ouLine != null) {
+    for (const row of bmRows) {
+      const t = String(row[1] || "").toLowerCase();
+      const s = String(row[2] || "").toLowerCase();
+      const side = String(row[3] || "").toLowerCase();
+      if (!((t === "over_under" || t === "totals" || t === "total" || t === "ou") && (s === "full_time" || s === "ft"))) continue;
+      const op = num(row[4]);
+      const cl = num(row[5]);
+      if (side === `over:${ouLine}` || side === `o:${ouLine}`) {
+        if (ouO_o == null) ouO_o = op ?? cl;
+        if (ouO_c == null) ouO_c = cl ?? op;
+      }
+      if (side === `under:${ouLine}` || side === `u:${ouLine}`) {
+        if (ouU_o == null) ouU_o = op ?? cl;
+        if (ouU_c == null) ouU_c = cl ?? op;
+      }
+    }
+  }
+
+  let dc1x: number | null = null, dc12: number | null = null, dcx2: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1] || "").toLowerCase();
+    const s = String(row[2] || "").toLowerCase();
+    const side = String(row[3] || "").toLowerCase();
+    if (!((t === "double_chance" || t === "dc") && (s === "full_time" || s === "ft"))) continue;
+    const odd = num(row[5]) ?? num(row[4]);
+    if (side === "dc:1x" || side === "1x" || side === "home_draw") dc1x = dc1x ?? odd;
+    if (side === "dc:12" || side === "12" || side === "home_away") dc12 = dc12 ?? odd;
+    if (side === "dc:x2" || side === "x2" || side === "draw_away") dcx2 = dcx2 ?? odd;
+  }
+
+  let dnbH: number | null = null, dnbA: number | null = null;
+  for (const row of bmRows) {
+    const t = String(row[1] || "").toLowerCase();
+    const s = String(row[2] || "").toLowerCase();
+    const side = String(row[3] || "").toLowerCase();
+    if (!((t === "draw_no_bet" || t === "dnb") && (s === "full_time" || s === "ft"))) continue;
+    const odd = num(row[5]) ?? num(row[4]);
+    if (side === "h" || side === "home" || side === "1") dnbH = dnbH ?? odd;
+    if (side === "a" || side === "away" || side === "2") dnbA = dnbA ?? odd;
+  }
+
+  return {
+    ahLine, ahH_o, ahH_c, ahA_o, ahA_c,
+    ouLine, ouO_o, ouO_c, ouU_o, ouU_c,
+    dc1x, dc12, dcx2,
+    dnbH, dnbA,
+  };
 }
 
 function bmOptionsFromFixture(fx: FixtureRow | null | undefined): BmOption[] {
@@ -385,6 +547,7 @@ export function HandballPanel({
           const bmName = availableBms.find((b) => b.id === bmId)?.name || `BM ${bmId}`;
           const sim = simResults[bmId] ?? { status: "idle" as const };
           const fx1x2 = extractFixture1x2ForBm(selectedFixture?.odds, Number(bmId));
+          const fxMk = extractFixtureMarkets(selectedFixture?.odds, Number(bmId));
           const stats = sim.status === "done" ? statsFor(sim.rows) : null;
 
           return (
@@ -412,6 +575,17 @@ export function HandballPanel({
                           <th className={styles.num}>X C</th>
                           <th className={styles.num}>2 O</th>
                           <th className={styles.num}>2 C</th>
+                          <th className={styles.num}>AH</th>
+                          <th className={styles.num}>AH H</th>
+                          <th className={styles.num}>AH A</th>
+                          <th className={styles.num}>OU</th>
+                          <th className={styles.num}>O</th>
+                          <th className={styles.num}>U</th>
+                          <th className={styles.num}>1X</th>
+                          <th className={styles.num}>12</th>
+                          <th className={styles.num}>X2</th>
+                          <th className={styles.num}>DNB H</th>
+                          <th className={styles.num}>DNB A</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -430,6 +604,17 @@ export function HandballPanel({
                           <td className={styles.num}>{fmtOdd(fx1x2.draw.c)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.away.o)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.away.c)}</td>
+                          <td className={styles.num}>{fxMk.ahLine != null ? fxMk.ahLine : "—"}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.ahH_c ?? fxMk.ahH_o)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.ahA_c ?? fxMk.ahA_o)}</td>
+                          <td className={styles.num}>{fxMk.ouLine != null ? fxMk.ouLine : "—"}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.ouO_c ?? fxMk.ouO_o)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.ouU_c ?? fxMk.ouU_o)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.dc1x)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.dc12)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.dcx2)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.dnbH)}</td>
+                          <td className={styles.num}>{fmtOdd(fxMk.dnbA)}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -487,6 +672,17 @@ export function HandballPanel({
                             <th className={styles.num}>X C</th>
                             <th className={styles.num}>2 O</th>
                             <th className={styles.num}>2 C</th>
+                            <th className={styles.num}>AH</th>
+                            <th className={styles.num}>AH H</th>
+                            <th className={styles.num}>AH A</th>
+                            <th className={styles.num}>OU</th>
+                            <th className={styles.num}>O</th>
+                            <th className={styles.num}>U</th>
+                            <th className={styles.num}>1X</th>
+                            <th className={styles.num}>12</th>
+                            <th className={styles.num}>X2</th>
+                            <th className={styles.num}>DNB H</th>
+                            <th className={styles.num}>DNB A</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -502,13 +698,13 @@ export function HandballPanel({
                             return (
                               <tr key={r.id}>
                                 <td>archive</td>
-                                <td>{fmtDate(r.ts)}</td>
-                                <td>{fmtTime(r.ts)}</td>
+                                <td>{r.date || fmtDate(r.ts)}</td>
+                                <td>{r.time || fmtTime(r.ts)}</td>
                                 <td>{r.season}</td>
                                 <td>{r.home}</td>
                                 <td>{r.away}</td>
                                 <td className={styles.num}>
-                                  {r.hs != null && r.as != null ? `${r.hs}-${r.as}` : "—"}
+                                  {r.ft || (r.hs != null && r.as != null ? `${r.hs}-${r.as}` : "—")}
                                 </td>
                                 <td>
                                   {res ? (
@@ -525,6 +721,17 @@ export function HandballPanel({
                                 <td className={styles.num}>{fmtOdd(cx)}</td>
                                 <td className={styles.num}>{fmtOdd(o2)}</td>
                                 <td className={styles.num}>{fmtOdd(c2)}</td>
+                                <td className={styles.num}>{r.ahLine != null ? r.ahLine : "—"}</td>
+                                <td className={styles.num}>{fmtOdd(r.ahH_c ?? r.ahH_o)}</td>
+                                <td className={styles.num}>{fmtOdd(r.ahA_c ?? r.ahA_o)}</td>
+                                <td className={styles.num}>{r.ouLine != null ? r.ouLine : "—"}</td>
+                                <td className={styles.num}>{fmtOdd(r.ouO_c ?? r.ouO_o)}</td>
+                                <td className={styles.num}>{fmtOdd(r.ouU_c ?? r.ouU_o)}</td>
+                                <td className={styles.num}>{fmtOdd(r.dc1x)}</td>
+                                <td className={styles.num}>{fmtOdd(r.dc12)}</td>
+                                <td className={styles.num}>{fmtOdd(r.dcx2)}</td>
+                                <td className={styles.num}>{fmtOdd(r.dnbH)}</td>
+                                <td className={styles.num}>{fmtOdd(r.dnbA)}</td>
                               </tr>
                             );
                           })}
