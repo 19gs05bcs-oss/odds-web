@@ -26,6 +26,12 @@ type Similar = {
     draw: OddsPair;
     away: OddsPair;
   };
+  o1?: number | null;
+  c1?: number | null;
+  ox?: number | null;
+  cx?: number | null;
+  o2?: number | null;
+  c2?: number | null;
 };
 
 type SimState =
@@ -36,18 +42,25 @@ type SimState =
 
 type BmOption = { id: string; name: string };
 
-const fmtDate = (ts: number) => {
-  const d = new Date(ts < 1e12 ? ts * 1000 : ts);
+const fmtDate = (ts: number | string | undefined) => {
+  if (ts == null || ts === "") return "—";
+  if (typeof ts === "string" && /^\d{4}-\d{2}-\d{2}/.test(ts)) return ts.slice(0, 10);
+  const n = Number(ts);
+  const d = new Date(n < 1e12 ? n * 1000 : n);
   return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 10);
 };
 
-const fmtTime = (ts: number) => {
-  const d = new Date(ts < 1e12 ? ts * 1000 : ts);
+const fmtTime = (ts: number | string | undefined) => {
+  if (ts == null || ts === "") return "—";
+  if (typeof ts === "string" && ts.includes("T")) return ts.slice(11, 16);
+  const n = Number(ts);
+  const d = new Date(n < 1e12 ? n * 1000 : n);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toISOString().slice(11, 16);
 };
 
 function ftResult(hs: string | null, as_: string | null): "Home" | "Draw" | "Away" | "" {
+  if (hs == null || as_ == null || hs === "" || as_ === "") return "";
   const h = Number(hs);
   const a = Number(as_);
   if (!Number.isFinite(h) || !Number.isFinite(a)) return "";
@@ -66,55 +79,40 @@ function fmtOdd(v: number | null | undefined): string {
   return formatOdds(v);
 }
 
-function sideLabel(side: string): string {
-  const s = String(side || "").toLowerCase();
-  if (s === "home" || s === "1" || s === "h") return "Home";
-  if (s === "draw" || s === "x" || s === "d") return "Draw";
-  if (s === "away" || s === "2" || s === "a") return "Away";
-  if (s.startsWith("over") || s === "o") return side.replace(/^o(ver)?:?/i, "Over ");
-  if (s.startsWith("under") || s === "u") return side.replace(/^u(nder)?:?/i, "Under ");
-  if (s.startsWith("h:")) return `Home ${s.slice(2)}`;
-  if (s.startsWith("a:")) return `Away ${s.slice(2)}`;
-  return side;
-}
+/** Seçili bookmaker için 1X2 açılış/kapanış oranlarını çıkarır (tek satırlık fikstür tablosu için). */
+function extractFixture1x2ForBm(odds: CompactOddsRow[] | null | undefined, bmId: number) {
+  const out = {
+    home: { o: null as number | null, c: null as number | null },
+    draw: { o: null as number | null, c: null as number | null },
+    away: { o: null as number | null, c: null as number | null },
+  };
+  if (!odds?.length) return out;
 
-function marketTitle(type: string, scope: string): string {
-  const t = String(type || "").toLowerCase();
-  const sc = String(scope || "").toLowerCase();
-  const scopeLabel =
-    sc === "full_time" || sc === "ft" ? "FT" : sc === "1st_half" || sc === "1h" ? "1H" : sc;
-  if (t === "1x2" || t === "match_odds") return `1X2 ${scopeLabel}`;
-  if (t === "ou" || t === "over_under" || t === "totals") return `O/U ${scopeLabel}`;
-  if (t === "ah" || t === "asian_handicap") return `AH ${scopeLabel}`;
-  if (t === "dc" || t === "double_chance") return `DC ${scopeLabel}`;
-  return `${type} ${scopeLabel}`.trim();
-}
+  for (const row of odds) {
+    if (Number(row[0]) !== bmId) continue;
+    const t = String(row[1] || "").toLowerCase();
+    const sc = String(row[2] || "").toLowerCase();
+    const side = String(row[3] || "").toLowerCase();
 
-/** Compact odds → grouped display for one bookmaker. */
-function groupOddsForBm(odds: CompactOddsRow[] | null | undefined, bmId: number) {
-  if (!odds?.length) return [] as { title: string; selections: { name: string; open: number | null; close: number | null }[] }[];
-  const rows = odds.filter((r) => Number(r[0]) === bmId);
-  const map = new Map<string, { name: string; open: number | null; close: number | null }[]>();
-  for (const row of rows) {
-    const title = marketTitle(String(row[1]), String(row[2]));
-    const list = map.get(title) ?? [];
-    list.push({
-      name: sideLabel(String(row[3])),
-      open: row[4] != null && Number(row[4]) > 1 ? Number(row[4]) : null,
-      close: row[5] != null && Number(row[5]) > 1 ? Number(row[5]) : null,
-    });
-    map.set(title, list);
+    if ((t !== "1x2" && t !== "home_draw_away" && t !== "match_odds") || (sc !== "full_time" && sc !== "ft")) {
+      continue;
+    }
+
+    const op = row[4] != null && Number(row[4]) > 1 ? Number(row[4]) : null;
+    const cl = row[5] != null && Number(row[5]) > 1 ? Number(row[5]) : null;
+
+    if (side === "home" || side === "1" || side === "h") {
+      if (out.home.o == null) out.home.o = op ?? cl;
+      if (out.home.c == null) out.home.c = cl ?? op;
+    } else if (side === "draw" || side === "x" || side === "d") {
+      if (out.draw.o == null) out.draw.o = op ?? cl;
+      if (out.draw.c == null) out.draw.c = cl ?? op;
+    } else if (side === "away" || side === "2" || side === "a") {
+      if (out.away.o == null) out.away.o = op ?? cl;
+      if (out.away.c == null) out.away.c = cl ?? op;
+    }
   }
-  // Prefer common markets first
-  const order = ["1X2 FT", "O/U FT", "AH FT", "1X2 1H", "O/U 1H", "AH 1H"];
-  return [...map.entries()]
-    .sort((a, b) => {
-      const ia = order.indexOf(a[0]);
-      const ib = order.indexOf(b[0]);
-      if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-      return a[0].localeCompare(b[0]);
-    })
-    .map(([title, selections]) => ({ title, selections }));
+  return out;
 }
 
 function bmOptionsFromFixture(fx: FixtureRow | null | undefined): BmOption[] {
@@ -236,6 +234,7 @@ export function HandballPanel({
       if (!selectedId) return;
       const fx = fixtures.find((f) => f.match_id === selectedId);
       const odds = fx?.odds ?? null;
+      const bmName = bmOptionsFromFixture(fx).find((b) => b.id === bmId)?.name || "";
       setSimResults((prev) => ({ ...prev, [bmId]: { status: "loading" } }));
       try {
         const res = odds?.length
@@ -247,10 +246,11 @@ export function HandballPanel({
                 id: selectedId,
                 odds,
                 bookmakerId: Number(bmId),
+                bm: bmName,
               }),
             })
           : await fetch(
-              `/api/handball/similar?id=${encodeURIComponent(selectedId)}&bookmakerId=${encodeURIComponent(bmId)}`,
+              `/api/handball/similar?id=${encodeURIComponent(selectedId)}&bookmakerId=${encodeURIComponent(bmId)}&bm=${encodeURIComponent(bmName)}`,
               { cache: "no-store" },
             );
         const j = await res.json();
@@ -263,10 +263,14 @@ export function HandballPanel({
           return;
         }
         if (!res.ok) throw new Error(j?.error || j?.message || `HTTP ${res.status}`);
-        if (!Array.isArray(j)) throw new Error(j?.message || "Beklenmeyen yanıt");
+
+        // Hem düz dizi [...] hem { matches: [...] } yanıtlarını destekle
+        const list = Array.isArray(j) ? j : Array.isArray(j?.matches) ? j.matches : null;
+        if (!list) throw new Error(j?.message || "Beklenmeyen yanıt");
+
         setSimResults((prev) => ({
           ...prev,
-          [bmId]: { status: "done", rows: j as Similar[] },
+          [bmId]: { status: "done", rows: list as Similar[] },
         }));
       } catch (e) {
         setSimResults((prev) => ({
@@ -380,46 +384,58 @@ export function HandballPanel({
         {referenceBms.map((bmId) => {
           const bmName = availableBms.find((b) => b.id === bmId)?.name || `BM ${bmId}`;
           const sim = simResults[bmId] ?? { status: "idle" as const };
-          const markets = groupOddsForBm(selectedFixture?.odds, Number(bmId));
+          const fx1x2 = extractFixture1x2ForBm(selectedFixture?.odds, Number(bmId));
           const stats = sim.status === "done" ? statsFor(sim.rows) : null;
 
           return (
             <section key={bmId} className={saStyles.card}>
-              <h3>
-                {bmName} — similar matches
-              </h3>
+              <h3>{bmName} — similar matches</h3>
 
-              {markets.length > 0 ? (
+              {selectedFixture ? (
                 <div className={saStyles.bmOpenedOdds}>
                   <p className={saStyles.cardLead}>{bmName} — odds for this match</p>
-                  <div className={styles.oddsGrid}>
-                    {markets.map((m) => (
-                      <div key={m.title} className={styles.oddsMarket}>
-                        <div className={styles.oddsMarketTitle}>{m.title}</div>
-                        <div className={styles.oddsSels}>
-                          {m.selections.map((s, i) => (
-                            <div key={`${s.name}-${i}`} className={styles.oddsSel}>
-                              <span className={styles.oddsName}>{s.name}</span>
-                              <span className={styles.oddsPrices}>
-                                {s.open != null && (
-                                  <span className={styles.oddsOpen} title="Opening">
-                                    {formatOdds(s.open)}
-                                  </span>
-                                )}
-                                <span className={styles.oddsClose} title="Current">
-                                  {formatOdds(s.close)}
-                                </span>
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                  <div className={styles.tableWrap}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr>
+                          <th>SRC</th>
+                          <th>DATE</th>
+                          <th>TIME</th>
+                          <th>LEAGUE</th>
+                          <th>HOME</th>
+                          <th>AWAY</th>
+                          <th className={styles.num}>FT</th>
+                          <th>FT RES</th>
+                          <th className={styles.num}>1 O</th>
+                          <th className={styles.num}>1 C</th>
+                          <th className={styles.num}>X O</th>
+                          <th className={styles.num}>X C</th>
+                          <th className={styles.num}>2 O</th>
+                          <th className={styles.num}>2 C</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>fixture</td>
+                          <td>{fmtDate((selectedFixture as any).match_time ?? (selectedFixture as any).ts ?? date)}</td>
+                          <td>{fmtTime((selectedFixture as any).match_time ?? (selectedFixture as any).ts)}</td>
+                          <td>{(selectedFixture as any).league || (selectedFixture as any).season || "—"}</td>
+                          <td>{(selectedFixture as any).home_team || (selectedFixture as any).home || "—"}</td>
+                          <td>{(selectedFixture as any).away_team || (selectedFixture as any).away || "—"}</td>
+                          <td className={styles.num}>—</td>
+                          <td>—</td>
+                          <td className={styles.num}>{fmtOdd(fx1x2.home.o)}</td>
+                          <td className={styles.num}>{fmtOdd(fx1x2.home.c)}</td>
+                          <td className={styles.num}>{fmtOdd(fx1x2.draw.o)}</td>
+                          <td className={styles.num}>{fmtOdd(fx1x2.draw.c)}</td>
+                          <td className={styles.num}>{fmtOdd(fx1x2.away.o)}</td>
+                          <td className={styles.num}>{fmtOdd(fx1x2.away.c)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              ) : (
-                <p className={saStyles.cardLead}>No odds rows for {bmName} on this match.</p>
-              )}
+              ) : null}
 
               <p className={saStyles.cardLead}>
                 Weighted similarity across markets this BM quotes for the match (1X2, O/U, …). Neighbours ranked by odds profile.
@@ -477,6 +493,12 @@ export function HandballPanel({
                           {sim.rows.map((r) => {
                             const res = ftResult(r.hs, r.as);
                             const o = r.odds1x2;
+                            const o1 = o?.home?.o ?? r.o1;
+                            const c1 = o?.home?.c ?? r.c1;
+                            const ox = o?.draw?.o ?? r.ox;
+                            const cx = o?.draw?.c ?? r.cx;
+                            const o2 = o?.away?.o ?? r.o2;
+                            const c2 = o?.away?.c ?? r.c2;
                             return (
                               <tr key={r.id}>
                                 <td>archive</td>
@@ -497,12 +519,12 @@ export function HandballPanel({
                                     "—"
                                   )}
                                 </td>
-                                <td className={styles.num}>{fmtOdd(o?.home?.o)}</td>
-                                <td className={styles.num}>{fmtOdd(o?.home?.c)}</td>
-                                <td className={styles.num}>{fmtOdd(o?.draw?.o)}</td>
-                                <td className={styles.num}>{fmtOdd(o?.draw?.c)}</td>
-                                <td className={styles.num}>{fmtOdd(o?.away?.o)}</td>
-                                <td className={styles.num}>{fmtOdd(o?.away?.c)}</td>
+                                <td className={styles.num}>{fmtOdd(o1)}</td>
+                                <td className={styles.num}>{fmtOdd(c1)}</td>
+                                <td className={styles.num}>{fmtOdd(ox)}</td>
+                                <td className={styles.num}>{fmtOdd(cx)}</td>
+                                <td className={styles.num}>{fmtOdd(o2)}</td>
+                                <td className={styles.num}>{fmtOdd(c2)}</td>
                               </tr>
                             );
                           })}
