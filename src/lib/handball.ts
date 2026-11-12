@@ -290,39 +290,44 @@ export async function similar(
   k = 10,
   oddsOverride?: CompactOddsRow[] | null,
   bookmakerId?: number | null,
-) {
+): Promise<SimilarRow[] | { error: string; message: string }> {
   const { matches, dim: D, vec, index, featureKeys, useProbCols } = await load();
   const i = index.get(eventId);
+
+  let nearest: (HandballMeta & { distance: number })[];
 
   // Arşivde varsa ve özel BM / oddsOverride yoksa precomputed vektörü kullan
   if (i !== undefined && !oddsOverride?.length && bookmakerId == null) {
     const q = new Float32Array(D);
     for (let c = 0; c < D; c++) q[c] = vec[i * D + c];
-    return nearestFromVector(q, matches, D, vec, k, eventId);
+    nearest = nearestFromVector(q, matches, D, vec, k, eventId);
+  } else {
+    let odds = oddsOverride ?? null;
+    if (!odds?.length) odds = await fetchFixtureHOdds(eventId);
+    if (!odds?.length) {
+      return {
+        error: "not_in_archive_no_odds",
+        message:
+          "Bu maç R2 arşivinde yok ve Supabase fixtureh içinde kullanılabilir oran bulunamadı. Benzer maç için oranlar gerekli.",
+      } as const;
+    }
+
+    const q = buildFeatureVector(odds, featureKeys, D, useProbCols, bookmakerId);
+    let nonzero = 0;
+    for (let c = 0; c < D; c++) if (q[c] !== 0) nonzero++;
+    if (nonzero === 0) {
+      return {
+        error: "odds_features_empty",
+        message:
+          "Oranlar var ama feature anahtarlarıyla eşleşmedi (type/scope/side isimleri farklı olabilir). meta.json features/cols listesini kontrol edin.",
+      } as const;
+    }
+
+    nearest = nearestFromVector(q, matches, D, vec, k, i !== undefined ? eventId : undefined);
   }
 
-  let odds = oddsOverride ?? null;
-  if (!odds?.length) odds = await fetchFixtureHOdds(eventId);
-  if (!odds?.length) {
-    return {
-      error: "not_in_archive_no_odds",
-      message:
-        "Bu maç R2 arşivinde yok ve Supabase fixtureh içinde kullanılabilir oran bulunamadı. Benzer maç için oranlar gerekli.",
-    } as const;
-  }
-
-  const q = buildFeatureVector(odds, featureKeys, D, useProbCols, bookmakerId);
-  let nonzero = 0;
-  for (let c = 0; c < D; c++) if (q[c] !== 0) nonzero++;
-  if (nonzero === 0) {
-    return {
-      error: "odds_features_empty",
-      message:
-        "Oranlar var ama feature anahtarlarıyla eşleşmedi (type/scope/side isimleri farklı olabilir). meta.json features/cols listesini kontrol edin.",
-    } as const;
-  }
-
-  return nearestFromVector(q, matches, D, vec, k, i !== undefined ? eventId : undefined);
+  // Always enrich with 1X2 odds for the reference BM so the UI can show football-style table
+  return enrichSimilarWithOdds(nearest, bookmakerId ?? null);
 }
 
 export async function searchMatches(q: string, limit = 20) {
@@ -337,7 +342,8 @@ export async function searchMatches(q: string, limit = 20) {
 }
 
 const rawCache = new Map<string, any>();
-export async function matchDetail(eventId: string) {
+/** Load raw file for a match (cached). Returns null if not in archive. */
+async function loadRawForMatch(eventId: string): Promise<{ meta: HandballMeta; raw: any; match: any } | null> {
   const { matches, index } = await load();
   const i = index.get(eventId);
   if (i === undefined) return null;
@@ -350,6 +356,13 @@ export async function matchDetail(eventId: string) {
   }
   const m = d.matches.find((x: any) => x.match_id === eventId);
   if (!m) return null;
+  return { meta: matches[i], raw: d, match: m };
+}
+
+export async function matchDetail(eventId: string) {
+  const loaded = await loadRawForMatch(eventId);
+  if (!loaded) return null;
+  const { meta, raw: d, match: m } = loaded;
   const odds = m.odds.map(([bid, type, scope, side, opening, current, active]: any[]) => ({
     bookmaker: d.bookmakers[String(bid)] ?? String(bid),
     type,
@@ -359,5 +372,73 @@ export async function matchDetail(eventId: string) {
     current: Number(current),
     active: !!active,
   }));
-  return { ...matches[i], odds };
+  return { ...meta, odds };
+}
+
+/** Extract 1X2 FT open/close for a numeric bookmaker id from a raw match. */
+function extract1x2ForBm(
+  matchOdds: any[],
+  bookmakers: Record<string, string>,
+  bookmakerId: number | null,
+): { home: { o: number | null; c: number | null }; draw: { o: number | null; c: number | null }; away: { o: number | null; c: number | null } } {
+  const empty = { o: null as number | null, c: null as number | null };
+  const out = { home: { ...empty }, draw: { ...empty }, away: { ...empty } };
+  if (!Array.isArray(matchOdds)) return out;
+
+  for (const row of matchOdds) {
+    const [bid, type, scope, side, opening, current] = row;
+    if (bookmakerId != null && Number(bid) !== bookmakerId) continue;
+    const t = String(type || "").toLowerCase();
+    const sc = String(scope || "").toLowerCase();
+    if (!(t === "home_draw_away" || t === "1x2" || t === "match_odds")) continue;
+    if (!(sc === "full_time" || sc === "ft" || sc === "")) continue;
+    const sideL = String(side || "").toLowerCase();
+    const o = opening === "" || opening == null ? null : Number(opening);
+    const c = current == null || current === "" ? null : Number(current);
+    const oo = o != null && Number.isFinite(o) && o >= 1.01 ? o : null;
+    const cc = c != null && Number.isFinite(c) && c >= 1.01 ? c : null;
+    if (sideL === "h" || sideL === "home" || sideL === "1") {
+      out.home.o = oo;
+      out.home.c = cc;
+    } else if (sideL === "d" || sideL === "draw" || sideL === "x") {
+      out.draw.o = oo;
+      out.draw.c = cc;
+    } else if (sideL === "a" || sideL === "away" || sideL === "2") {
+      out.away.o = oo;
+      out.away.c = cc;
+    }
+  }
+  return out;
+}
+
+export type SimilarRow = HandballMeta & {
+  distance: number;
+  /** 1X2 FT odds for the reference BM (if available) */
+  odds1x2?: {
+    home: { o: number | null; c: number | null };
+    draw: { o: number | null; c: number | null };
+    away: { o: number | null; c: number | null };
+  };
+};
+
+/** Enrich nearest matches with 1X2 odds for the given BM (loads raw files, cached). */
+export async function enrichSimilarWithOdds(
+  rows: (HandballMeta & { distance: number })[],
+  bookmakerId: number | null,
+): Promise<SimilarRow[]> {
+  const out: SimilarRow[] = [];
+  for (const r of rows) {
+    try {
+      const loaded = await loadRawForMatch(r.id);
+      if (!loaded) {
+        out.push({ ...r });
+        continue;
+      }
+      const odds1x2 = extract1x2ForBm(loaded.match.odds, loaded.raw.bookmakers || {}, bookmakerId);
+      out.push({ ...r, odds1x2 });
+    } catch {
+      out.push({ ...r });
+    }
+  }
+  return out;
 }

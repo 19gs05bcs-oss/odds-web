@@ -10,6 +10,8 @@ import filterStyles from "@/components/AnalyzeFilters.module.css";
 import saStyles from "./SmartAnalysisClient.module.css";
 import styles from "./HandballPanel.module.css";
 
+type OddsPair = { o: number | null; c: number | null };
+
 type Similar = {
   id: string;
   season: string;
@@ -19,6 +21,11 @@ type Similar = {
   hs: string | null;
   as: string | null;
   distance: number;
+  odds1x2?: {
+    home: OddsPair;
+    draw: OddsPair;
+    away: OddsPair;
+  };
 };
 
 type SimState =
@@ -33,6 +40,31 @@ const fmtDate = (ts: number) => {
   const d = new Date(ts < 1e12 ? ts * 1000 : ts);
   return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 10);
 };
+
+const fmtTime = (ts: number) => {
+  const d = new Date(ts < 1e12 ? ts * 1000 : ts);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toISOString().slice(11, 16);
+};
+
+function ftResult(hs: string | null, as_: string | null): "Home" | "Draw" | "Away" | "" {
+  const h = Number(hs);
+  const a = Number(as_);
+  if (!Number.isFinite(h) || !Number.isFinite(a)) return "";
+  return h > a ? "Home" : h < a ? "Away" : "Draw";
+}
+
+function resClass(res: string): string {
+  if (res === "Home") return styles.resHome;
+  if (res === "Away") return styles.resAway;
+  if (res === "Draw") return styles.resDraw;
+  return "";
+}
+
+function fmtOdd(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v) || v < 1.01) return "—";
+  return formatOdds(v);
+}
 
 function sideLabel(side: string): string {
   const s = String(side || "").toLowerCase();
@@ -390,7 +422,7 @@ export function HandballPanel({
               )}
 
               <p className={saStyles.cardLead}>
-                Similarity from this BM&apos;s odds profile against the handball archive.
+                Weighted similarity across markets this BM quotes for the match (1X2, O/U, …). Neighbours ranked by odds profile.
               </p>
 
               {sim.status === "idle" || sim.status === "loading" ? (
@@ -425,27 +457,55 @@ export function HandballPanel({
                       <table className={styles.table}>
                         <thead>
                           <tr>
-                            <th>Date</th>
-                            <th>Season</th>
-                            <th>Match</th>
-                            <th className={styles.num}>Score</th>
-                            <th className={styles.num}>Distance</th>
+                            <th>SRC</th>
+                            <th>DATE</th>
+                            <th>TIME</th>
+                            <th>SEASON</th>
+                            <th>HOME</th>
+                            <th>AWAY</th>
+                            <th className={styles.num}>FT</th>
+                            <th>FT RES</th>
+                            <th className={styles.num}>1 O</th>
+                            <th className={styles.num}>1 C</th>
+                            <th className={styles.num}>X O</th>
+                            <th className={styles.num}>X C</th>
+                            <th className={styles.num}>2 O</th>
+                            <th className={styles.num}>2 C</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {sim.rows.map((r) => (
-                            <tr key={r.id}>
-                              <td>{fmtDate(r.ts)}</td>
-                              <td>{r.season}</td>
-                              <td>
-                                {r.home} – {r.away}
-                              </td>
-                              <td className={styles.num}>
-                                {r.hs}-{r.as}
-                              </td>
-                              <td className={styles.num}>{r.distance.toFixed(3)}</td>
-                            </tr>
-                          ))}
+                          {sim.rows.map((r) => {
+                            const res = ftResult(r.hs, r.as);
+                            const o = r.odds1x2;
+                            return (
+                              <tr key={r.id}>
+                                <td>archive</td>
+                                <td>{fmtDate(r.ts)}</td>
+                                <td>{fmtTime(r.ts)}</td>
+                                <td>{r.season}</td>
+                                <td>{r.home}</td>
+                                <td>{r.away}</td>
+                                <td className={styles.num}>
+                                  {r.hs != null && r.as != null ? `${r.hs}-${r.as}` : "—"}
+                                </td>
+                                <td>
+                                  {res ? (
+                                    <span className={`${styles.resBadge} ${resClass(res)}`}>
+                                      {res}
+                                    </span>
+                                  ) : (
+                                    "—"
+                                  )}
+                                </td>
+                                <td className={styles.num}>{fmtOdd(o?.home?.o)}</td>
+                                <td className={styles.num}>{fmtOdd(o?.home?.c)}</td>
+                                <td className={styles.num}>{fmtOdd(o?.draw?.o)}</td>
+                                <td className={styles.num}>{fmtOdd(o?.draw?.c)}</td>
+                                <td className={styles.num}>{fmtOdd(o?.away?.o)}</td>
+                                <td className={styles.num}>{fmtOdd(o?.away?.c)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
