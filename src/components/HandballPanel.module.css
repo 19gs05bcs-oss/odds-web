@@ -1,8 +1,99 @@
-.panel { margin-top: 1.25rem; }
-.msg { margin: 0.75rem 0; font-size: 0.9rem; opacity: 0.85; }
-.err { color: #b91c1c; }
-.summary { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; margin: 0.75rem 0; font-size: 0.9rem; }
-.tableWrap { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-.table th, .table td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid rgba(128,128,128,0.25); white-space: nowrap; }
-.num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.panel {
+  margin-top: 1.25rem;
+}
+
+.msg {
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.err {
+  color: #b91c1c;
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  margin-bottom: 0.75rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.table th,
+.table td {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+  white-space: nowrap;
+}
+
+.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.oddsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.5rem;
+}
+
+.oddsMarket {
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+  border-radius: 10px;
+  padding: 0.5rem 0.65rem;
+  background: color-mix(in srgb, var(--ink, #111) 3%, transparent);
+}
+
+.oddsMarketTitle {
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+  opacity: 0.9;
+}
+
+.oddsSels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.oddsSel {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.oddsName {
+  opacity: 0.85;
+}
+
+.oddsPrices {
+  display: inline-flex;
+  gap: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.oddsOpen {
+  opacity: 0.55;
+  font-size: 0.78rem;
+}
+
+.oddsClose {
+  font-weight: 650;
+}

@@ -151,22 +151,26 @@ export function buildFeatureVector(
   featureKeys: string[],
   dim: number,
   useProbCols = false,
+  bookmakerId?: number | null,
 ): Float32Array {
   const out = new Float32Array(dim);
   if (!odds?.length) return out;
 
-  // En fazla satırı olan bookmaker'ı seç
-  const counts = new Map<number, number>();
-  for (const row of odds) {
-    const bid = row[0];
-    counts.set(bid, (counts.get(bid) ?? 0) + 1);
-  }
-  let bestBm = -1;
-  let bestN = -1;
-  for (const [bid, n] of counts) {
-    if (n > bestN) {
-      bestN = n;
-      bestBm = bid;
+  // Seçili bookmaker varsa onu kullan; yoksa en fazla satırı olanı seç
+  let bestBm = bookmakerId != null && Number.isFinite(bookmakerId) ? Number(bookmakerId) : -1;
+  if (bestBm < 0 || !odds.some((r) => r[0] === bestBm)) {
+    const counts = new Map<number, number>();
+    for (const row of odds) {
+      const bid = row[0];
+      counts.set(bid, (counts.get(bid) ?? 0) + 1);
+    }
+    bestBm = -1;
+    let bestN = -1;
+    for (const [bid, n] of counts) {
+      if (n > bestN) {
+        bestN = n;
+        bestBm = bid;
+      }
     }
   }
 
@@ -281,11 +285,17 @@ function nearestFromVector(
   return sc.slice(0, k).map(([d, j]) => ({ ...matches[j], distance: Math.sqrt(d) }));
 }
 
-export async function similar(eventId: string, k = 10, oddsOverride?: CompactOddsRow[] | null) {
+export async function similar(
+  eventId: string,
+  k = 10,
+  oddsOverride?: CompactOddsRow[] | null,
+  bookmakerId?: number | null,
+) {
   const { matches, dim: D, vec, index, featureKeys, useProbCols } = await load();
   const i = index.get(eventId);
 
-  if (i !== undefined) {
+  // Arşivde varsa ve özel BM / oddsOverride yoksa precomputed vektörü kullan
+  if (i !== undefined && !oddsOverride?.length && bookmakerId == null) {
     const q = new Float32Array(D);
     for (let c = 0; c < D; c++) q[c] = vec[i * D + c];
     return nearestFromVector(q, matches, D, vec, k, eventId);
@@ -301,7 +311,7 @@ export async function similar(eventId: string, k = 10, oddsOverride?: CompactOdd
     } as const;
   }
 
-  const q = buildFeatureVector(odds, featureKeys, D, useProbCols);
+  const q = buildFeatureVector(odds, featureKeys, D, useProbCols, bookmakerId);
   let nonzero = 0;
   for (let c = 0; c < D; c++) if (q[c] !== 0) nonzero++;
   if (nonzero === 0) {
@@ -312,7 +322,7 @@ export async function similar(eventId: string, k = 10, oddsOverride?: CompactOdd
     } as const;
   }
 
-  return nearestFromVector(q, matches, D, vec, k);
+  return nearestFromVector(q, matches, D, vec, k, i !== undefined ? eventId : undefined);
 }
 
 export async function searchMatches(q: string, limit = 20) {
