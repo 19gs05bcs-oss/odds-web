@@ -135,25 +135,25 @@ async function loadRawSeason(file: string) {
   let d = rawCache.get(file);
   if (d) return d;
 
-  // Önce raw/, yoksa kök dene (yükleme hatası için)
+  // R2'de raw/ klasörü yok — dosyalar bucket kökünde
+  // Önce kök, yoksa raw/ dene (geriye uyumluluk)
   let buf: Buffer;
-  let usedKey = `raw/${file}`;
+  let usedKey = file;
   try {
     buf = await get(usedKey);
   } catch (e1: any) {
     try {
-      usedKey = file;
+      usedKey = `raw/${file}`;
       buf = await get(usedKey);
     } catch (e2: any) {
       throw new Error(
-        `Sezon dosyası bulunamadı. Denenen keyler: raw/${file}, ${file}. Son hata: ${e2?.message || e2}`,
+        `Sezon dosyası bulunamadı. Denenen keyler: ${file}, raw/${file}. Son hata: ${e2?.message || e2}`,
       );
     }
   }
 
   let text: string;
   try {
-    // gzip değilse düz JSON da kabul et
     try {
       text = gunzipSync(buf).toString("utf8");
     } catch {
