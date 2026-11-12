@@ -45,8 +45,8 @@ type Store = {
   vec: Float32Array;
   index: Map<string, number>;
   haystack: string[];
-  /** Özellik anahtarları: "type|scope|side" — features.bin ile aynı sıra. meta.json'da yoksa DEFAULT_FEATURES. */
   featureKeys: string[];
+  useProbCols: boolean;
 };
 
 const fold = (s: string) =>
@@ -56,11 +56,6 @@ const fold = (s: string) =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
-/**
- * R2 features.bin üretiminde kullanılan varsayılan pazar sırası.
- * meta.json içinde `features` / `feature_keys` varsa o kullanılır (yeniden build gerekmez).
- * Yoksa bu liste dim kadar kesilir/pad edilir — indeksi aynı script ile ürettiyseniz eşleşir.
- */
 const DEFAULT_FEATURES = [
   "1x2|full_time|home",
   "1x2|full_time|draw",
@@ -76,28 +71,34 @@ const DEFAULT_FEATURES = [
   "ou|1st_half|under",
 ];
 
-// Benzerlik verisi: bir kez indirilir, bellekte tutulur
 let cache: Promise<Store> | null = null;
 const load = () =>
   (cache ??= (async () => {
     const [m, b] = await Promise.all([get("meta.json"), get("features.bin")]);
     const meta = JSON.parse(m.toString());
     const matches = meta.matches as HandballMeta[];
-    const vec = new Float32Array(new Uint8Array(b).buffer); // kopya: hizalama güvenli
+    const vec = new Float32Array(new Uint8Array(b).buffer);
     const index = new Map<string, number>(matches.map((x, i) => [x.id, i]));
     const haystack = matches.map((x) => fold(`${x.home} ${x.away} ${x.season}`));
     const dim = meta.dim as number;
+
     const fromMeta =
       (Array.isArray(meta.features) && meta.features) ||
       (Array.isArray(meta.feature_keys) && meta.feature_keys) ||
+      (Array.isArray(meta.cols) && meta.cols) ||
       null;
+
     const featureKeys: string[] = fromMeta
       ? (fromMeta as string[]).map(String)
       : DEFAULT_FEATURES.slice(0, dim);
-    // dim ile anahtar sayısı uyuşmuyorsa pad / kes
+
     while (featureKeys.length < dim) featureKeys.push(`pad|${featureKeys.length}`);
     if (featureKeys.length > dim) featureKeys.length = dim;
-    return { matches, dim, vec, index, haystack, featureKeys };
+
+    // meta.json içinde cols (open_H, close_H, ah_line vb.) varsa probability + line modu aktif olur
+    const useProbCols = Array.isArray(meta.cols) && !meta.features && !meta.feature_keys;
+
+    return { matches, dim, vec, index, haystack, featureKeys, useProbCols };
   })().catch((e) => {
     cache = null;
     throw e;
@@ -106,26 +107,55 @@ const load = () =>
 const hasScore = (m: HandballMeta) =>
   m.hs != null && m.hs !== "" && m.as != null && m.as !== "";
 
-/** odds satırını feature key'e çevir (küçük harf, ayırıcı |). */
-function oddsKey(type: string, scope: string, side: string): string {
-  return `${String(type).toLowerCase()}|${String(scope).toLowerCase()}|${String(side).toLowerCase()}`;
+/** Canlı fixtureh oran anahtarlarını standart formata çevirir */
+function normalizeOddsKey(type: string, scope: string, side: string): string | null {
+  const t = String(type).toLowerCase();
+  const s = String(scope).toLowerCase();
+  const sideL = String(side).toLowerCase();
+
+  // 1X2
+  if (t === "home_draw_away" || t === "1x2") {
+    const sc = s === "full_time" ? "full_time" : s === "first_half" || s === "1st_half" ? "1st_half" : null;
+    if (!sc) return null;
+    if (sideL === "h" || sideL === "home") return `1x2|${sc}|home`;
+    if (sideL === "d" || sideL === "draw") return `1x2|${sc}|draw`;
+    if (sideL === "a" || sideL === "away") return `1x2|${sc}|away`;
+  }
+
+  // Over/Under
+  if (t === "over_under" || t === "ou") {
+    const sc = s === "full_time" ? "full_time" : s === "first_half" || s === "1st_half" ? "1st_half" : null;
+    if (!sc) return null;
+    if (sideL === "over" || sideL.startsWith("over:")) return `ou|${sc}|over`;
+    if (sideL === "under" || sideL.startsWith("under:")) return `ou|${sc}|under`;
+  }
+
+  // Asian Handicap
+  if (t === "asian_handicap" || t === "ah") {
+    const sc = s === "full_time" ? "full_time" : s === "first_half" || s === "1st_half" ? "1st_half" : null;
+    if (!sc) return null;
+    if (sideL === "home" || sideL.startsWith("h:") || sideL.startsWith("home:")) return `ah|${sc}|home`;
+    if (sideL === "away" || sideL.startsWith("a:") || sideL.startsWith("away:")) return `ah|${sc}|away`;
+  }
+
+  return null;
 }
 
 /**
  * Canlı / arşiv dışı maç için oranlardan sorgu vektörü üret.
- * - Tercihen tek bookmaker (en çok satırlı) kullanılır.
- * - Değer: log(current odds); eksik özellik 0.
- * features.bin ile aynı ölçekte olmalı (indeks script'i log-odds kullanıyorsa).
+ * - useProbCols = true ise: meta.cols (open_H, open_D, open_A, close_H, close_D, close_A, ah_line) formatında implied probability + line üretir.
+ * - useProbCols = false ise: log(current odds) formatında vektör üretir.
  */
 export function buildFeatureVector(
   odds: CompactOddsRow[],
   featureKeys: string[],
   dim: number,
+  useProbCols = false,
 ): Float32Array {
   const out = new Float32Array(dim);
   if (!odds?.length) return out;
 
-  // Bookmaker seç: en fazla satırı olan
+  // En fazla satırı olan bookmaker'ı seç
   const counts = new Map<number, number>();
   for (const row of odds) {
     const bid = row[0];
@@ -140,13 +170,66 @@ export function buildFeatureVector(
     }
   }
 
+  const bmRows = odds.filter((r) => r[0] === bestBm);
+
+  // Mod 1: meta.json'daki cols (open_H, close_H, ah_line vb.) ile implied probability + line
+  if (useProbCols) {
+    const vals = new Map<string, number>();
+
+    // 1X2 opening & closing implied probabilities (1 / odds)
+    for (const row of bmRows) {
+      const k = normalizeOddsKey(row[1], row[2], row[3]);
+      if (!k) continue;
+      const openOdd = row[4];
+      const closeOdd = row[5];
+
+      if (k === "1x2|full_time|home") {
+        if (openOdd && openOdd > 1 && !vals.has("open_H")) vals.set("open_H", 1 / openOdd);
+        if (closeOdd && closeOdd > 1 && !vals.has("close_H")) vals.set("close_H", 1 / closeOdd);
+      } else if (k === "1x2|full_time|draw") {
+        if (openOdd && openOdd > 1 && !vals.has("open_D")) vals.set("open_D", 1 / openOdd);
+        if (closeOdd && closeOdd > 1 && !vals.has("close_D")) vals.set("close_D", 1 / closeOdd);
+      } else if (k === "1x2|full_time|away") {
+        if (openOdd && openOdd > 1 && !vals.has("open_A")) vals.set("open_A", 1 / openOdd);
+        if (closeOdd && closeOdd > 1 && !vals.has("close_A")) vals.set("close_A", 1 / closeOdd);
+      }
+    }
+
+    // Ana AH çizgisini (oranları 2.00'ye en yakın olan ev sahibi handikapını) bul
+    let bestAhLine: number | null = null;
+    let bestDiff = Infinity;
+    for (const row of bmRows) {
+      const t = String(row[1]).toLowerCase();
+      const s = String(row[2]).toLowerCase();
+      const sideL = String(row[3]).toLowerCase();
+      if ((t === "asian_handicap" || t === "ah") && s === "full_time" && sideL.startsWith("h:")) {
+        const lineVal = Number(sideL.split(":")[1]);
+        const curOdd = row[5] ?? row[4];
+        if (Number.isFinite(lineVal) && curOdd && curOdd > 1) {
+          const diff = Math.abs(curOdd - 1.9);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            bestAhLine = lineVal;
+          }
+        }
+      }
+    }
+    if (bestAhLine != null) vals.set("ah_line", bestAhLine);
+
+    for (let c = 0; c < dim; c++) {
+      const v = vals.get(featureKeys[c]);
+      out[c] = v != null && Number.isFinite(v) ? v : 0;
+    }
+    return out;
+  }
+
+  // Mod 2: Standart log(current odds) vektörü
   const byKey = new Map<string, number>();
-  for (const row of odds) {
-    if (row[0] !== bestBm) continue;
+  for (const row of bmRows) {
     const cur = row[5];
     if (cur == null || !(cur > 1)) continue;
-    const k = oddsKey(row[1], row[2], row[3]);
-    // Aynı key birden fazla satırda varsa (farklı handicap/line) ilk geçerli değeri tut
+    const k = normalizeOddsKey(row[1], row[2], row[3]);
+    if (!k) continue;
     if (!byKey.has(k)) byKey.set(k, Math.log(cur));
   }
 
@@ -198,14 +281,8 @@ function nearestFromVector(
   return sc.slice(0, k).map(([d, j]) => ({ ...matches[j], distance: Math.sqrt(d) }));
 }
 
-/**
- * Benzer maçlar.
- * - match_id R2 indeksindeyse: hazır vektör ile arama (eski davranış).
- * - değilse (Supabase fikstür): fixtureh.odds ile vektör kurup R2 arşivine karşı oran benzerliği.
- * Futboldaki gibi: aynı id gerekmez, oran profili yeter.
- */
 export async function similar(eventId: string, k = 10, oddsOverride?: CompactOddsRow[] | null) {
-  const { matches, dim: D, vec, index, featureKeys } = await load();
+  const { matches, dim: D, vec, index, featureKeys, useProbCols } = await load();
   const i = index.get(eventId);
 
   if (i !== undefined) {
@@ -214,7 +291,6 @@ export async function similar(eventId: string, k = 10, oddsOverride?: CompactOdd
     return nearestFromVector(q, matches, D, vec, k, eventId);
   }
 
-  // Arşivde yok → canlı fikstür: oranlardan sorgu vektörü
   let odds = oddsOverride ?? null;
   if (!odds?.length) odds = await fetchFixtureHOdds(eventId);
   if (!odds?.length) {
@@ -225,22 +301,20 @@ export async function similar(eventId: string, k = 10, oddsOverride?: CompactOdd
     } as const;
   }
 
-  const q = buildFeatureVector(odds, featureKeys, D);
-  // Hepsi 0 ise oran eşleşmesi kurulamadı (pazar isimleri farklı)
+  const q = buildFeatureVector(odds, featureKeys, D, useProbCols);
   let nonzero = 0;
   for (let c = 0; c < D; c++) if (q[c] !== 0) nonzero++;
   if (nonzero === 0) {
     return {
       error: "odds_features_empty",
       message:
-        "Oranlar var ama feature anahtarlarıyla eşleşmedi (type/scope/side isimleri farklı olabilir). meta.json features listesini kontrol edin.",
+        "Oranlar var ama feature anahtarlarıyla eşleşmedi (type/scope/side isimleri farklı olabilir). meta.json features/cols listesini kontrol edin.",
     } as const;
   }
 
   return nearestFromVector(q, matches, D, vec, k);
 }
 
-// Takım adı / lig yazarak maç arama (en yeni maçlar önce)
 export async function searchMatches(q: string, limit = 20) {
   const { matches, haystack } = await load();
   const terms = fold(q).split(/\s+/).filter(Boolean);
@@ -252,7 +326,6 @@ export async function searchMatches(q: string, limit = 20) {
   return out.sort((a, b) => b.ts - a.ts).slice(0, limit);
 }
 
-// Maç detayı: ilgili sezon dosyasını R2'den indirir, içinden maçı okur
 const rawCache = new Map<string, any>();
 export async function matchDetail(eventId: string) {
   const { matches, index } = await load();
