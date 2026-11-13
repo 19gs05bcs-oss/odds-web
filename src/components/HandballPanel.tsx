@@ -6,6 +6,8 @@ import { SportSelect, type Sport } from "@/components/SportSelect";
 import type { FixtureRow } from "@/lib/archiveCache";
 import type { CompactOddsRow } from "@/lib/handball";
 import { formatOdds } from "@/lib/format";
+import { clockInTz, dayKeyInTz } from "@/lib/time";
+import type { BookmakerOption } from "@/lib/types";
 import filterStyles from "@/components/AnalyzeFilters.module.css";
 import saStyles from "./SmartAnalysisClient.module.css";
 import styles from "./HandballPanel.module.css";
@@ -81,6 +83,34 @@ const fmtTime = (ts: number | string | undefined) => {
   if (Number.isNaN(d.getTime())) return "—";
   return d.toISOString().slice(11, 16);
 };
+
+/** Fixture row fields come from the Supabase `fixtureh` table (home_name, away_name, kickoff_at …). */
+function fixtureDate(fx: FixtureRow, fallbackDay: string): string {
+  return dayKeyInTz(fx.kickoff_at) || fallbackDay || "—";
+}
+
+function fixtureTime(fx: FixtureRow): string {
+  return clockInTz(fx.kickoff_at) || "—";
+}
+
+function scorePair(a: string | number | null | undefined, b: string | number | null | undefined): string {
+  if (a == null || b == null || a === "" || b === "") return "—";
+  return `${a}-${b}`;
+}
+
+function fixtureHt(fx: FixtureRow): string {
+  return scorePair(fx.home_ht_score, fx.away_ht_score);
+}
+
+function fixtureFt(fx: FixtureRow): string {
+  return scorePair(fx.home_score, fx.away_score);
+}
+
+function fixtureTotal(fx: FixtureRow): string {
+  const h = fx.home_score != null && fx.home_score !== "" ? Number(fx.home_score) : NaN;
+  const a = fx.away_score != null && fx.away_score !== "" ? Number(fx.away_score) : NaN;
+  return Number.isFinite(h) && Number.isFinite(a) ? String(h + a) : "—";
+}
 
 function ftResult(hs: string | null, as_: string | null): "Home" | "Draw" | "Away" | "" {
   if (hs == null || as_ == null || hs === "" || as_ === "") return "";
@@ -346,29 +376,45 @@ function extractFixtureMarkets(odds: CompactOddsRow[] | null | undefined, bmId: 
   };
 }
 
-function bmOptionsFromFixture(fx: FixtureRow | null | undefined): BmOption[] {
-  if (!fx?.odds?.length) return [];
-  const names = (fx.bookmakers ?? {}) as Record<string, string>;
-  const counts = new Map<number, number>();
-  for (const row of fx.odds) {
-    const bid = Number(row[0]);
-    if (!Number.isFinite(bid)) continue;
-    counts.set(bid, (counts.get(bid) ?? 0) + 1);
+/** True when the fixture carries at least one odds row for this bookmaker. */
+function fixtureHasBm(fx: FixtureRow | null | undefined, bmId: string): boolean {
+  if (!fx?.odds?.length) return false;
+  const id = Number(bmId);
+  return fx.odds.some((row) => Number(row[0]) === id);
+}
+
+/**
+ * Pinned bookmaker list: the same fixed list the football view uses, always shown in
+ * the same order. Any bookmaker that appears only in this fixture's odds is appended
+ * at the end so nothing is hidden. A BM without odds for the selected match is still
+ * pinned; it just reports "no similar matches found" when run.
+ */
+function pinnedBmOptions(
+  pinned: BookmakerOption[],
+  fx: FixtureRow | null | undefined,
+): BmOption[] {
+  const out: BmOption[] = pinned.map((b) => ({ id: String(b.id), name: b.name }));
+  const seen = new Set(out.map((b) => b.id));
+  if (fx?.odds?.length) {
+    const names = (fx.bookmakers ?? {}) as Record<string, string>;
+    for (const row of fx.odds) {
+      const id = String(Number(row[0]));
+      if (id === "NaN" || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ id, name: names[id] || `BM ${id}` });
+    }
   }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([id]) => ({
-      id: String(id),
-      name: names[String(id)] || names[id] || `BM ${id}`,
-    }));
+  return out;
 }
 
 export function HandballPanel({
   sport,
   onSportChange,
+  bookmakers,
 }: {
   sport: Sport;
   onSportChange: (s: Sport) => void;
+  bookmakers: BookmakerOption[];
 }) {
   const [dates, setDates] = useState<string[]>([]);
   const [date, setDate] = useState("");
@@ -440,17 +486,22 @@ export function HandballPanel({
     [fixtures, selectedId],
   );
 
-  const availableBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
+  const availableBms = useMemo(
+    () => pinnedBmOptions(bookmakers, selectedFixture),
+    [bookmakers, selectedFixture],
+  );
 
-  // Maç değişince varsayılan BM: en çok satırlı (liste zaten sıralı)
+  // On match change: default to the first pinned BM that has odds for this match
+  // (falls back to the first pinned BM). The list itself never changes.
   useEffect(() => {
     if (!selectedId) {
       setReferenceBms([]);
       setSimResults({});
       return;
     }
-    const opts = bmOptionsFromFixture(selectedFixture);
-    setReferenceBms(opts.length ? [opts[0].id] : []);
+    const opts = pinnedBmOptions(bookmakers, selectedFixture);
+    const first = opts.find((o) => fixtureHasBm(selectedFixture, o.id)) ?? opts[0];
+    setReferenceBms(first ? [first.id] : []);
     setSimResults({});
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -465,7 +516,17 @@ export function HandballPanel({
       if (!selectedId) return;
       const fx = fixtures.find((f) => f.match_id === selectedId);
       const odds = fx?.odds ?? null;
-      const bmName = bmOptionsFromFixture(fx).find((b) => b.id === bmId)?.name || "";
+      const bmName = pinnedBmOptions(bookmakers, fx).find((b) => b.id === bmId)?.name || "";
+      if (!fixtureHasBm(fx, bmId)) {
+        setSimResults((prev) => ({
+          ...prev,
+          [bmId]: {
+            status: "error",
+            message: `No odds from ${bmName || "this bookmaker"} for this match, so no similar matches could be found.`,
+          },
+        }));
+        return;
+      }
       setSimResults((prev) => ({ ...prev, [bmId]: { status: "loading" } }));
       try {
         const res = odds?.length
@@ -489,7 +550,7 @@ export function HandballPanel({
           const msg =
             typeof j?.message === "string"
               ? j.message
-              : "Benzer maç hesaplanamadı (arşivde yok veya oran yok).";
+              : "No similar matches found (not in the archive, or no odds).";
           setSimResults((prev) => ({ ...prev, [bmId]: { status: "error", message: msg } }));
           return;
         }
@@ -497,7 +558,7 @@ export function HandballPanel({
 
         // Hem düz dizi [...] hem { matches: [...] } yanıtlarını destekle
         const list = Array.isArray(j) ? j : Array.isArray(j?.matches) ? j.matches : null;
-        if (!list) throw new Error(j?.message || "Beklenmeyen yanıt");
+        if (!list) throw new Error(j?.message || "Unexpected response");
 
         setSimResults((prev) => ({
           ...prev,
@@ -513,7 +574,7 @@ export function HandballPanel({
         }));
       }
     },
-    [selectedId, fixtures],
+    [selectedId, fixtures, bookmakers],
   );
 
   // Seçili BM'ler için sırayla benzerlik çalıştır
@@ -571,29 +632,27 @@ export function HandballPanel({
         </div>
       </div>
 
-      {selectedFixture && availableBms.length > 0 ? (
-        <div className={filterStyles.filterSection}>
-          <p className={filterStyles.filterSectionTitle}>
-            Reference BMs ({referenceBms.length} selected)
-          </p>
-          <p className={filterStyles.hint}>
-            Select one or more bookmakers — each runs similarity on that BM&apos;s odds profile
-            and shows its own section below, in the order you picked them.
-          </p>
-          <div className={saStyles.tabs}>
-            {availableBms.map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                className={referenceBms.includes(b.id) ? saStyles.tabActive : saStyles.tab}
-                onClick={() => toggleBm(b.id)}
-              >
-                {b.name}
-              </button>
-            ))}
-          </div>
+      <div className={filterStyles.filterSection}>
+        <p className={filterStyles.filterSectionTitle}>
+          Reference BMs ({referenceBms.length} selected)
+        </p>
+        <p className={filterStyles.hint}>
+          Select one or more bookmakers — each runs similarity on that BM&apos;s odds profile
+          and shows its own section below, in the order you picked them.
+        </p>
+        <div className={saStyles.tabs}>
+          {availableBms.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              className={referenceBms.includes(b.id) ? saStyles.tabActive : saStyles.tab}
+              onClick={() => toggleBm(b.id)}
+            >
+              {b.name}
+            </button>
+          ))}
         </div>
-      ) : null}
+      </div>
 
       <div className={styles.panel}>
         {error && <p className={`${styles.msg} ${styles.err}`}>{error}</p>}
@@ -602,11 +661,6 @@ export function HandballPanel({
         )}
         {!selectedId && fixtures.length > 0 && (
           <p className={styles.msg}>Select a match to list the most similar matches from the archive.</p>
-        )}
-        {selectedId && availableBms.length === 0 && (
-          <p className={styles.msg}>
-            This match has no bookmaker odds yet. Similarity needs odds (or an archive vector).
-          </p>
         )}
         {selectedId && availableBms.length > 0 && referenceBms.length === 0 && (
           <p className={saStyles.empty}>Pick at least one reference bookmaker above.</p>
@@ -636,10 +690,10 @@ export function HandballPanel({
                           <th>LEAGUE</th>
                           <th>HOME</th>
                           <th>AWAY</th>
+                          <th className={styles.num}>HT</th>
                           <th className={styles.num}>FT</th>
                           <th>FT RES</th>
                           <th className={styles.num}>Total</th>
-                          <th className={styles.num}>HT</th>
                           <th className={styles.num}>1 O</th>
                           <th className={styles.num}>1 C</th>
                           <th className={styles.num}>X O</th>
@@ -662,15 +716,15 @@ export function HandballPanel({
                       <tbody>
                         <tr>
                           <td>fixture</td>
-                          <td>{fmtDate((selectedFixture as any).match_time ?? (selectedFixture as any).ts ?? date)}</td>
-                          <td>{fmtTime((selectedFixture as any).match_time ?? (selectedFixture as any).ts)}</td>
-                          <td>{(selectedFixture as any).league || (selectedFixture as any).season || "—"}</td>
-                          <td>{(selectedFixture as any).home_team || (selectedFixture as any).home || "—"}</td>
-                          <td>{(selectedFixture as any).away_team || (selectedFixture as any).away || "—"}</td>
-                          <td className={styles.num}>—</td>
-                          <td>—</td>
-                          <td className={styles.num}>—</td>
-                          <td className={styles.num}>—</td>
+                          <td>{fixtureDate(selectedFixture, date)}</td>
+                          <td>{fixtureTime(selectedFixture)}</td>
+                          <td>{selectedFixture.league || "—"}</td>
+                          <td>{selectedFixture.home_name || "—"}</td>
+                          <td>{selectedFixture.away_name || "—"}</td>
+                          <td className={styles.num}>{fixtureHt(selectedFixture)}</td>
+                          <td className={styles.num}>{fixtureFt(selectedFixture)}</td>
+                          <td>{ftResult(selectedFixture.home_score, selectedFixture.away_score) || "—"}</td>
+                          <td className={styles.num}>{fixtureTotal(selectedFixture)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.home.o)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.home.c)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.draw.o)}</td>
@@ -737,10 +791,10 @@ export function HandballPanel({
                             <th>SEASON</th>
                             <th>HOME</th>
                             <th>AWAY</th>
+                            <th className={styles.num}>HT</th>
                             <th className={styles.num}>FT</th>
                             <th>FT RES</th>
                             <th className={styles.num}>Total</th>
-                            <th className={styles.num}>HT</th>
                             <th className={styles.num}>1 O</th>
                             <th className={styles.num}>1 C</th>
                             <th className={styles.num}>X O</th>
@@ -788,6 +842,7 @@ export function HandballPanel({
                                 <td>{r.season}</td>
                                 <td>{r.home}</td>
                                 <td>{r.away}</td>
+                                <td className={styles.num}>{ht}</td>
                                 <td className={styles.num}>
                                   {r.ft || (r.hs != null && r.as != null ? `${r.hs}-${r.as}` : "—")}
                                 </td>
@@ -801,7 +856,6 @@ export function HandballPanel({
                                   )}
                                 </td>
                                 <td className={styles.num}>{total != null ? total : "—"}</td>
-                                <td className={styles.num}>{ht}</td>
                                 {cellOdd(o1, settle1x2("H", hsN, asN))}
                                 {cellOdd(c1, settle1x2("H", hsN, asN))}
                                 {cellOdd(ox, settle1x2("D", hsN, asN))}

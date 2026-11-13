@@ -429,7 +429,7 @@ const goalEngine = useMemo(
           <p className={styles.kicker}>Smart Analysis · Pro</p>
           <h1 className={styles.title}>Select match → similar matches</h1>
         </header>
-        <HandballPanel sport={sport} onSportChange={setSport} />
+        <HandballPanel sport={sport} onSportChange={setSport} bookmakers={bookmakers} />
       </div>
     );
   }
