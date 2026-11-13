@@ -973,7 +973,7 @@ async function hydrateMatchesFromRaw(
 
   // Oran toleransı: önce dar (±%6), yetmezse kademeli genişlet (en fazla ±%25).
   // Kapsam dışı (1.65 vs 1.11 gibi) maçlar hiçbir zaman listeye girmez.
-  const TOLS = [0.06, 0.1, 0.15, 0.25];
+  const TOLS = [0.03, 0.05, 0.08];
   let picked: Scored[] = scored;
   let tolUsed: number | null = null;
   if (q1x2 && q1x2.o1 != null) {
