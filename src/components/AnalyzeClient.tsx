@@ -579,7 +579,7 @@ export default function AnalyzeClient({
   }
 
   if (sport === "handball") {
-    return <HandballPanel sport={sport} onSportChange={setSport} />;
+    return <HandballPanel sport={sport} onSportChange={setSport} bookmakers={bookmakers} />;
   }
 
   return (
