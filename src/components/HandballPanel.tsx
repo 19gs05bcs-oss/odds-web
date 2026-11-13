@@ -22,6 +22,8 @@ type Similar = {
   hs: string | null;
   as: string | null;
   distance: number;
+  tol?: number | null;
+  oddsDiff?: number | null;
   odds1x2?: {
     home: OddsPair;
     draw: OddsPair;
@@ -396,9 +398,12 @@ function bmOptionsFromFixture(fx: FixtureRow | null | undefined): BmOption[] {
 export function HandballPanel({
   sport,
   onSportChange,
+  bookmakers = [],
 }: {
   sport: Sport;
   onSportChange: (s: Sport) => void;
+  /** Football ile ortak tam bookmaker listesi (opsiyonel). */
+  bookmakers?: BmOption[];
 }) {
   const [dates, setDates] = useState<string[]>([]);
   const [date, setDate] = useState("");
@@ -470,7 +475,15 @@ export function HandballPanel({
     [fixtures, selectedId],
   );
 
-  const availableBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
+  // Maçta verisi olan BM'ler (satır sayısına göre sıralı) + tam liste (verisi olmayanlar pasif)
+  const fixtureBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
+  const availableBms = useMemo(() => {
+    const have = new Set(fixtureBms.map((b) => b.id));
+    const rest = bookmakers
+      .filter((b) => !have.has(String(b.id)))
+      .map((b) => ({ id: String(b.id), name: b.name, noData: true }));
+    return [...fixtureBms.map((b) => ({ ...b, noData: false })), ...rest];
+  }, [fixtureBms, bookmakers]);
 
   // Maç değişince varsayılan BM: en çok satırlı (liste zaten sıralı)
   useEffect(() => {
@@ -617,6 +630,9 @@ export function HandballPanel({
                 type="button"
                 className={referenceBms.includes(b.id) ? saStyles.tabActive : saStyles.tab}
                 onClick={() => toggleBm(b.id)}
+                disabled={b.noData}
+                title={b.noData ? "Bu maçta bu bookmaker için oran yok" : undefined}
+                style={b.noData ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
               >
                 {b.name}
               </button>
@@ -652,6 +668,11 @@ export function HandballPanel({
           return (
             <section key={bmId} className={saStyles.card}>
               <h3>{bmName} — similar matches</h3>
+              {sim.status === "done" && sim.rows[0]?.tol != null ? (
+                <p className={filterStyles.hint}>
+                  Odds tolerance: ±{Math.round((sim.rows[0].tol as number) * 100)}% (1/2 open &amp; close)
+                </p>
+              ) : null}
 
               {selectedFixture ? (
                 <div className={saStyles.bmOpenedOdds}>

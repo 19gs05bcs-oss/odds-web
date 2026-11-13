@@ -95,6 +95,10 @@ export type HandballTableRow = HandballMeta & {
   dnbA: number | null;
   bmUsed?: string;
   distance?: number;
+  /** Kullanılan oran toleransı (göreli, örn. 0.1 = ±%10) */
+  tol?: number | null;
+  /** Sorgu maçına göre en büyük göreli oran sapması */
+  oddsDiff?: number | null;
 };
 
 type Store = {
@@ -605,6 +609,15 @@ export async function fetchFixtureHOdds(matchId: string): Promise<CompactOddsRow
   }
 }
 
+/** ah_line gibi ölçeksiz kolonlar olasılıkları ezmesin diye ağırlık (1X2 olasılıkları = 1). */
+function colWeights(cols: string[], dim: number): Float32Array {
+  const w = new Float32Array(dim).fill(1);
+  for (let c = 0; c < dim; c++) {
+    if (cols[c] === "ah_line") w[c] = 0.03; // 1 gol farkı ≈ 0.03 olasılık farkı
+  }
+  return w;
+}
+
 function nearestFromVector(
   q: Float32Array,
   matches: HandballMeta[],
@@ -612,7 +625,9 @@ function nearestFromVector(
   vec: Float32Array,
   k: number,
   skipId?: string,
+  cols: string[] = [],
 ) {
+  const w = colWeights(cols, dim);
   const sc: [number, number][] = [];
   for (let j = 0; j < matches.length; j++) {
     if (skipId && matches[j].id === skipId) continue;
@@ -620,7 +635,7 @@ function nearestFromVector(
     let d = 0;
     const base = j * dim;
     for (let c = 0; c < dim; c++) {
-      const t = q[c] - vec[base + c];
+      const t = (q[c] - vec[base + c]) * w[c];
       d += t * t;
     }
     sc.push([d, j]);
@@ -784,8 +799,9 @@ function buildBmRichVector(
   out[3] = closeH;
   out[4] = closeD;
   out[5] = closeA;
-  out[6] = ahLine;
-  out[7] = ouLine;
+  // Çizgiler ölçeksiz (AH ±5, OU ~58) — olasılıkları ezmesin diye küçük ağırlık
+  out[6] = ahLine * 0.03;
+  out[7] = ouLine * 0.01;
   out[8] = ouOver;
   out[9] = ouUnder;
   return out;
@@ -861,7 +877,16 @@ async function hydrateMatchesFromRaw(
     if (nz === 0) queryVec = null;
   }
 
-  type Scored = HandballTableRow & { _hasBm: boolean };
+  // Sorgu maçının seçilen BM'deki 1X2 oranları (tolerans filtresi için)
+  const qBid = queryVec ? preferredBmId : null;
+  const q1x2 =
+    queryOdds?.length && qBid != null
+      ? extract1x2Columns(queryOdds, qBid, true)
+      : null;
+  const relDiff = (a: number | null, b: number | null) =>
+    a == null || b == null ? null : Math.abs(a - b) / a;
+
+  type Scored = HandballTableRow & { _hasBm: boolean; _oddsDiff: number | null };
   const scored: Scored[] = [];
 
   for (const m of items) {
@@ -928,14 +953,43 @@ async function hydrateMatchesFromRaw(
           ? d.bookmakers[String(usedBid)]
           : undefined,
       _hasBm: bmPresent,
+      _oddsDiff: (() => {
+        if (!q1x2 || q1x2.o1 == null) return null;
+        // Ev/deplasman açılış + kapanış oranlarının en büyük göreli sapması
+        const ds = [
+          relDiff(q1x2.o1, o1),
+          relDiff(q1x2.c1, c1),
+          relDiff(q1x2.o2, o2),
+          relDiff(q1x2.c2, c2),
+        ];
+        if (ds.some((x) => x == null)) return 99;
+        return Math.max(...(ds as number[]));
+      })(),
     });
   }
 
   // BM'ye göre yeniden sırala
   scored.sort((a, b) => (a.distance ?? 99) - (b.distance ?? 99));
 
-  // strict modda yetersiz kaldıysa (çok az maç) gevşetme yok — kullanıcı BM istiyor
-  return scored.slice(0, k).map(({ _hasBm, ...rest }) => rest);
+  // Oran toleransı: önce dar (±%6), yetmezse kademeli genişlet (en fazla ±%25).
+  // Kapsam dışı (1.65 vs 1.11 gibi) maçlar hiçbir zaman listeye girmez.
+  const TOLS = [0.06, 0.1, 0.15, 0.25];
+  let picked: Scored[] = scored;
+  let tolUsed: number | null = null;
+  if (q1x2 && q1x2.o1 != null) {
+    for (const tol of TOLS) {
+      const within = scored.filter((r) => r._oddsDiff != null && r._oddsDiff <= tol);
+      tolUsed = tol;
+      picked = within;
+      if (within.length >= k) break;
+    }
+  }
+
+  return picked.slice(0, k).map(({ _hasBm, _oddsDiff, ...rest }) => ({
+    ...rest,
+    tol: tolUsed,
+    oddsDiff: _oddsDiff != null && _oddsDiff < 99 ? Number(_oddsDiff.toFixed(4)) : null,
+  }));
 }
 
 export async function similar(
@@ -955,7 +1009,7 @@ export async function similar(
   const strictBm = !!(bmName || bmId != null);
 
   // Aday havuzu: BM filtre + re-rank için daha geniş çek
-  const candidateK = strictBm ? Math.max(k * 8, 80) : k;
+  const candidateK = strictBm ? Math.max(k * 30, 400) : k;
 
   let nearest: (HandballMeta & { distance?: number })[];
   let queryOdds: CompactOddsRow[] | null = opts?.oddsOverride ?? null;
@@ -964,7 +1018,7 @@ export async function similar(
     // Arşiv maçı: features.bin vektörü ile aday bul
     const q = new Float32Array(D);
     for (let c = 0; c < D; c++) q[c] = vec[i * D + c];
-    nearest = nearestFromVector(q, matches, D, vec, candidateK, eventId);
+    nearest = nearestFromVector(q, matches, D, vec, candidateK, eventId, cols);
 
     // Arşiv maçının kendi odds'unu da al (BM re-rank query için)
     if (!queryOdds?.length) {
@@ -995,7 +1049,7 @@ export async function similar(
       } as const;
     }
 
-    nearest = nearestFromVector(q, matches, D, vec, candidateK);
+    nearest = nearestFromVector(q, matches, D, vec, candidateK, undefined, cols);
   }
 
   const rows = await hydrateMatchesFromRaw(nearest, {
