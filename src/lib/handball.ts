@@ -99,6 +99,8 @@ export type HandballTableRow = HandballMeta & {
   tol?: number | null;
   /** Sorgu maçına göre en büyük göreli oran sapması */
   oddsDiff?: number | null;
+  /** O/U barajı toleransı (gol): 0 = sorgu maçıyla aynı baraj, 1 = ±1, 2 = ±2. null = filtre uygulanmadı */
+  ouLineTol?: number | null;
 };
 
 type Store = {
@@ -828,6 +830,64 @@ function hasBm1x2(odds: any[], bid: number): boolean {
   return false;
 }
 
+/** Oran toleransı kademeleri (göreli): önce dar, yetmezse genişlet. */
+const ODDS_TOLS = [0.03, 0.05, 0.08];
+/** O/U barajı kademeleri (gol): önce AYNI baraj, yetmezse ±1, en fazla ±2. */
+const OU_LINE_STEPS = [0, 1, 2];
+
+/**
+ * Benzer maç seçimi: sorgu maçının O/U barajı (ör. 57.5) ile aynı barajda açılan maçlar önce gelir;
+ * baraj kademesi dış döngü, 1X2 oran toleransı iç döngüdür (baraj, oran toleransından daha önceliklidir).
+ * Eskiden baraj sadece vektörde ouLine*0.01 ağırlığıyla vardı (5 gol fark = 0.05), yani 57.5 için 62.5 gelebiliyordu.
+ */
+export function pickSimilar<
+  T extends { ouLine: number | null; distance?: number; _oddsDiff: number | null },
+>(
+  scored: T[],
+  opts: { qOuLine: number | null; has1x2: boolean; k: number },
+): { rows: T[]; tol: number | null; ouLineTol: number | null } {
+  const { qOuLine, has1x2, k } = opts;
+  const steps: (number | null)[] = qOuLine != null ? OU_LINE_STEPS : [null];
+  const tols: (number | null)[] = has1x2 ? ODDS_TOLS : [null];
+  let last: { within: T[]; tol: number | null; step: number | null } = {
+    within: scored,
+    tol: null,
+    step: null,
+  };
+  for (const step of steps) {
+    for (const tol of tols) {
+      const within = scored.filter(
+        (r) =>
+          (tol == null || (r._oddsDiff != null && r._oddsDiff <= tol)) &&
+          (step == null ||
+            (r.ouLine != null && Math.abs(r.ouLine - (qOuLine as number)) <= step + 1e-9)),
+      );
+      last = { within, tol, step };
+      if (within.length >= k) {
+        return finishPick(last, qOuLine, k);
+      }
+    }
+  }
+  return finishPick(last, qOuLine, k);
+}
+
+function finishPick<T extends { ouLine: number | null; distance?: number }>(
+  r: { within: T[]; tol: number | null; step: number | null },
+  qOuLine: number | null,
+  k: number,
+) {
+  const rows = [...r.within];
+  if (qOuLine != null) {
+    // Aynı barajdakiler önce, sonra yakın barajlar; eşitlikte vektör mesafesi.
+    rows.sort(
+      (a, b) =>
+        Math.abs((a.ouLine ?? 1e9) - qOuLine) - Math.abs((b.ouLine ?? 1e9) - qOuLine) ||
+        (a.distance ?? 99) - (b.distance ?? 99),
+    );
+  }
+  return { rows: rows.slice(0, k), tol: r.tol, ouLineTol: r.step };
+}
+
 /**
  * Meta adaylarını R2 raw dosyalarından doldurur.
  * strictBm=true ise: sadece seçilen BM'nin oranının olduğu maçlar kalır,
@@ -883,6 +943,9 @@ async function hydrateMatchesFromRaw(
     queryOdds?.length && qBid != null
       ? extract1x2Columns(queryOdds, qBid, true)
       : null;
+  // Sorgu maçının seçilen BM'deki O/U barajı (canlıda açık olan baraj) — benzer maçlar buna göre filtrelenir
+  const qOuLine =
+    queryOdds?.length && qBid != null ? extractMarkets(queryOdds, qBid).ouLine : null;
   const relDiff = (a: number | null, b: number | null) =>
     a == null || b == null ? null : Math.abs(a - b) / a;
 
@@ -971,23 +1034,18 @@ async function hydrateMatchesFromRaw(
   // BM'ye göre yeniden sırala
   scored.sort((a, b) => (a.distance ?? 99) - (b.distance ?? 99));
 
-  // Oran toleransı: önce dar (±%6), yetmezse kademeli genişlet (en fazla ±%25).
-  // Kapsam dışı (1.65 vs 1.11 gibi) maçlar hiçbir zaman listeye girmez.
-  const TOLS = [0.03, 0.05, 0.08];
-  let picked: Scored[] = scored;
-  let tolUsed: number | null = null;
-  if (q1x2 && q1x2.o1 != null) {
-    for (const tol of TOLS) {
-      const within = scored.filter((r) => r._oddsDiff != null && r._oddsDiff <= tol);
-      tolUsed = tol;
-      picked = within;
-      if (within.length >= k) break;
-    }
-  }
+  // Baraj (O/U) + oran toleransı: önce aynı baraj ve dar oran, yetmezse kademeli genişlet.
+  // Kapsam dışı (1.65 vs 1.11 gibi veya 57.5 vs 62.5) maçlar hiçbir zaman listeye girmez.
+  const { rows: picked, tol: tolUsed, ouLineTol } = pickSimilar(scored, {
+    qOuLine,
+    has1x2: !!(q1x2 && q1x2.o1 != null),
+    k,
+  });
 
-  return picked.slice(0, k).map(({ _hasBm, _oddsDiff, ...rest }) => ({
+  return picked.map(({ _hasBm, _oddsDiff, ...rest }) => ({
     ...rest,
     tol: tolUsed,
+    ouLineTol,
     oddsDiff: _oddsDiff != null && _oddsDiff < 99 ? Number(_oddsDiff.toFixed(4)) : null,
   }));
 }

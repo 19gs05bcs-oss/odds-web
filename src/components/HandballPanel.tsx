@@ -683,6 +683,13 @@ export function HandballPanel({
               {sim.status === "done" && sim.rows[0]?.tol != null ? (
                 <p className={filterStyles.hint}>
                   Odds tolerance: ±{Math.round((sim.rows[0].tol as number) * 100)}% (1/2 open &amp; close)
+                  {sim.rows[0]?.ouLineTol != null
+                    ? sim.rows[0].ouLineTol === 0
+                      ? selectedFixture && fxMk.ouLine != null
+                        ? ` · O/U line: ${fxMk.ouLine} only`
+                        : " · O/U line: same line only"
+                      : ` · O/U line: ±${sim.rows[0].ouLineTol} (same line first)`
+                    : ""}
                 </p>
               ) : null}
 
