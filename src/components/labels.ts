@@ -19,6 +19,21 @@ export function prettySideName(
 
   if (s.startsWith("OVER:")) return `Over ${s.slice(5)}`;
   if (s.startsWith("UNDER:")) return `Under ${s.slice(6)}`;
+  // Çizgi market başlığında taşınıyorsa seçim anahtarı çıplak gelir (MarketBoard: key "OVER").
+  if (s === "OVER") return "Over";
+  if (s === "UNDER") return "Under";
+
+  // Odd/Even: "sel:ODD" / "sel:EVEN"
+  if (mt === "ODD_OR_EVEN" || s.startsWith("sel:")) {
+    if (/^sel:ODD$/i.test(s) || /^odd$/i.test(s)) return "Odd";
+    if (/^sel:EVEN$/i.test(s) || /^even$/i.test(s)) return "Even";
+  }
+
+  // HT/FT: "htft:1/X" -> "1/X"
+  if (mt === "HALF_FULL_TIME" || s.startsWith("htft:")) {
+    const m = /^htft:([12X]\/[12X])$/i.exec(s);
+    if (m) return m[1].toUpperCase();
+  }
 
   const name = (fallbackName || "").trim();
   if (name && !/^no$/i.test(name)) return name;
@@ -38,6 +53,7 @@ export function marketTypeLabel(type: string, name?: string | null): string {
     BOTH_TEAMS_TO_SCORE: "BTTS",
     OVER_UNDER: "Over/Under",
     DRAW_NO_BET: "Draw No Bet",
+    HOME_AWAY: "Home/Away",
     ASIAN_HANDICAP: "Asian Handicap",
     EUROPEAN_HANDICAP: "European Handicap",
     CORRECT_SCORE: "Correct Score",

@@ -115,10 +115,15 @@ function fixtureFt(fx: FixtureRow): string {
   return scorePair(fx.home_score, fx.away_score);
 }
 
-function fixtureTotal(fx: FixtureRow): string {
+function fixtureTotalNum(fx: FixtureRow): number | null {
   const h = fx.home_score != null && fx.home_score !== "" ? Number(fx.home_score) : NaN;
   const a = fx.away_score != null && fx.away_score !== "" ? Number(fx.away_score) : NaN;
-  return Number.isFinite(h) && Number.isFinite(a) ? String(h + a) : "—";
+  return Number.isFinite(h) && Number.isFinite(a) ? h + a : null;
+}
+
+function fixtureTotal(fx: FixtureRow): string {
+  const t = fixtureTotalNum(fx);
+  return t != null ? String(t) : "—";
 }
 
 
@@ -160,6 +165,13 @@ function settleOu(
   const over = total > line;
   if (side === "O") return over ? "hit" : "miss";
   return over ? "miss" : "hit";
+}
+
+/** Total gol, o satırın O/U barajına göre: Over = yeşil, Under = kırmızı, tam baraj (push) = gri. */
+function totalClass(total: number | null | undefined, line: number | null | undefined): string {
+  if (total == null || line == null || !Number.isFinite(total) || !Number.isFinite(line)) return "";
+  if (total === line) return styles.totalPush;
+  return total > line ? styles.totalOver : styles.totalUnder;
 }
 
 function settleAh(
@@ -689,8 +701,8 @@ export function HandballPanel({
                           <th>AWAY</th>
                           <th className={styles.num}>HT</th>
                           <th className={styles.num}>FT</th>
-                          <th>FT RES</th>
                           <th className={styles.num}>Total</th>
+                          <th>FT RES</th>
                           <th className={styles.num}>1 O</th>
                           <th className={styles.num}>1 C</th>
                           <th className={styles.num}>X O</th>
@@ -720,8 +732,15 @@ export function HandballPanel({
                           <td>{selectedFixture.away_name || "—"}</td>
                           <td className={styles.num}>{fixtureHt(selectedFixture)}</td>
                           <td className={styles.num}>{fixtureFt(selectedFixture)}</td>
+                          <td
+                            className={`${styles.num} ${totalClass(
+                              fixtureTotalNum(selectedFixture),
+                              fxMk.ouLine,
+                            )}`.trim()}
+                          >
+                            {fixtureTotal(selectedFixture)}
+                          </td>
                           <td>{ftResult(selectedFixture.home_score, selectedFixture.away_score) || "—"}</td>
-                          <td className={styles.num}>{fixtureTotal(selectedFixture)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.home.o)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.home.c)}</td>
                           <td className={styles.num}>{fmtOdd(fx1x2.draw.o)}</td>
@@ -790,8 +809,8 @@ export function HandballPanel({
                             <th>AWAY</th>
                             <th className={styles.num}>HT</th>
                             <th className={styles.num}>FT</th>
-                            <th>FT RES</th>
                             <th className={styles.num}>Total</th>
+                            <th>FT RES</th>
                             <th className={styles.num}>1 O</th>
                             <th className={styles.num}>1 C</th>
                             <th className={styles.num}>X O</th>
@@ -843,6 +862,9 @@ export function HandballPanel({
                                 <td className={styles.num}>
                                   {r.ft || (r.hs != null && r.as != null ? `${r.hs}-${r.as}` : "—")}
                                 </td>
+                                <td className={`${styles.num} ${totalClass(total, r.ouLine)}`.trim()}>
+                                  {total != null ? total : "—"}
+                                </td>
                                 <td>
                                   {res ? (
                                     <span className={`${styles.resBadge} ${resClass(res)}`}>
@@ -852,7 +874,6 @@ export function HandballPanel({
                                     "—"
                                   )}
                                 </td>
-                                <td className={styles.num}>{total != null ? total : "—"}</td>
                                 {cellOdd(o1, settle1x2("H", hsN, asN))}
                                 {cellOdd(c1, settle1x2("H", hsN, asN))}
                                 {cellOdd(ox, settle1x2("D", hsN, asN))}

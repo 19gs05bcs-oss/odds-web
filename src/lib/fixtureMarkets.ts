@@ -7,6 +7,7 @@ const LINE_TYPES = new Set(["OVER_UNDER", "ASIAN_HANDICAP", "EUROPEAN_HANDICAP"]
 const SCOPE_SUFFIX: Record<string, string> = {
   FIRST_HALF: "1st Half",
   SECOND_HALF: "2nd Half",
+  FULL_TIME_OVER_TIME: "incl. Overtime",
 };
 
 const SIDE_NAMES: Record<string, string> = {
@@ -15,13 +16,40 @@ const SIDE_NAMES: Record<string, string> = {
   A: "Away",
 };
 
-function splitSide(type: string, sideRaw: string): { key: string; line: string | null } {
+const fmtLine = (n: number): string => {
+  const v = n + 0; // -0 -> 0
+  return Number.isInteger(v) ? v.toFixed(1) : String(v);
+};
+
+/**
+ * Handikap pazarlarında seçenekler FARKLI işaretli çizgilerle gelir:
+ *  - Asian:    H:-0.5  ↔  A:+0.5   (aynı bahis çifti)
+ *  - European: H:-1.0 · D:-1.0 · A:+1.0  (3'lü)
+ * Eskiden her çizgi ayrı kovaya düşüyordu, bu yüzden "Asian Handicap -0.5" altında
+ * Home -0.5 ile Away -0.5 (yanlış çift) birlikte görünüyordu. Burada her şey EV SAHİBİ çizgisine göre gruplanır.
+ */
+function splitSide(
+  type: string,
+  sideRaw: string,
+): { key: string; line: string | null; sideLabel: string | null } {
   const side = String(sideRaw ?? "");
   if (LINE_TYPES.has(type)) {
     const idx = side.lastIndexOf(":");
-    if (idx > -1) return { key: side.slice(0, idx), line: side.slice(idx + 1) };
+    if (idx > -1) {
+      const key = side.slice(0, idx);
+      const lineRaw = side.slice(idx + 1);
+      const n = Number(lineRaw);
+      if ((type === "ASIAN_HANDICAP" || type === "EUROPEAN_HANDICAP") && Number.isFinite(n)) {
+        const homeLine = key === "A" ? -n : n;
+        const signed = (x: number) => (x > 0 ? `+${fmtLine(x)}` : fmtLine(x));
+        const sideLabel =
+          key === "D" ? "Draw" : key === "H" ? `Home ${signed(n)}` : key === "A" ? `Away ${signed(n)}` : null;
+        return { key, line: fmtLine(homeLine), sideLabel };
+      }
+      return { key, line: lineRaw, sideLabel: null };
+    }
   }
-  return { key: side, line: null };
+  return { key: side, line: null, sideLabel: null };
 }
 
 function marketName(type: string, scope: string, line: string | null): string {
@@ -35,6 +63,7 @@ const MARKET_ORDER = [
   "HOME_DRAW_AWAY",
   "DOUBLE_CHANCE",
   "DRAW_NO_BET",
+  "HOME_AWAY",
   "OVER_UNDER",
   "ASIAN_HANDICAP",
   "EUROPEAN_HANDICAP",
@@ -68,8 +97,10 @@ export function compactOddsToMarketsBlob(
   for (const row of odds) {
     if (!Array.isArray(row) || row.length < 7) continue;
     const [bmId, type, scope, sideRaw, opening, current, active] = row;
-    if (current == null && opening == null) continue;
-    const { key: sideKey, line } = splitSide(type, sideRaw);
+    const curN = current == null || (current as unknown) === "" ? null : Number(current);
+    const openN = opening == null || (opening as unknown) === "" ? null : Number(opening);
+    if (curN == null && openN == null) continue;
+    const { key: sideKey, line, sideLabel } = splitSide(type, sideRaw);
     const marketKey = `${type}|${scope}|${line ?? ""}`;
     let bucket = buckets.get(marketKey);
     if (!bucket) {
@@ -80,7 +111,7 @@ export function compactOddsToMarketsBlob(
     if (!sel) {
       sel = {
         key: sideKey,
-        name: SIDE_NAMES[sideKey] || sideKey,
+        name: sideLabel || SIDE_NAMES[sideKey] || sideKey,
         odds: null,
         opening: null,
         suspended: true,
@@ -91,9 +122,10 @@ export function compactOddsToMarketsBlob(
       bucket.selections.set(sideKey, sel);
     }
     sel._bookmakerCount += 1;
-    if (current != null && (sel.odds == null || current > sel.odds)) {
-      sel.odds = current;
-      sel.opening = opening;
+    // Sayısal karşılaştırma: oranlar string gelirse '10.0' > '9.5' yanlış çıkıyordu.
+    if (curN != null && Number.isFinite(curN) && (sel.odds == null || curN > sel.odds)) {
+      sel.odds = curN;
+      sel.opening = openN != null && Number.isFinite(openN) ? openN : null;
       sel.bookmaker_id = String(bmId);
       sel.bookmaker_name = bookmakerNames?.[String(bmId)] || `#${bmId}`;
       sel.suspended = !active;

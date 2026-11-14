@@ -165,3 +165,22 @@
   background: #f1f5f9 !important;
   color: #64748b;
 }
+
+/* Total gol — O/U barajına göre (Over yeşil, Under kırmızı, push gri) */
+.totalOver {
+  background: #dcfce7 !important;
+  color: #166534;
+  font-weight: 650;
+}
+
+.totalUnder {
+  background: #fee2e2 !important;
+  color: #991b1b;
+  font-weight: 650;
+}
+
+.totalPush {
+  background: #f1f5f9 !important;
+  color: #64748b;
+  font-weight: 650;
+}
