@@ -26,7 +26,7 @@ function s3(): S3Client {
   if (_s3) return _s3;
   const need = (n: string) => {
     const v = process.env[n];
-    if (!v) throw new Error(`R2 env eksik: ${n}. R2_ACCOUNT_ID, R2_KEY, R2_SECRET tanımlı olmalı.`);
+    if (!v) throw new Error(`Missing R2 env var: ${n}. R2_ACCOUNT_ID, R2_KEY and R2_SECRET must be set.`);
     return v;
   };
   _s3 = new S3Client({
@@ -40,10 +40,10 @@ function s3(): S3Client {
 async function get(key: string): Promise<Buffer> {
   try {
     const out = await s3().send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
-    if (!out.Body) throw new Error("boş body");
+    if (!out.Body) throw new Error("empty body");
     return Buffer.from(await out.Body.transformToByteArray());
   } catch (e: any) {
-    throw new Error(`R2 okuma hatası [${BUCKET}/${key}] ${e?.name || e?.Code || ""}: ${e?.message || e}`);
+    throw new Error(`R2 read error [${BUCKET}/${key}] ${e?.name || e?.Code || ""}: ${e?.message || e}`);
   }
 }
 
@@ -124,15 +124,15 @@ const load = () =>
     try {
       meta = JSON.parse(m.toString("utf8"));
     } catch (e: any) {
-      throw new Error(`meta.json JSON.parse başarısız: ${e?.message || e}`);
+      throw new Error(`meta.json JSON.parse failed: ${e?.message || e}`);
     }
     const matches = meta.matches as BasketballMeta[];
-    if (!Array.isArray(matches) || !matches.length) throw new Error("meta.json içinde matches yok/boş.");
+    if (!Array.isArray(matches) || !matches.length) throw new Error("meta.json has no matches (missing or empty).");
 
     const dim = Number(meta.dim ?? 5);
     if (b.byteLength !== matches.length * dim * 4) {
       throw new Error(
-        `features.bin boyutu uyuşmuyor: got=${b.byteLength} expected=${matches.length * dim * 4} (matches=${matches.length} dim=${dim})`,
+        `features.bin size mismatch: got=${b.byteLength} expected=${matches.length * dim * 4} (matches=${matches.length} dim=${dim})`,
       );
     }
     // Buffer byteOffset'i hizalı olmayabilir → kopyalayarak oku
@@ -168,7 +168,7 @@ async function loadRawSeason(file: string): Promise<RawSeason> {
     try {
       buf = await get(`raw/${file}`);
     } catch (e2: any) {
-      throw new Error(`Sezon dosyası bulunamadı (${file}, raw/${file}): ${e2?.message || e2}`);
+      throw new Error(`Season file not found (${file}, raw/${file}): ${e2?.message || e2}`);
     }
   }
   let text: string;
@@ -333,7 +333,7 @@ export async function similar(
   if (archiveIdx === undefined && !queryOdds?.length) {
     return {
       error: "not_in_archive_no_odds",
-      message: "Bu maç R2 arşivinde yok ve fixtureb içinde oran bulunamadı.",
+      message: "This match is not in the R2 archive and has no odds in fixtureb.",
     } as const;
   }
 
@@ -349,7 +349,7 @@ export async function similar(
   if (qCons.filter((x) => Number.isFinite(x)).length < 2) {
     return {
       error: "odds_features_empty",
-      message: "Oranlar feature anahtarlarıyla eşleşmedi (ML / AH / O-U marketleri eksik).",
+      message: "Odds could not be turned into features (ML / AH / O-U markets missing).",
     } as const;
   }
 
@@ -358,14 +358,14 @@ export async function similar(
   let qBmProfile: RawProfile | null = null;
   if (strictBm) {
     if (!queryOdds?.some((r) => Number(r[0]) === bmId)) {
-      return { error: "no_bm_odds", message: "Seçilen bahis şirketi bu maç için oran vermiyor." } as const;
+      return { error: "no_bm_odds", message: "The selected bookmaker has no odds for this match." } as const;
     }
     qBmProfile = profileFromOdds(queryOdds, bmId);
     qBm = zVector(qBmProfile, cols, norm);
     if (qBm.filter((x) => Number.isFinite(x)).length < 2) {
       return {
         error: "odds_features_empty",
-        message: "Seçilen bahis şirketinin ML / AH / O-U oranları feature çıkarmaya yetmiyor.",
+        message: "The selected bookmaker's ML / AH / O-U odds are not enough to build features.",
       } as const;
     }
   }
@@ -386,7 +386,7 @@ export async function similar(
     }),
   );
   if (files.length && errs.length === files.length) {
-    throw new Error(`Hiçbir sezon dosyası yüklenemedi (${files.length}). Örnek: ${errs[0]}`);
+    throw new Error(`No season file could be loaded (${files.length}). Example: ${errs[0]}`);
   }
 
   // 4) Hidrasyon + (BM modunda) yeniden sıralama
@@ -476,7 +476,7 @@ export async function similar(
   if (strictBm && picked.rows.length === 0) {
     return {
       error: "no_matches_for_bookmaker",
-      message: `Seçilen bahis şirketi (${opts?.bookmakerName || bmId}) için arşivde yeterli benzer maç bulunamadı.`,
+      message: `Not enough similar archive matches for the selected bookmaker (${opts?.bookmakerName || bmId}).`,
     } as const;
   }
 

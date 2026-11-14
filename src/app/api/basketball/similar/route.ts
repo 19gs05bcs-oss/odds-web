@@ -21,7 +21,7 @@ const STATUS: Record<string, number> = {
 
 async function run({ id, k = 10, odds, bookmakerId, bookmakerName }: Params) {
   if (!id) {
-    return NextResponse.json({ error: "missing_id", message: "match_id / id gerekli." }, { status: 400 });
+    return NextResponse.json({ error: "missing_id", message: "match_id / id is required." }, { status: 400 });
   }
   const resolvedOdds = odds?.length ? odds : await fetchFixtureBOdds(id);
   const result = await similar(id, Math.min(Math.max(Number(k) || 10, 1), 50), {
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return NextResponse.json({ error: "invalid_json", message: "İstek gövdesi geçerli JSON değil." }, { status: 400 });
+      return NextResponse.json({ error: "invalid_json", message: "Request body is not valid JSON." }, { status: 400 });
     }
     return await run({
       id: body.id || body.match_id || null,

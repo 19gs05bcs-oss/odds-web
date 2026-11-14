@@ -8,6 +8,6 @@ export async function GET(req: Request) {
   try {
     return Response.json(await searchMatches(q, 20));
   } catch {
-    return Response.json({ error: "veri okunamadı" }, { status: 500 });
+    return Response.json({ error: "could not read data" }, { status: 500 });
   }
 }

@@ -401,7 +401,7 @@ export function BasketballPanel({
                 className={refs.includes(b.id) ? saStyles.tabActive : saStyles.tab}
                 onClick={() => toggleRef(b.id)}
                 disabled={b.noData}
-                title={b.noData ? "Bu maçta bu bookmaker için ana market oranı yok" : undefined}
+                title={b.noData ? "This bookmaker has no main-market odds (ML / AH / O-U) for this match" : undefined}
                 style={b.noData ? { opacity: 0.4, cursor: "not-allowed" } : undefined}
               >
                 {b.name}
