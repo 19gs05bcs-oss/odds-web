@@ -23,6 +23,8 @@ type Similar = {
   as: string | null;
   distance: number;
   tol?: number | null;
+  /** O/U barajı toleransı (gol): 0 = aynı baraj, 1/2 = ±1/±2 */
+  ouLineTol?: number | null;
   oddsDiff?: number | null;
   odds1x2?: {
     home: OddsPair;
