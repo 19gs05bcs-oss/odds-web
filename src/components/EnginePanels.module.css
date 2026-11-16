@@ -300,3 +300,56 @@
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* ---------- Handball engine: rule signal cards ---------- */
+.signals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.4rem;
+  margin: 0 0 0.5rem;
+}
+
+.signal {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid color-mix(in srgb, #1a7f37 35%, var(--line));
+  border-left: 3px solid #1a7f37;
+  border-radius: 8px;
+  background: color-mix(in srgb, #1a7f37 5%, #fff);
+  min-width: 0;
+}
+
+.signalContext {
+  border-color: var(--line);
+  border-left-color: var(--ink-faint);
+  background: #fafafa;
+}
+
+.signalName {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.signalPick {
+  display: block;
+  margin: 0.15rem 0;
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #1a7f37;
+}
+
+.signalReason {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.signalStats {
+  margin: 0.25rem 0 0;
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}

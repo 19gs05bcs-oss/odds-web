@@ -5,6 +5,8 @@ import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import type { FixtureRow } from "@/lib/archiveCache";
 import type { CompactOddsRow } from "@/lib/handball";
+import { HandballEnginePanel } from "@/components/HandballEnginePanel";
+import { computeHandballEngine } from "@/lib/analysis/handballEngine";
 import { formatOdds } from "@/lib/format";
 import { clockInTz, dayKeyInTz } from "@/lib/time";
 import filterStyles from "@/components/AnalyzeFilters.module.css";
@@ -489,6 +491,17 @@ export function HandballPanel({
     [fixtures, selectedId],
   );
 
+  // Goal & Market engine: seçili maçın kendi oranlarından (tüm BM medyanı)
+  const handballEngine = useMemo(
+    () =>
+      computeHandballEngine(
+        selectedFixture?.odds,
+        selectedFixture?.league_country,
+        selectedFixture?.league,
+      ),
+    [selectedFixture?.odds, selectedFixture?.league_country, selectedFixture?.league],
+  );
+
   // Maçta verisi olan BM'ler (satır sayısına göre sıralı) + tam liste (verisi olmayanlar pasif)
   const fixtureBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
   const availableBms = useMemo(() => {
@@ -671,6 +684,17 @@ export function HandballPanel({
         {selectedId && availableBms.length > 0 && referenceBms.length === 0 && (
           <p className={saStyles.empty}>Pick at least one reference bookmaker above.</p>
         )}
+
+        {selectedFixture ? (
+          <HandballEnginePanel
+            metrics={handballEngine}
+            actualScore={
+              selectedFixture.home_score != null && selectedFixture.away_score != null
+                ? fixtureFt(selectedFixture)
+                : null
+            }
+          />
+        ) : null}
 
         {referenceBms.map((bmId) => {
           const bmName = availableBms.find((b) => b.id === bmId)?.name || `BM ${bmId}`;
