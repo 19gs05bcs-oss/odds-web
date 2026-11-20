@@ -105,11 +105,20 @@ function fixtureTotalNum(fx: VFixture): number | null {
   return p ? p.ph + p.pa : null;
 }
 
-function periodsLabel(h: unknown, a: unknown): string {
-  const hs = String(h ?? "").split(",").filter(Boolean);
-  const as = String(a ?? "").split(",").filter(Boolean);
-  if (!hs.length || hs.length !== as.length) return "—";
-  return hs.map((x, i) => `${x}-${as[i]}`).join(" ");
+const MAX_SETS = 5;
+
+/** Per-set scores as ["25-16", "23-25", ...], padded to MAX_SETS with null. */
+function setCells(h: unknown, a: unknown): (string | null)[] {
+  const hs = String(h ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  const as_ = String(a ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  const ok = hs.length > 0 && hs.length === as_.length;
+  return Array.from({ length: MAX_SETS }, (_, i) => (ok && i < hs.length ? `${hs[i]}-${as_[i]}` : null));
+}
+
+/** Same, from the compact "25-16, 23-25" string used by the similar-matches rows. */
+function setCellsFromString(periods: string | null | undefined): (string | null)[] {
+  const parts = String(periods ?? "").split(/[,\s]+/).filter(Boolean);
+  return Array.from({ length: MAX_SETS }, (_, i) => parts[i] ?? null);
 }
 
 function ftResult(hs: unknown, as_: unknown): "Home" | "Away" | "Draw" | "" {
@@ -493,7 +502,11 @@ export function VolleyballPanel({
                           <th>LEAGUE</th>
                           <th>HOME</th>
                           <th>AWAY</th>
-                          <th className={styles.num}>Set pts</th>
+                          <th className={styles.num}>Set 1</th>
+                          <th className={styles.num}>Set 2</th>
+                          <th className={styles.num}>Set 3</th>
+                          <th className={styles.num}>Set 4</th>
+                          <th className={styles.num}>Set 5</th>
                           <th className={styles.num}>Sets</th>
                           <th className={styles.num}>Total pts</th>
                           <th>RES</th>
@@ -517,9 +530,9 @@ export function VolleyballPanel({
                           <td>{selectedFixture.league || "—"}</td>
                           <td>{selectedFixture.home_name || "—"}</td>
                           <td>{selectedFixture.away_name || "—"}</td>
-                          <td className={styles.num}>
-                            {periodsLabel(selectedFixture.home_periods, selectedFixture.away_periods)}
-                          </td>
+                          {setCells(selectedFixture.home_periods, selectedFixture.away_periods).map((c, i) => (
+                            <td key={i} className={styles.num}>{c ?? "—"}</td>
+                          ))}
                           <td className={styles.num}>
                             {scorePair(selectedFixture.home_score, selectedFixture.away_score)}
                           </td>
@@ -592,7 +605,11 @@ export function VolleyballPanel({
                             <th>LEAGUE</th>
                             <th>HOME</th>
                             <th>AWAY</th>
-                            <th className={styles.num}>Set pts</th>
+                            <th className={styles.num}>Set 1</th>
+                            <th className={styles.num}>Set 2</th>
+                            <th className={styles.num}>Set 3</th>
+                            <th className={styles.num}>Set 4</th>
+                            <th className={styles.num}>Set 5</th>
                             <th className={styles.num}>Sets</th>
                             <th className={styles.num}>Total pts</th>
                             <th>RES</th>
@@ -618,7 +635,7 @@ export function VolleyballPanel({
                             const pH = r.ptsH ?? null;
                             const pA = r.ptsA ?? null;
                             const total = r.total ?? (pH != null && pA != null ? pH + pA : null);
-                            const ht = r.periods ? r.periods.replace(/, /g, " ") : "—";
+                            const setCols = setCellsFromString(r.periods);
                             return (
                               <tr key={r.id} title={r.periods ? `Set scores: ${r.periods}` : undefined}>
                                 <td>archive</td>
@@ -627,7 +644,9 @@ export function VolleyballPanel({
                                 <td>{r.league || r.season}</td>
                                 <td>{r.home}</td>
                                 <td>{r.away}</td>
-                                <td className={styles.num}>{ht}</td>
+                                {setCols.map((c, i) => (
+                                  <td key={i} className={styles.num}>{c ?? "—"}</td>
+                                ))}
                                 <td className={styles.num}>{r.ft || scorePair(r.hs, r.as)}</td>
                                 <td className={`${styles.num} ${totalClass(total, r.ouLine)}`.trim()}>{total ?? "—"}</td>
                                 <td>
