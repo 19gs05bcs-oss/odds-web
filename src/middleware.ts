@@ -8,7 +8,7 @@ import {
 
 const MEMBER_PAGES = ["/analyze", "/matches"];
 const SMART_PAGES = ["/smart-analysis"];
-const MEMBER_API = ["/api/fixtures", "/api/fixtureh", "/api/handball", "/api/fixtureb", "/api/basketball", "/api/analyze", "/api/archive-table"];
+const MEMBER_API = ["/api/fixtures", "/api/fixtureh", "/api/handball", "/api/fixtureb", "/api/basketball", "/api/fixturev", "/api/volleyball", "/api/analyze", "/api/archive-table"];
 const SMART_API = ["/api/smart-analysis"];
 
 function matchesPrefix(pathname: string, paths: string[]): boolean {
@@ -118,6 +118,8 @@ export const config = {
     "/api/handball/:path*",
     "/api/fixtureb/:path*",
     "/api/basketball/:path*",
+    "/api/fixturev/:path*",
+    "/api/volleyball/:path*",
     "/api/analyze/:path*",
     "/api/archive-table/:path*",
     "/api/smart-analysis/:path*",

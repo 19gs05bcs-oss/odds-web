@@ -5,6 +5,7 @@ import { AnalyzeTable } from "@/components/AnalyzeTable";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { HandballPanel } from "@/components/HandballPanel";
 import { BasketballPanel } from "@/components/BasketballPanel";
+import { VolleyballPanel } from "@/components/VolleyballPanel";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import { HtftEnginePanel } from "@/components/HtftEnginePanel";
 import { PREFERRED_BM, fixtureToTableRow } from "@/lib/analysis/tableRows";
@@ -443,6 +444,18 @@ const goalEngine = useMemo(
           <h1 className={styles.title}>Select match → similar matches</h1>
         </header>
         <BasketballPanel sport={sport} onSportChange={setSport} bookmakers={bookmakers} />
+      </div>
+    );
+  }
+
+  if (sport === "volleyball") {
+    return (
+      <div className={styles.wrap}>
+        <header className={styles.hero}>
+          <p className={styles.kicker}>Smart Analysis · Pro</p>
+          <h1 className={styles.title}>Select match → similar matches</h1>
+        </header>
+        <VolleyballPanel sport={sport} onSportChange={setSport} bookmakers={bookmakers} />
       </div>
     );
   }

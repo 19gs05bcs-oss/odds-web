@@ -7,6 +7,7 @@ import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { MarketFilterPanel } from "@/components/MarketFilterPanel";
 import { HandballPanel } from "@/components/HandballPanel";
 import { BasketballPanel } from "@/components/BasketballPanel";
+import { VolleyballPanel } from "@/components/VolleyballPanel";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import styles from "@/components/AnalyzeFilters.module.css";
 import {
@@ -585,6 +586,10 @@ export default function AnalyzeClient({
 
   if (sport === "basketball") {
     return <BasketballPanel sport={sport} onSportChange={setSport} bookmakers={bookmakers} />;
+  }
+
+  if (sport === "volleyball") {
+    return <VolleyballPanel sport={sport} onSportChange={setSport} bookmakers={bookmakers} />;
   }
 
   return (
