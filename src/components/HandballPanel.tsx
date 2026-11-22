@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import type { FixtureRow } from "@/lib/archiveCache";
 import type { CompactOddsRow } from "@/lib/handball";
 import { HandballEnginePanel } from "@/components/HandballEnginePanel";
 import { computeHandballEngine } from "@/lib/analysis/handballEngine";
+import { buildSortedBmList } from "@/lib/bmList";
 import { formatOdds } from "@/lib/format";
 import { clockInTz, dayKeyInTz } from "@/lib/time";
 import filterStyles from "@/components/AnalyzeFilters.module.css";
@@ -461,7 +462,6 @@ export function HandballPanel({
     let off = false;
     setLoading(true);
     setSelectedId(null);
-    setReferenceBms([]);
     setSimResults({});
     setError(undefined);
     (async () => {
@@ -471,7 +471,8 @@ export function HandballPanel({
         });
         const j = (await res.json()) as { fixtures?: FixtureRow[]; error?: string };
         if (!res.ok) throw new Error(j.error || res.statusText);
-        if (!off) setFixtures(j.fixtures ?? []);
+        // Oranı hiç olmayan (odds boş / []) maçlar analiz edilemez → listede gösterme
+        if (!off) setFixtures((j.fixtures ?? []).filter((f) => Array.isArray(f.odds) && f.odds.length > 0));
       } catch (e) {
         if (!off) {
           setFixtures([]);
@@ -502,26 +503,36 @@ export function HandballPanel({
     [selectedFixture?.odds, selectedFixture?.league_country, selectedFixture?.league],
   );
 
-  // Maçta verisi olan BM'ler (satır sayısına göre sıralı) + tam liste (verisi olmayanlar pasif)
+  // fixtureBms: bu maçta verisi olan BM'ler (satır sayısına göre sıralı — sadece varsayılan seçim için).
+  // Ekranda görünen liste ise SABİT ve alfabetik: günün tüm maçlarına göre kurulur, maç değişince oynamaz.
   const fixtureBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
+  const allBms = useMemo(() => buildSortedBmList(fixtures, bookmakers), [fixtures, bookmakers]);
   const availableBms = useMemo(() => {
     const have = new Set(fixtureBms.map((b) => b.id));
-    const rest = bookmakers
-      .filter((b) => !have.has(String(b.id)))
-      .map((b) => ({ id: String(b.id), name: b.name, noData: true }));
-    return [...fixtureBms.map((b) => ({ ...b, noData: false })), ...rest];
-  }, [fixtureBms, bookmakers]);
+    return allBms.map((b) => ({ ...b, noData: selectedId ? !have.has(b.id) : false }));
+  }, [allBms, fixtureBms, selectedId]);
 
-  // Maç değişince varsayılan BM: en çok satırlı (liste zaten sıralı)
+  // Seçili maçta geçerli referanslar (seçim maçtan maça korunur, verisi olmayan çıkarılır)
+  const activeBms = useMemo(() => {
+    if (!selectedId) return referenceBms;
+    const ok = new Set(fixtureBms.map((b) => b.id));
+    return referenceBms.filter((id) => ok.has(id));
+  }, [referenceBms, selectedId, fixtureBms]);
+
+  const selRef = useRef<string | null>(selectedId);
+  selRef.current = selectedId;
+  const startedRef = useRef<Set<string>>(new Set());
+
+  // Maç değişince: önceden seçilen BM'ler korunur; hiçbiri geçerli değilse en çok satırlı BM
   useEffect(() => {
-    if (!selectedId) {
-      setReferenceBms([]);
-      setSimResults({});
-      return;
-    }
-    const opts = bmOptionsFromFixture(selectedFixture);
-    setReferenceBms(opts.length ? [opts[0].id] : []);
     setSimResults({});
+    if (!selectedId) return;
+    const opts = bmOptionsFromFixture(selectedFixture);
+    setReferenceBms((prev) => {
+      const ok = new Set(opts.map((b) => b.id));
+      const kept = prev.filter((id) => ok.has(id));
+      return kept.length ? prev : opts.length ? [opts[0].id] : prev;
+    });
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleBm = useCallback((id: string) => {
@@ -555,6 +566,7 @@ export function HandballPanel({
               { cache: "no-store" },
             );
         const j = await res.json();
+        if (selRef.current !== selectedId) return;
         if (res.status === 404) {
           const msg =
             typeof j?.message === "string"
@@ -574,6 +586,7 @@ export function HandballPanel({
           [bmId]: { status: "done", rows: list as Similar[] },
         }));
       } catch (e) {
+        if (selRef.current !== selectedId) return;
         setSimResults((prev) => ({
           ...prev,
           [bmId]: {
@@ -588,13 +601,15 @@ export function HandballPanel({
 
   // Seçili BM'ler için sırayla benzerlik çalıştır
   useEffect(() => {
-    if (!selectedId || !referenceBms.length) return;
-    for (const bmId of referenceBms) {
-      const cur = simResults[bmId];
-      if (!cur || cur.status === "idle") void runSimilar(bmId);
+    if (!selectedId || !activeBms.length) return;
+    for (const bmId of activeBms) {
+      const key = `${selectedId}:${bmId}`;
+      if (startedRef.current.has(key)) continue;
+      startedRef.current.add(key);
+      void runSimilar(bmId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, referenceBms.join(",")]);
+  }, [selectedId, activeBms.join(",")]);
 
   const statsFor = (rows: Similar[]) => {
     let h = 0,
@@ -633,7 +648,7 @@ export function HandballPanel({
           <FixtureMatchStrip
             fixtures={fixtures}
             selectedId={selectedId}
-            bookmakerId={Number(referenceBms[0]) || 0}
+            bookmakerId={Number(activeBms[0]) || 0}
             loading={loading}
             ignoreOdds
             onSelect={setSelectedId}
@@ -641,10 +656,10 @@ export function HandballPanel({
         </div>
       </div>
 
-      {selectedFixture && availableBms.length > 0 ? (
+      {availableBms.length > 0 ? (
         <div className={filterStyles.filterSection}>
           <p className={filterStyles.filterSectionTitle}>
-            Reference BMs ({referenceBms.length} selected)
+            Reference BMs ({activeBms.length} selected)
           </p>
           <p className={filterStyles.hint}>
             Select one or more bookmakers — each runs similarity on that BM&apos;s odds profile
@@ -655,7 +670,7 @@ export function HandballPanel({
               <button
                 key={b.id}
                 type="button"
-                className={referenceBms.includes(b.id) ? saStyles.tabActive : saStyles.tab}
+                className={activeBms.includes(b.id) ? saStyles.tabActive : saStyles.tab}
                 onClick={() => toggleBm(b.id)}
                 disabled={b.noData}
                 title={b.noData ? "Bu maçta bu bookmaker için oran yok" : undefined}
@@ -676,12 +691,12 @@ export function HandballPanel({
         {!selectedId && fixtures.length > 0 && (
           <p className={styles.msg}>Select a match to list the most similar matches from the archive.</p>
         )}
-        {selectedId && availableBms.length === 0 && (
+        {selectedId && !fixtureBms.length && (
           <p className={styles.msg}>
             This match has no bookmaker odds yet. Similarity needs odds (or an archive vector).
           </p>
         )}
-        {selectedId && availableBms.length > 0 && referenceBms.length === 0 && (
+        {selectedId && fixtureBms.length > 0 && activeBms.length === 0 && (
           <p className={saStyles.empty}>Pick at least one reference bookmaker above.</p>
         )}
 
@@ -696,7 +711,7 @@ export function HandballPanel({
           />
         ) : null}
 
-        {referenceBms.map((bmId) => {
+        {activeBms.map((bmId) => {
           const bmName = availableBms.find((b) => b.id === bmId)?.name || `BM ${bmId}`;
           const sim = simResults[bmId] ?? { status: "idle" as const };
           const fx1x2 = extractFixture1x2ForBm(selectedFixture?.odds, Number(bmId));

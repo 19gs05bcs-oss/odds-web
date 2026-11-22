@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import type { FixtureRow } from "@/lib/archiveCache";
@@ -11,6 +11,7 @@ import {
   periodPoints,
   type CompactOddsRow,
 } from "@/lib/volleyballOdds";
+import { buildSortedBmList } from "@/lib/bmList";
 import { formatOdds } from "@/lib/format";
 import { clockInTz, dayKeyInTz } from "@/lib/time";
 import filterStyles from "@/components/AnalyzeFilters.module.css";
@@ -243,7 +244,6 @@ export function VolleyballPanel({
     let off = false;
     setLoading(true);
     setSelectedId(null);
-    setRefs([]);
     setSimResults({});
     setError(undefined);
     (async () => {
@@ -251,7 +251,8 @@ export function VolleyballPanel({
         const res = await fetch(`/api/fixturev?date=${encodeURIComponent(date)}`, { cache: "no-store" });
         const j = (await res.json()) as { fixtures?: VFixture[]; error?: string };
         if (!res.ok) throw new Error(j.error || res.statusText);
-        if (!off) setFixtures(j.fixtures ?? []);
+        // Oranı hiç olmayan (odds boş / []) maçlar analiz edilemez → listede gösterme
+        if (!off) setFixtures((j.fixtures ?? []).filter((f) => Array.isArray(f.odds) && f.odds.length > 0));
       } catch (e) {
         if (!off) {
           setFixtures([]);
@@ -274,18 +275,35 @@ export function VolleyballPanel({
   const hasOdds = !!fixtureOdds?.length;
 
   const fixtureBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
+  // Sabit, alfabetik BM listesi: maça değil günün tüm maçlarına göre kurulur (maç değişince oynamaz).
+  // Seçili maçta verisi olmayanlar sadece pasif olur, yerinden oynamaz.
+  const allBms = useMemo(() => buildSortedBmList(fixtures, bookmakers), [fixtures, bookmakers]);
   const availableBms = useMemo(() => {
     const have = new Set(fixtureBms.map((b) => b.id));
-    const rest = bookmakers
-      .filter((b) => !have.has(String(b.id)))
-      .map((b) => ({ id: String(b.id), name: b.name, noData: true }));
-    return [...fixtureBms.map((b) => ({ ...b, noData: false })), ...rest];
-  }, [fixtureBms, bookmakers]);
+    return allBms.map((b) => ({ ...b, noData: selectedId ? !have.has(b.id) : false }));
+  }, [allBms, fixtureBms, selectedId]);
+
+  // Seçili maçta geçerli referanslar (seçim maçtan maça korunur, verisi olmayan çıkarılır)
+  const activeRefs = useMemo(() => {
+    if (!selectedId) return refs;
+    const ok = new Set(fixtureBms.map((b) => b.id));
+    return refs.filter((id) => id === CONSENSUS || ok.has(id));
+  }, [refs, selectedId, fixtureBms]);
+
+  const selRef = useRef<string | null>(selectedId);
+  selRef.current = selectedId;
+  const startedRef = useRef<Set<string>>(new Set());
 
   // Maç değişince varsayılan: konsensüs (features.bin ile aynı uzay)
   useEffect(() => {
     setSimResults({});
-    setRefs(selectedId && hasOdds ? [CONSENSUS] : []);
+    if (!selectedId || !hasOdds) return;
+    // Kullanıcının önceden seçtiği BM'ler korunur; bu maçta hiçbiri geçerli değilse konsensüs.
+    setRefs((prev) => {
+      const ok = new Set(fixtureBms.map((b) => b.id));
+      const kept = prev.filter((id) => id === CONSENSUS || ok.has(id));
+      return kept.length ? prev : [CONSENSUS];
+    });
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleRef = useCallback((id: string) => {
@@ -319,6 +337,7 @@ export function VolleyballPanel({
               { cache: "no-store" },
             );
         const j = await res.json();
+        if (selRef.current !== selectedId) return;
         if (!res.ok) {
           throw new Error(
             typeof j?.message === "string" ? j.message : j?.error || `HTTP ${res.status}`,
@@ -328,6 +347,7 @@ export function VolleyballPanel({
         if (!list) throw new Error(j?.message || "Unexpected response");
         setSimResults((prev) => ({ ...prev, [refId]: { status: "done", rows: list as Similar[] } }));
       } catch (e) {
+        if (selRef.current !== selectedId) return;
         setSimResults((prev) => ({
           ...prev,
           [refId]: { status: "error", message: e instanceof Error ? e.message : String(e) },
@@ -338,13 +358,15 @@ export function VolleyballPanel({
   );
 
   useEffect(() => {
-    if (!selectedId || !refs.length) return;
-    for (const id of refs) {
-      const cur = simResults[id];
-      if (!cur || cur.status === "idle") void runSimilar(id);
+    if (!selectedId || !hasOdds || !activeRefs.length) return;
+    for (const id of activeRefs) {
+      const key = `${selectedId}:${id}`;
+      if (startedRef.current.has(key)) continue;
+      startedRef.current.add(key);
+      void runSimilar(id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, refs.join(",")]);
+  }, [selectedId, hasOdds, activeRefs.join(",")]);
 
   const statsFor = (rows: Similar[]) => {
     let h = 0,
@@ -416,9 +438,9 @@ export function VolleyballPanel({
         </div>
       </div>
 
-      {selectedFixture && hasOdds ? (
+      {availableBms.length > 0 ? (
         <div className={filterStyles.filterSection}>
-          <p className={filterStyles.filterSectionTitle}>Reference ({refs.length} selected)</p>
+          <p className={filterStyles.filterSectionTitle}>Reference ({activeRefs.length} selected)</p>
           <p className={filterStyles.hint}>
             <b>Consensus</b> = median of all bookmakers (same space as the archive index). Pick a bookmaker to
             match on that BM&apos;s own match-winner / handicap / total profile instead; each selection gets its own section below.
@@ -426,8 +448,9 @@ export function VolleyballPanel({
           <div className={saStyles.tabs}>
             <button
               type="button"
-              className={refs.includes(CONSENSUS) ? saStyles.tabActive : saStyles.tab}
+              className={activeRefs.includes(CONSENSUS) ? saStyles.tabActive : saStyles.tab}
               onClick={() => toggleRef(CONSENSUS)}
+              disabled={!!selectedId && !hasOdds}
             >
               Consensus
             </button>
@@ -435,7 +458,7 @@ export function VolleyballPanel({
               <button
                 key={b.id}
                 type="button"
-                className={refs.includes(b.id) ? saStyles.tabActive : saStyles.tab}
+                className={activeRefs.includes(b.id) ? saStyles.tabActive : saStyles.tab}
                 onClick={() => toggleRef(b.id)}
                 disabled={b.noData}
                 title={b.noData ? "This bookmaker has no match-winner odds for this match" : undefined}
@@ -459,11 +482,11 @@ export function VolleyballPanel({
             This match has no bookmaker odds yet. Similarity needs odds (or an archive vector).
           </p>
         )}
-        {selectedId && hasOdds && refs.length === 0 && (
+        {selectedId && hasOdds && activeRefs.length === 0 && (
           <p className={saStyles.empty}>Pick at least one reference above.</p>
         )}
 
-        {refs.map((refId) => {
+        {activeRefs.map((refId) => {
           const isCons = refId === CONSENSUS;
           const bmNum = isCons ? defaultBookmaker(fixtureOdds) : Number(refId);
           const label = isCons
