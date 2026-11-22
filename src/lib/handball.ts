@@ -911,10 +911,12 @@ async function hydrateMatchesFromRaw(
 
   const uniqueFiles = [...new Set(items.map((x) => x.file))];
   const loadErrors: string[] = [];
+  // İstek boyunca yerelde tut: global cache (25) eşzamanlı yüklemelerde adayları sessizce düşürebiliyordu.
+  const loaded = new Map<string, any>();
   await Promise.all(
     uniqueFiles.map(async (f) => {
       try {
-        await loadRawSeason(f);
+        loaded.set(f, await loadRawSeason(f));
       } catch (e: any) {
         loadErrors.push(`${f}: ${e?.message || e}`);
       }
@@ -953,7 +955,7 @@ async function hydrateMatchesFromRaw(
   const scored: Scored[] = [];
 
   for (const m of items) {
-    const d = rawCache.get(m.file);
+    const d = loaded.get(m.file);
     if (!d) continue;
 
     const bid = resolveBookmakerId(d.bookmakers, preferredBmName, preferredBmId);

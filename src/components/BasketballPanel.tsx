@@ -286,6 +286,7 @@ export function BasketballPanel({
   // Maç değişince varsayılan: konsensüs (features.bin ile aynı uzay)
   useEffect(() => {
     setSimResults({});
+    startedRef.current.clear();
     if (!selectedId || !hasOdds) return;
     // Kullanıcının önceden seçtiği BM'ler korunur; bu maçta hiçbiri geçerli değilse konsensüs.
     setRefs((prev) => {

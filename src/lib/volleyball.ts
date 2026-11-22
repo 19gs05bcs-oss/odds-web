@@ -424,10 +424,13 @@ export async function similar(
   // 3) Ham sezon dosyalarını yükle
   const files = [...new Set(nearest.map((x) => matches[x.j].file))];
   const errs: string[] = [];
+  // Bu istekte yüklenen sezonlar yerelde tutulur: global cache (25 dosya) eşzamanlı yüklemelerde
+  // birbirini atabiliyor ve adaylar sessizce düşüyordu (özellikle küçük havuzlu konsensüs modunda).
+  const loaded = new Map<string, RawSeason>();
   await Promise.all(
     files.map(async (f) => {
       try {
-        await loadRawSeason(f);
+        loaded.set(f, await loadRawSeason(f));
       } catch (e: any) {
         errs.push(`${f}: ${e?.message || e}`);
       }
@@ -446,7 +449,7 @@ export async function similar(
   const scored: Scored[] = [];
   for (const n of nearest) {
     const m = matches[n.j];
-    const rs = rawCache.get(m.file);
+    const rs = loaded.get(m.file);
     if (!rs) continue;
     const raw = rs.byId.get(m.id);
     const rawOdds: CompactOddsRow[] = raw?.odds ?? [];

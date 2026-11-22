@@ -526,6 +526,7 @@ export function HandballPanel({
   // Maç değişince: önceden seçilen BM'ler korunur; hiçbiri geçerli değilse en çok satırlı BM
   useEffect(() => {
     setSimResults({});
+    startedRef.current.clear();
     if (!selectedId) return;
     const opts = bmOptionsFromFixture(selectedFixture);
     setReferenceBms((prev) => {
