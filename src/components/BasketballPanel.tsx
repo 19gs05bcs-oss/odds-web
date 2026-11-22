@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { SportSelect, type Sport } from "@/components/SportSelect";
+import { BasketballEnginePanel } from "@/components/BasketballEnginePanel";
+import { computeBasketballEngine } from "@/lib/analysis/basketballEngine";
 import type { FixtureRow } from "@/lib/archiveCache";
 import {
   bmHasCore,
@@ -249,6 +251,18 @@ export function BasketballPanel({
   const fixtureOdds = (selectedFixture?.odds ?? null) as CompactOddsRow[] | null;
   const hasOdds = !!fixtureOdds?.length;
 
+  // Market & Tempo engine: seçili maçın kendi oranlarından (tüm BM medyanı) + varsa devre skoru
+  const basketballEngine = useMemo(
+    () =>
+      computeBasketballEngine(
+        fixtureOdds,
+        selectedFixture?.league_country,
+        selectedFixture?.league,
+        selectedFixture ? { home: selectedFixture.home_ht_score, away: selectedFixture.away_ht_score } : null,
+      ),
+    [fixtureOdds, selectedFixture],
+  );
+
   const fixtureBms = useMemo(() => bmOptionsFromFixture(selectedFixture), [selectedFixture]);
   // Sabit, alfabetik BM listesi: maça değil günün tüm maçlarına göre kurulur (maç değişince oynamaz).
   // Seçili maçta verisi olmayanlar sadece pasif olur, yerinden oynamaz.
@@ -448,6 +462,17 @@ export function BasketballPanel({
         {selectedId && hasOdds && activeRefs.length === 0 && (
           <p className={saStyles.empty}>Pick at least one reference above.</p>
         )}
+
+        {selectedFixture && hasOdds ? (
+          <BasketballEnginePanel
+            metrics={basketballEngine}
+            actualScore={
+              selectedFixture.home_score != null && selectedFixture.away_score != null
+                ? scorePair(selectedFixture.home_score, selectedFixture.away_score)
+                : null
+            }
+          />
+        ) : null}
 
         {activeRefs.map((refId) => {
           const isCons = refId === CONSENSUS;
