@@ -15,6 +15,7 @@ import {
   ptsFromRaw,
   zVector,
   type CompactOddsRow,
+  type ExtraMarkets,
   type Norm,
   type RawProfile,
 } from "@/lib/volleyballOdds";
@@ -99,6 +100,8 @@ export type VolleyballTableRow = VolleyballMeta & {
   ouO_c: number | null;
   ouU_o: number | null;
   ouU_c: number | null;
+  /** ek marketler (1. set, set AH/OU, 1. set AH/OU, tek/çift, doğru skor) */
+  x: ExtraMarkets;
   bmUsed?: string;
   distance?: number;
   /** kullanılan ML olasılık toleransı (mutlak, ör. 0.04) */
@@ -511,6 +514,7 @@ export async function similar(
         ouO_c: snap.ouO_c,
         ouU_o: snap.ouU_o,
         ouU_c: snap.ouU_c,
+        x: snap.x,
         bmUsed: bm != null ? rs.bookmakers[String(bm)] : undefined,
         distance,
       },

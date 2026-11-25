@@ -51,8 +51,40 @@ export type Norm = Record<string, [number, number]>;
 /** kolon adı -> ham (ölçeklenmiş) değer; eksik = null */
 export type RawProfile = Record<string, number | null>;
 
+/** Çizgili market (AH: h=ev/a=deplasman, OU: h=over/a=under); açılış + kapanış */
+export type LineQuote = {
+  line: number | null;
+  h_o: number | null;
+  h_c: number | null;
+  a_o: number | null;
+  a_c: number | null;
+};
+
+/** Tabloya eklenen ek marketler (tek bookmaker). */
+export type ExtraMarkets = {
+  /** 1. set kazananı (FIRST_SET HOME_AWAY) */
+  s1: { ho: number | null; hc: number | null; ao: number | null; ac: number | null };
+  /** SET handikapı (FULL_TIME AH, |çizgi| <= 3) */
+  setAh: LineQuote;
+  /** SET toplamı (FULL_TIME OU, çizgi < 100; ör. 3.5 / 4.5) */
+  setOu: LineQuote;
+  /** 1. set sayı handikapı */
+  s1Ah: LineQuote;
+  /** 1. set toplam sayı */
+  s1Ou: LineQuote;
+  /** Toplam sayı tek/çift (FULL_TIME) */
+  oe: { oo: number | null; oc: number | null; eo: number | null; ec: number | null };
+  /** Set skoru doğru skor: "3:1" -> [açılış, kapanış] (ev:deplasman set) */
+  cs: Record<string, [number | null, number | null]>;
+};
+
+/** Doğru skor kolonları (en çok 5 set); best-of-3 ligler için 2:0 / 2:1 / 0:2 / 1:2 */
+export const CS_KEYS = ["3:0", "3:1", "3:2", "2:3", "1:3", "0:3"] as const;
+export const CS_KEYS_BO3 = ["2:0", "2:1", "1:2", "0:2"] as const;
+
 export type MarketSnapshot = {
   bmId: number | null;
+  x: ExtraMarkets;
   ml: { ho: number | null; hc: number | null; ao: number | null; ac: number | null };
   /** puan handikapı (ev perspektifi) */
   ahLine: number | null;
@@ -376,13 +408,34 @@ function pairProb(p: LinePair): number | null {
 }
 
 /** Bir bookmaker'ın puan çizgileri: ev handikap çizgisi | baraj -> satır çifti */
-function rowLines(
-  rows: CompactOddsRow[],
-  type: "ASIAN_HANDICAP" | "OVER_UNDER",
-): Map<number, LinePair> {
+type LineSpec = {
+  type: "ASIAN_HANDICAP" | "OVER_UNDER";
+  scope: string;
+  /** ev perspektifli handikap çizgisi / baraj için filtre */
+  keep: (line: number) => boolean;
+};
+
+/** Ana tablo: FT sayı handikapı (|çizgi|>3) ve FT sayı toplamı (>=100) */
+const specFor = (type: "ASIAN_HANDICAP" | "OVER_UNDER"): LineSpec => ({
+  type,
+  scope: "FULL_TIME",
+  keep: type === "ASIAN_HANDICAP" ? (l) => Math.abs(l) > 3 : (l) => l >= 100,
+});
+
+const SPEC_SET_AH: LineSpec = { type: "ASIAN_HANDICAP", scope: "FULL_TIME", keep: (l) => Math.abs(l) <= 3 };
+const SPEC_SET_OU: LineSpec = { type: "OVER_UNDER", scope: "FULL_TIME", keep: (l) => l < 100 };
+const SPEC_S1_AH: LineSpec = { type: "ASIAN_HANDICAP", scope: "FIRST_SET", keep: () => true };
+const SPEC_S1_OU: LineSpec = { type: "OVER_UNDER", scope: "FIRST_SET", keep: () => true };
+
+function rowLines(rows: CompactOddsRow[], type: "ASIAN_HANDICAP" | "OVER_UNDER"): Map<number, LinePair> {
+  return rowLinesBy(rows, specFor(type));
+}
+
+function rowLinesBy(rows: CompactOddsRow[], spec: LineSpec): Map<number, LinePair> {
+  const type = spec.type;
   const out = new Map<number, LinePair>();
   for (const r of rows) {
-    if (up(r[1]) !== type || up(r[2]) !== "FULL_TIME") continue;
+    if (up(r[1]) !== type || up(r[2]) !== spec.scope) continue;
     const side = String(r[3] ?? "");
     const i = side.indexOf(":");
     if (i < 0) continue;
@@ -396,13 +449,12 @@ function rowLines(
       if (Math.abs(v) > 40) continue;
       line = K === "H" ? v : -v;
       first = K === "H";
-      if (Math.abs(line) <= 3) continue; // set handikapı: tabloda değil
     } else {
       if (K !== "OVER" && K !== "UNDER") continue;
       line = v;
       first = K === "OVER";
-      if (line < 100) continue; // set toplamı: tabloda değil
     }
+    if (!spec.keep(line)) continue;
     let p = out.get(line);
     if (!p) out.set(line, (p = { h: null, a: null }));
     if (first) p.h = r;
@@ -424,12 +476,63 @@ function balanced(byLine: Map<number, LinePair>): { line: number; pair: LinePair
   return best;
 }
 
+const emptyLine = (): LineQuote => ({ line: null, h_o: null, h_c: null, a_o: null, a_c: null });
+
+export const emptyExtra = (): ExtraMarkets => ({
+  s1: { ho: null, hc: null, ao: null, ac: null },
+  setAh: emptyLine(),
+  setOu: emptyLine(),
+  s1Ah: emptyLine(),
+  s1Ou: emptyLine(),
+  oe: { oo: null, oc: null, eo: null, ec: null },
+  cs: {},
+});
+
+function lineQuote(rows: CompactOddsRow[], spec: LineSpec): LineQuote {
+  const b = balanced(rowLinesBy(rows, spec));
+  if (!b) return emptyLine();
+  return {
+    line: b.line,
+    h_o: b.pair.h ? openOf(b.pair.h) : null,
+    h_c: b.pair.h ? closeOf(b.pair.h) : null,
+    a_o: b.pair.a ? openOf(b.pair.a) : null,
+    a_c: b.pair.a ? closeOf(b.pair.a) : null,
+  };
+}
+
+/** Tek bookmaker satırlarından ek marketler (1. set, set AH/OU, 1. set AH/OU, tek/çift, doğru skor). */
+export function extraMarkets(rows: CompactOddsRow[]): ExtraMarkets {
+  const x = emptyExtra();
+  for (const r of rows) {
+    const t = up(r[1]);
+    const sc = up(r[2]);
+    const side = up(r[3]);
+    if (t === "HOME_AWAY" && sc === "FIRST_SET") {
+      if (side === "H") [x.s1.ho, x.s1.hc] = [openOf(r), closeOf(r)];
+      else if (side === "A") [x.s1.ao, x.s1.ac] = [openOf(r), closeOf(r)];
+    } else if (t === "ODD_OR_EVEN" && sc === "FULL_TIME") {
+      if (side === "SEL:ODD") [x.oe.oo, x.oe.oc] = [openOf(r), closeOf(r)];
+      else if (side === "SEL:EVEN") [x.oe.eo, x.oe.ec] = [openOf(r), closeOf(r)];
+    } else if (t === "CORRECT_SCORE" && (sc === "FULL_TIME" || sc === "")) {
+      // side = "SCORE:3:1" (ev:deplasman set)
+      const m = /^SCORE:(\d+):(\d+)$/.exec(side);
+      if (m) x.cs[`${m[1]}:${m[2]}`] = [openOf(r), closeOf(r)];
+    }
+  }
+  x.setAh = lineQuote(rows, SPEC_SET_AH);
+  x.setOu = lineQuote(rows, SPEC_SET_OU);
+  x.s1Ah = lineQuote(rows, SPEC_S1_AH);
+  x.s1Ou = lineQuote(rows, SPEC_S1_OU);
+  return x;
+}
+
 export function marketSnapshot(
   odds: CompactOddsRow[] | null | undefined,
   bookmakerId: number | null,
 ): MarketSnapshot {
   const empty: MarketSnapshot = {
     bmId: bookmakerId,
+    x: emptyExtra(),
     ml: { ho: null, hc: null, ao: null, ac: null },
     ahLine: null, ahH_o: null, ahH_c: null, ahA_o: null, ahA_c: null,
     ouLine: null, ouO_o: null, ouO_c: null, ouU_o: null, ouU_c: null,
@@ -437,7 +540,7 @@ export function marketSnapshot(
   if (!Array.isArray(odds) || !odds.length || bookmakerId == null) return empty;
   const rows = odds.filter((r) => Number(r[0]) === bookmakerId);
   if (!rows.length) return empty;
-  const out: MarketSnapshot = { ...empty, ml: { ...empty.ml } };
+  const out: MarketSnapshot = { ...empty, ml: { ...empty.ml }, x: extraMarkets(rows) };
 
   for (const r of rows) {
     if (up(r[1]) !== "HOME_AWAY" || up(r[2]) !== "FULL_TIME") continue;
@@ -465,21 +568,21 @@ export function marketSnapshot(
   return out;
 }
 
-/** Maçta en çok FT ana-market satırı (ML + AH + OU) olan bookmaker. */
+/** Maçta en çok (FT + 1. set) market satırı olan bookmaker; FT maç kazananı olanlar tercih edilir. */
 export function defaultBookmaker(odds: CompactOddsRow[] | null | undefined): number | null {
   if (!Array.isArray(odds) || !odds.length) return null;
+  const TYPES = new Set(["HOME_AWAY", "ASIAN_HANDICAP", "OVER_UNDER", "ODD_OR_EVEN", "CORRECT_SCORE"]);
   const score = new Map<number, number>();
   for (const r of odds) {
-    if (up(r[2]) !== "FULL_TIME") continue;
-    const t = up(r[1]);
-    if (t !== "HOME_AWAY" && t !== "ASIAN_HANDICAP" && t !== "OVER_UNDER") continue;
+    const sc = up(r[2]);
+    if (sc !== "FULL_TIME" && sc !== "FIRST_SET") continue;
+    if (!TYPES.has(up(r[1]))) continue;
     const bm = Number(r[0]);
     score.set(bm, (score.get(bm) ?? 0) + 1);
   }
-  let best: number | null = null;
-  let bn = -1;
-  for (const [bm, n] of score) if (n > bn) [best, bn] = [bm, n];
-  return best;
+  const ranked = [...score.entries()].sort((a, b) => b[1] - a[1]);
+  const core = ranked.find(([bm]) => bmHasCore(odds, bm));
+  return (core ?? ranked[0])?.[0] ?? null;
 }
 
 /** Bu bookmaker maç kazananı (FT HOME_AWAY) oranı veriyor mu? Benzerlik için asgari koşul. */

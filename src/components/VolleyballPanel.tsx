@@ -5,11 +5,16 @@ import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import type { FixtureRow } from "@/lib/archiveCache";
 import {
+  CS_KEYS,
+  CS_KEYS_BO3,
   bmHasCore,
   defaultBookmaker,
+  emptyExtra,
   marketSnapshot,
   periodPoints,
   type CompactOddsRow,
+  type ExtraMarkets,
+  type LineQuote,
 } from "@/lib/volleyballOdds";
 import { buildSortedBmList } from "@/lib/bmList";
 import { formatOdds } from "@/lib/format";
@@ -60,6 +65,7 @@ type Similar = {
   ouO_c?: number | null;
   ouU_o?: number | null;
   ouU_c?: number | null;
+  x?: ExtraMarkets;
   bmUsed?: string;
 };
 
@@ -177,6 +183,123 @@ function totalClass(total: number | null | undefined, line: number | null | unde
 
 function cellOdd(v: number | null | undefined, oc: Outcome) {
   return <td className={`${styles.num} ${oddClass(oc)}`.trim()}>{fmtOdd(v)}</td>;
+}
+
+/* ------------------------------------------------ ek marketler (1. set, set AH/OU, tek/çift, CS) */
+
+type XCtx = {
+  /** kazanılan set (ev / deplasman) */
+  hs: number | null;
+  as_: number | null;
+  /** 1. set sayıları */
+  s1h: number | null;
+  s1a: number | null;
+  /** toplam sayı */
+  total: number | null;
+};
+
+/** "25-23, 31-29" -> ilk set */
+function firstSetFromString(periods: string | null | undefined): { h: number; a: number } | null {
+  const first = String(periods ?? "").split(",")[0]?.trim() ?? "";
+  const m = /^(\d+)-(\d+)$/.exec(first);
+  return m ? { h: Number(m[1]), a: Number(m[2]) } : null;
+}
+
+/** "25,31" + "23,29" -> ilk set */
+function firstSetFromLists(h: unknown, a: unknown): { h: number; a: number } | null {
+  const x = String(h ?? "").split(",")[0]?.trim();
+  const y = String(a ?? "").split(",")[0]?.trim();
+  if (!x || !y) return null;
+  const hn = Number(x);
+  const an = Number(y);
+  return Number.isFinite(hn) && Number.isFinite(an) ? { h: hn, a: an } : null;
+}
+
+function settleOe(side: "O" | "E", total: number | null): Outcome {
+  if (total == null) return null;
+  const odd = total % 2 === 1;
+  return (side === "O") === odd ? "hit" : "miss";
+}
+
+function settleCs(key: string, hs: number | null, as_: number | null): Outcome {
+  if (hs == null || as_ == null) return null;
+  return `${hs}:${as_}` === key ? "hit" : "miss";
+}
+
+/** Gösterilen satırlarda bulunan doğru skor anahtarları (sıralı). */
+function csKeysFor(xs: (ExtraMarkets | undefined)[]): string[] {
+  const present = new Set<string>();
+  for (const x of xs) if (x) for (const k of Object.keys(x.cs)) present.add(k);
+  return [...CS_KEYS, ...CS_KEYS_BO3].filter((k) => present.has(k));
+}
+
+const SUM = (a: number | null, b: number | null) => (a == null || b == null ? null : a + b);
+
+function ExtraHead({ csKeys }: { csKeys: string[] }) {
+  const n = styles.num;
+  return (
+    <>
+      <th className={n}>S1 1</th>
+      <th className={n}>S1 2</th>
+      <th className={n}>SAH</th>
+      <th className={n}>SAH H</th>
+      <th className={n}>SAH A</th>
+      <th className={n}>SOU</th>
+      <th className={n}>S O</th>
+      <th className={n}>S U</th>
+      <th className={n}>S1 AH</th>
+      <th className={n}>S1 AH H</th>
+      <th className={n}>S1 AH A</th>
+      <th className={n}>S1 OU</th>
+      <th className={n}>S1 O</th>
+      <th className={n}>S1 U</th>
+      <th className={n}>ODD</th>
+      <th className={n}>EVEN</th>
+      {csKeys.map((k) => (
+        <th key={k} className={n}>
+          CS {k.replace(":", "-")}
+        </th>
+      ))}
+    </>
+  );
+}
+
+function lineCells(q: LineQuote, kind: "ah" | "ou", a: number | null, b: number | null) {
+  // ah: a/b = (ev, dep) puan/set ; ou: a = toplam
+  const l = q.line;
+  const hOc: Outcome = kind === "ah" ? settleAh("H", a, b, l) : settleOu("O", a, l);
+  const aOc: Outcome = kind === "ah" ? settleAh("A", a, b, l) : settleOu("U", a, l);
+  return (
+    <>
+      <td className={styles.num}>{l ?? "—"}</td>
+      {cellOdd(q.h_c ?? q.h_o, hOc)}
+      {cellOdd(q.a_c ?? q.a_o, aOc)}
+    </>
+  );
+}
+
+function extraCells(x: ExtraMarkets | undefined, c: XCtx, csKeys: string[]) {
+  const e = x ?? emptyExtra();
+  return (
+    <>
+      {cellOdd(e.s1.hc ?? e.s1.ho, settleMl("H", c.s1h, c.s1a))}
+      {cellOdd(e.s1.ac ?? e.s1.ao, settleMl("A", c.s1h, c.s1a))}
+      {lineCells(e.setAh, "ah", c.hs, c.as_)}
+      {lineCells(e.setOu, "ou", SUM(c.hs, c.as_), null)}
+      {lineCells(e.s1Ah, "ah", c.s1h, c.s1a)}
+      {lineCells(e.s1Ou, "ou", SUM(c.s1h, c.s1a), null)}
+      {cellOdd(e.oe.oc ?? e.oe.oo, settleOe("O", c.total))}
+      {cellOdd(e.oe.ec ?? e.oe.eo, settleOe("E", c.total))}
+      {csKeys.map((k) => {
+        const q = e.cs[k];
+        return (
+          <td key={k} className={`${styles.num} ${oddClass(settleCs(k, c.hs, c.as_))}`.trim()}>
+            {fmtOdd(q ? (q[1] ?? q[0]) : null)}
+          </td>
+        );
+      })}
+    </>
+  );
 }
 
 /** Maçta ana marketleri (ML + AH/OU) veren bookmaker'lar; verisi olanlar önce. */
@@ -498,6 +621,16 @@ export function VolleyballPanel({
           const mk = marketSnapshot(fixtureOdds, bmNum);
           const stats = sim.status === "done" ? statsFor(sim.rows) : null;
           const first = sim.status === "done" ? sim.rows[0] : undefined;
+          const fxS1 = firstSetFromLists(selectedFixture?.home_periods, selectedFixture?.away_periods);
+          const fxCtx: XCtx = {
+            hs: num(selectedFixture?.home_score),
+            as_: num(selectedFixture?.away_score),
+            s1h: fxS1?.h ?? null,
+            s1a: fxS1?.a ?? null,
+            total: selectedFixture ? fixtureTotalNum(selectedFixture) : null,
+          };
+          const csKeysFx = csKeysFor([mk.x]);
+          const csKeysSim = sim.status === "done" ? csKeysFor(sim.rows.map((r) => r.x)) : [];
 
           return (
             <section key={refId} className={saStyles.card}>
@@ -544,6 +677,7 @@ export function VolleyballPanel({
                           <th className={styles.num}>OU</th>
                           <th className={styles.num}>O</th>
                           <th className={styles.num}>U</th>
+                          <ExtraHead csKeys={csKeysFx} />
                         </tr>
                       </thead>
                       <tbody>
@@ -574,6 +708,7 @@ export function VolleyballPanel({
                           <td className={styles.num}>{mk.ouLine ?? "—"}</td>
                           <td className={styles.num}>{fmtOdd(mk.ouO_c ?? mk.ouO_o)}</td>
                           <td className={styles.num}>{fmtOdd(mk.ouU_c ?? mk.ouU_o)}</td>
+                          {extraCells(mk.x, fxCtx, csKeysFx)}
                         </tr>
                       </tbody>
                     </table>
@@ -647,6 +782,7 @@ export function VolleyballPanel({
                             <th className={styles.num}>OU</th>
                             <th className={styles.num}>O</th>
                             <th className={styles.num}>U</th>
+                            <ExtraHead csKeys={csKeysSim} />
                             <th>BM</th>
                             <th className={styles.num}>Dist</th>
                           </tr>
@@ -660,6 +796,8 @@ export function VolleyballPanel({
                             const pA = r.ptsA ?? null;
                             const total = r.total ?? (pH != null && pA != null ? pH + pA : null);
                             const setCols = setCellsFromString(r.periods);
+                            const s1 = firstSetFromString(r.periods);
+                            const xCtx: XCtx = { hs: hsN, as_: asN, s1h: s1?.h ?? null, s1a: s1?.a ?? null, total };
                             return (
                               <tr key={r.id} title={r.periods ? `Set scores: ${r.periods}` : undefined}>
                                 <td>archive</td>
@@ -690,6 +828,7 @@ export function VolleyballPanel({
                                 <td className={styles.num}>{r.ouLine ?? "—"}</td>
                                 {cellOdd(r.ouO_c ?? r.ouO_o, settleOu("O", total, r.ouLine ?? null))}
                                 {cellOdd(r.ouU_c ?? r.ouU_o, settleOu("U", total, r.ouLine ?? null))}
+                                {extraCells(r.x, xCtx, csKeysSim)}
                                 <td>{r.bmUsed ?? "—"}</td>
                                 <td className={styles.num}>{r.distance != null ? r.distance.toFixed(2) : "—"}</td>
                               </tr>
