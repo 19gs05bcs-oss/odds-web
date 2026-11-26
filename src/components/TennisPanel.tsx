@@ -55,8 +55,10 @@ function setCells(h: unknown, a: unknown): (string | null)[] {
 
 /** Toplam oyun sayısı (tüm setlerin oyunları toplamı). */
 function totalGames(fx: TFixture): number | null {
-  const h = String(fx.home_periods ?? "").split(",").map((x) => Number(x.trim())).filter((x) => Number.isFinite(x));
-  const a = String(fx.away_periods ?? "").split(",").map((x) => Number(x.trim())).filter((x) => Number.isFinite(x));
+  const parse = (v: unknown) =>
+    String(v ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "").map(Number).filter((x) => Number.isFinite(x));
+  const h = parse(fx.home_periods);
+  const a = parse(fx.away_periods);
   if (!h.length || h.length !== a.length) return null;
   return [...h, ...a].reduce((p, c) => p + c, 0);
 }
@@ -275,7 +277,8 @@ export function TennisPanel({
             const label = isCons ? "Consensus" : availableBms.find((b) => b.id === refId)?.name || `BM ${refId}`;
             const shownBm =
               bmNum != null
-                ? ((selectedFixture.bookmakers ?? {}) as Record<string, string>)[String(bmNum)]
+                ? ((selectedFixture.bookmakers ?? {}) as Record<string, string>)[String(bmNum)] ||
+                  allBms.find((b) => b.id === String(bmNum))?.name
                 : undefined;
             const mk = marketSnapshot(fixtureOdds, bmNum);
             const total = totalGames(selectedFixture);
