@@ -2,7 +2,7 @@
 
 import filterStyles from "@/components/AnalyzeFilters.module.css";
 
-export type Sport = "football" | "handball" | "basketball" | "volleyball";
+export type Sport = "football" | "handball" | "basketball" | "volleyball" | "tennis";
 
 export function SportSelect({
   value,
@@ -21,6 +21,7 @@ export function SportSelect({
         <option value="handball">Handball</option>
         <option value="basketball">Basketball</option>
         <option value="volleyball">Volleyball</option>
+        <option value="tennis">Tennis</option>
       </select>
     </label>
   );
