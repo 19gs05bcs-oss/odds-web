@@ -18,9 +18,9 @@ import {
   type ExtraMarkets,
   type Norm,
   type RawProfile,
-} from "@/lib/volleyballOdds";
+} from "@/lib/tennisOdds";
 
-export type { CompactOddsRow } from "@/lib/volleyballOdds";
+export type { CompactOddsRow } from "@/lib/tennisOdds";
 
 const BUCKET = process.env.R2_TENNIS_BUCKET || "tennis-odds";
 
@@ -400,9 +400,14 @@ export async function similar(
     qCons = zVector(consProfile, cols, norm);
   }
   if (qCons.filter((x) => Number.isFinite(x)).length < 2) {
+    const prof = consProfile ?? profileFromOdds(queryOdds, null);
+    const have = Object.entries(prof).filter(([, v]) => v != null).map(([k]) => k);
+    const missingInMeta = have.filter((k) => !cols.includes(k));
     return {
       error: "odds_features_empty",
-      message: "Odds could not be turned into features (match-winner / handicap / total markets missing).",
+      message:
+        "Odds could not be turned into features (match-winner / handicap / total markets missing). " +
+        `[debug] profile_nonnull=${JSON.stringify(have)} not_in_meta_cols=${JSON.stringify(missingInMeta)} meta_cols=${JSON.stringify(cols)}`,
     } as const;
   }
 
@@ -576,4 +581,19 @@ export async function matchDetail(eventId: string) {
     active: !!active,
   }));
   return { ...matches[i], odds };
+}
+
+/** Teşhis: meta.json özeti (kolonlar, boyut, örnek maç). */
+export async function debugInfo() {
+  const S = await load();
+  return {
+    bucket: BUCKET,
+    matches: S.matches.length,
+    dim: S.dim,
+    cols: S.cols,
+    weights: Array.from(S.weights),
+    norm: S.norm,
+    sample: S.matches.slice(0, 3),
+    last: S.matches.slice(-2),
+  };
 }

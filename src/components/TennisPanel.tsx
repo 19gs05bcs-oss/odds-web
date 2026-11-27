@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FixtureMatchStrip } from "@/components/FixtureMatchStrip";
 import { SportSelect, type Sport } from "@/components/SportSelect";
 import type { FixtureRow } from "@/lib/archiveCache";
-import { bmHasCore, defaultBookmaker, marketSnapshot, type CompactOddsRow } from "@/lib/volleyballOdds";
+import { bmHasCore, defaultBookmaker, marketSnapshot, type CompactOddsRow } from "@/lib/tennisOdds";
 import { buildSortedBmList } from "@/lib/bmList";
 import { formatOdds } from "@/lib/format";
 import { clockInTz, dayKeyInTz, todayInTz } from "@/lib/time";
