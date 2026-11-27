@@ -40,6 +40,77 @@ const STATUS: Record<string, string> = { "8": "RET", "9": "WO" };
 const CONSENSUS = "all";
 const MAX_SETS = 5;
 
+type Similar = {
+  id: string;
+  season: string;
+  league?: string;
+  ts: number;
+  home: string;
+  away: string;
+  hs: string | null;
+  as: string | null;
+  distance: number;
+  date?: string;
+  time?: string;
+  ft?: string;
+  ftRes?: string;
+  periods?: string | null;
+  total?: number | null;
+  o1?: number | null;
+  c1?: number | null;
+  o2?: number | null;
+  c2?: number | null;
+  ahLine?: number | null;
+  ahH_o?: number | null;
+  ahH_c?: number | null;
+  ahA_o?: number | null;
+  ahA_c?: number | null;
+  ouLine?: number | null;
+  ouO_o?: number | null;
+  ouO_c?: number | null;
+  ouU_o?: number | null;
+  ouU_c?: number | null;
+  bmUsed?: string;
+  tol?: number | null;
+  ouLineTol?: number | null;
+};
+
+type SimState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "done"; rows: Similar[] }
+  | { status: "error"; message: string };
+
+type Outcome = "hit" | "miss" | "void" | null;
+
+const oddClass = (oc: Outcome) =>
+  oc === "hit" ? styles.outcomeWin : oc === "miss" ? styles.outcomeLose : oc === "void" ? styles.outcomeVoid : "";
+
+const settleMl = (side: "H" | "A", hs: number | null, as_: number | null): Outcome =>
+  hs == null || as_ == null || hs === as_ ? null : (hs > as_ ? "H" : "A") === side ? "hit" : "miss";
+
+const settleOu = (side: "O" | "U", total: number | null, line: number | null): Outcome => {
+  if (total == null || line == null) return null;
+  if (total === line) return "void";
+  return side === "O" ? (total > line ? "hit" : "miss") : total > line ? "miss" : "hit";
+};
+
+const settleAh = (side: "H" | "A", hs: number | null, as_: number | null, line: number | null): Outcome => {
+  if (hs == null || as_ == null || line == null) return null;
+  const adj = hs + line - as_;
+  if (adj === 0) return "void";
+  return side === "H" ? (adj > 0 ? "hit" : "miss") : adj < 0 ? "hit" : "miss";
+};
+
+function setCellsFromString(periods: string | null | undefined): (string | null)[] {
+  const parts = String(periods ?? "").split(/[,\s]+/).filter(Boolean);
+  return Array.from({ length: MAX_SETS }, (_, i) => parts[i] ?? null);
+}
+
+function oddCell(v: number | null | undefined, oc: Outcome) {
+  return <td className={`${styles.num} ${oddClass(oc)}`.trim()}>{fmtOdd(v)}</td>;
+}
+
 const num = (v: unknown): number | null => {
   if (v == null || v === "") return null;
   const n = Number(v);
@@ -194,6 +265,37 @@ export function TennisPanel({
       return kept.length ? prev : [CONSENSUS];
     });
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [sims, setSims] = useState<Record<string, SimState>>({});
+
+  // Her aktif referans için R2 arşivinden benzer maçları çek
+  useEffect(() => {
+    if (!selectedId || !hasOdds) return;
+    let off = false;
+    for (const refId of activeRefs) {
+      const key = `${selectedId}|${refId}`;
+      if (sims[key]) continue;
+      setSims((p) => ({ ...p, [key]: { status: "loading" } }));
+      const q = new URLSearchParams({ id: selectedId, k: "10" });
+      if (refId !== CONSENSUS) {
+        q.set("bookmakerId", refId);
+        const nm = allBms.find((b) => b.id === refId)?.name;
+        if (nm) q.set("bm", nm);
+      }
+      fetch(`/api/tennis/similar?${q.toString()}`, { cache: "no-store" })
+        .then(async (res) => {
+          const j = await res.json();
+          if (!res.ok) throw new Error(j?.message || j?.error || res.statusText);
+          if (!off) setSims((p) => ({ ...p, [key]: { status: "done", rows: Array.isArray(j) ? j : [] } }));
+        })
+        .catch((e) => {
+          if (!off) setSims((p) => ({ ...p, [key]: { status: "error", message: e instanceof Error ? e.message : String(e) } }));
+        });
+    }
+    return () => {
+      off = true;
+    };
+  }, [selectedId, hasOdds, activeRefs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleRef = useCallback((id: string) => {
     setRefs((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -353,13 +455,100 @@ export function TennisPanel({
                     </table>
                   </div>
                 </div>
-                <p className={saStyles.empty}>
-                  Similar-match archive for tennis is not built yet — neighbours will appear here once the archive exists.
-                </p>
+                <SimilarBlock sim={sims[`${selectedId}|${refId}`]} />
               </section>
             );
           })}
       </div>
     </div>
+  );
+}
+
+function SimilarBlock({ sim }: { sim: SimState | undefined }) {
+  if (!sim || sim.status === "idle" || sim.status === "loading") return <p className={saStyles.empty}>Loading similar matches…</p>;
+  if (sim.status === "error") return <p className={`${styles.msg} ${styles.err}`}>{sim.message}</p>;
+  const rows = sim.rows;
+  if (!rows.length) return <p className={saStyles.empty}>No similar archive matches found.</p>;
+
+  const fin = rows.filter((r) => r.hs != null && r.as != null && r.hs !== "" && r.as !== "");
+  const homeW = fin.filter((r) => r.ftRes === "Home").length;
+  const awayW = fin.filter((r) => r.ftRes === "Away").length;
+  const tot = rows.map((r) => r.total).filter((x): x is number => x != null);
+  const avg = tot.length ? tot.reduce((a, b) => a + b, 0) / tot.length : null;
+  const over = rows.filter((r) => r.total != null && r.ouLine != null && r.total > r.ouLine).length;
+  const under = rows.filter((r) => r.total != null && r.ouLine != null && r.total < r.ouLine).length;
+
+  return (
+    <>
+      <p className={saStyles.cardLead}>
+        Home {homeW} · Away {awayW} by sets ({fin.length} matches)
+        {avg != null ? ` · Avg total games: ${avg.toFixed(1)}` : ""} · Over {over} · Under {under}
+      </p>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>SRC</th>
+              <th>DATE</th>
+              <th>TIME</th>
+              <th>LEAGUE</th>
+              <th>HOME</th>
+              <th>AWAY</th>
+              <th className={styles.num}>Set 1</th>
+              <th className={styles.num}>Set 2</th>
+              <th className={styles.num}>Set 3</th>
+              <th className={styles.num}>Set 4</th>
+              <th className={styles.num}>Set 5</th>
+              <th className={styles.num}>Sets</th>
+              <th className={styles.num}>Total games</th>
+              <th>RES</th>
+              <th className={styles.num}>1 O</th>
+              <th className={styles.num}>1 C</th>
+              <th className={styles.num}>2 O</th>
+              <th className={styles.num}>2 C</th>
+              <th className={styles.num}>AH</th>
+              <th className={styles.num}>AH H</th>
+              <th className={styles.num}>AH A</th>
+              <th className={styles.num}>OU</th>
+              <th className={styles.num}>O</th>
+              <th className={styles.num}>U</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const hs = num(r.hs);
+              const as_ = num(r.as);
+              const res = r.ftRes === "Home" || r.ftRes === "Away" ? r.ftRes : "";
+              return (
+                <tr key={r.id}>
+                  <td>archive</td>
+                  <td>{r.date ?? "—"}</td>
+                  <td>{r.time ?? "—"}</td>
+                  <td>{r.league || r.season}</td>
+                  <td>{r.home}</td>
+                  <td>{r.away}</td>
+                  {setCellsFromString(r.periods).map((c, i) => (
+                    <td key={i} className={styles.num}>{c ?? "—"}</td>
+                  ))}
+                  <td className={styles.num}>{r.ft && r.ft !== "-" ? r.ft : "—"}</td>
+                  <td className={`${styles.num} ${totalClass(r.total ?? null, r.ouLine ?? null)}`.trim()}>{r.total ?? "—"}</td>
+                  <td>{res || "—"}</td>
+                  {oddCell(r.o1, settleMl("H", hs, as_))}
+                  {oddCell(r.c1, settleMl("H", hs, as_))}
+                  {oddCell(r.o2, settleMl("A", hs, as_))}
+                  {oddCell(r.c2, settleMl("A", hs, as_))}
+                  <td className={styles.num}>{fmtLine(r.ahLine ?? null)}</td>
+                  {oddCell(r.ahH_c ?? r.ahH_o, settleAh("H", hs, as_, r.ahLine ?? null))}
+                  {oddCell(r.ahA_c ?? r.ahA_o, settleAh("A", hs, as_, r.ahLine ?? null))}
+                  <td className={styles.num}>{r.ouLine ?? "—"}</td>
+                  {oddCell(r.ouO_c ?? r.ouO_o, settleOu("O", r.total ?? null, r.ouLine ?? null))}
+                  {oddCell(r.ouU_c ?? r.ouU_o, settleOu("U", r.total ?? null, r.ouLine ?? null))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
