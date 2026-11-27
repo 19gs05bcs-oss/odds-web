@@ -263,11 +263,17 @@ function periodsText(h: unknown, a: unknown): string | null {
 /** Supabase fixturet tablosundan maçın oranlarını oku */
 export async function fetchFixtureTOdds(matchId: string): Promise<CompactOddsRow[] | null> {
   try {
-    const rows = await sql.unsafe<{ odds: CompactOddsRow[] | null }[]>(
+    const rows = await sql.unsafe<{ odds: unknown }[]>(
       `SELECT odds FROM fixturet WHERE match_id = $1 LIMIT 1`,
       [matchId],
     );
-    const odds = rows[0]?.odds;
+    const raw = rows[0]?.odds;
+    let odds: CompactOddsRow[] | null = null;
+    if (typeof raw === "string") {
+      try { odds = JSON.parse(raw); } catch { odds = null; }
+    } else if (Array.isArray(raw)) {
+      odds = raw as CompactOddsRow[];
+    }
     return Array.isArray(odds) && odds.length ? odds : null;
   } catch (e) {
     console.error("fixturet odds okunamadı:", e);
